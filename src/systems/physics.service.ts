@@ -111,12 +111,16 @@ export class PhysicsService {
   private checkCollision(e: Entity): boolean {
       const radius = e.radius || 20;
       // Query nearby with slight padding to ensure we catch everything
-      const nearby = this.spatialHash.query(e.x, e.y, radius + 20); 
+      const zoneId = this.world.currentZone().id;
+      const nearby = this.spatialHash.query(e.x, e.y, radius + 20, zoneId); 
 
       for (const obs of nearby) {
           if (obs.id === e.id) continue;
           
           if (obs.type === 'WALL' || (isDestructible(obs) && obs.state !== 'DEAD')) {
+              // Permeable Wall Check (e.g. Unlocked Gate)
+              if (obs.type === 'WALL' && obs.locked === false) continue;
+
               if (obs.width && obs.height) {
                   // AABB vs Circle
                   const halfW = obs.width / 2;

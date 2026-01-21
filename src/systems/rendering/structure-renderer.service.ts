@@ -126,7 +126,7 @@ export class StructureRendererService {
       const cacheKey = `STRUCT_${e.type}_${e.subType}_${w}_${d}_${h}_${e.color}_${theme}_${e.locked}`;
       
       const isoBounds = this.calculateIsoBounds(w, d, h);
-      const padding = 60; 
+      const padding = 120; // Increased padding for gate sliding
       const canvasW = Math.ceil(isoBounds.maxX - isoBounds.minX + padding * 2);
       const canvasH = Math.ceil(isoBounds.maxY - isoBounds.minY + padding * 2);
       
@@ -264,31 +264,88 @@ export class StructureRendererService {
   }
 
   private renderGate(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number, visuals: ThemeVisuals) {
-      this.renderPrism(ctx, w, d, h, ax, ay, e.color, visuals);
+      // Logic: Render two halves. If unlocked, slide them apart.
       
-      ctx.translate(ax, ay);
+      const isOpen = !e.locked;
+      const slide = isOpen ? w * 0.4 : 0; // Slide distance
+      
+      // Left Door Panel
+      ctx.save();
+      // Slide left in model space (depends on orientation, assuming width along X for simplicity)
+      // Actually simpler: Just offset anchor point in ISO space to simulate slide
       const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
-      const topB = p(w/2, d/2, h);
-      const baseB = p(w/2, d/2, 0);
+      const slideVec = p(-slide, 0, 0); 
       
-      // Status Light
-      ctx.beginPath();
-      ctx.arc(topB.x, topB.y + 20, 6, 0, Math.PI * 2);
-      ctx.fillStyle = e.locked ? '#ef4444' : '#22c55e';
-      ctx.fill();
-      ctx.shadowColor = e.locked ? '#ef4444' : '#22c55e';
-      ctx.shadowBlur = 15;
-      ctx.stroke();
-      ctx.shadowBlur = 0;
+      ctx.translate(slideVec.x, slideVec.y);
+      this.renderPrism(ctx, w/2, d, h, ax, ay, e.color, visuals);
+      ctx.restore();
 
-      // Hazard Stripes
-      ctx.strokeStyle = '#facc15';
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.moveTo(baseB.x - 15, baseB.y - 15); ctx.lineTo(baseB.x + 15, baseB.y + 15);
-      ctx.moveTo(baseB.x - 5, baseB.y - 15); ctx.lineTo(baseB.x + 25, baseB.y + 15);
-      ctx.stroke();
-      ctx.translate(-ax, -ay);
+      // Right Door Panel
+      ctx.save();
+      const slideVecR = p(slide, 0, 0);
+      ctx.translate(slideVecR.x, slideVecR.y);
+      // We need to render the other half, but renderPrism centers on 0,0. 
+      // We can hack it by rendering a thinner prism at offset position relative to anchor
+      // Actually, simplest is to render two distinct prisms at offset local coords
+      const rightCenter = p(w/4, 0, 0); // Offset right
+      // Since renderPrism resets transform, we have to handle the offset carefully.
+      // Re-implementing renderPrism call with offset anchor
+      // Wait, renderPrism assumes center is (0,0) relative to anchor.
+      // Let's manually invoke renderPrism twice with adjusted anchor points? 
+      // No, renderPrism takes absolute anchor.
+      
+      // Actually, `renderGate` replaces the main body.
+      // Let's render the right panel here.
+      // NOTE: Because renderPrism centers on (0,0) relative to current context translation (inside renderPrism it does translate(ax,ay)),
+      // we need to be careful. The easiest way is to modify renderPrism or just call it with hacked logic.
+      
+      // Instead, let's just use the translate on the context *before* passing to renderPrism?
+      // renderPrism does `ctx.translate(anchorX, anchorY)`.
+      // So if we offset context before calling, it works.
+      
+      // Let's redraw properly:
+      // We want two halves meeting at 0.
+      // Left Half: Center at -w/4. Width w/2.
+      // Right Half: Center at w/4. Width w/2.
+      // If open, Left center moves to -w/4 - slide. Right center moves to w/4 + slide.
+      
+      // Re-clearing? No, we are in a sprite cache buffer.
+      // But we already drew the Left Panel above assuming it was centered. That was wrong.
+      // Let's clear and redo.
+      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+      
+      // Recalculate centers
+      const leftCenterX = -w/4 - (isOpen ? w * 0.35 : 0);
+      const rightCenterX = w/4 + (isOpen ? w * 0.35 : 0);
+      
+      const leftIso = p(leftCenterX, 0, 0);
+      const rightIso = p(rightCenterX, 0, 0);
+      
+      // Draw Left
+      ctx.save();
+      ctx.translate(leftIso.x, leftIso.y); // Apply model offset
+      this.renderPrism(ctx, w/2, d, h, ax, ay, e.color, visuals);
+      
+      // Draw Hazard Stripes on Left Panel
+      ctx.translate(ax, ay);
+      ctx.strokeStyle = '#facc15'; ctx.lineWidth = 4;
+      const baseB = p(w/4, d/2, 0); // Relative to new center
+      ctx.beginPath(); ctx.moveTo(baseB.x - 20, baseB.y - 20); ctx.lineTo(baseB.x, baseB.y); ctx.stroke();
+      ctx.restore();
+
+      // Draw Right
+      ctx.save();
+      ctx.translate(rightIso.x, rightIso.y);
+      this.renderPrism(ctx, w/2, d, h, ax, ay, e.color, visuals);
+      
+      // Draw Status Light on Right Panel
+      ctx.translate(ax, ay);
+      const topB = p(-w/4, d/2, h - 40); // Near the seam
+      ctx.fillStyle = e.locked ? '#ef4444' : '#22c55e';
+      ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 10;
+      ctx.beginPath(); ctx.arc(topB.x, topB.y, 6, 0, Math.PI*2); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.restore();
   }
 
   private renderMonolith(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number, visuals: ThemeVisuals) {

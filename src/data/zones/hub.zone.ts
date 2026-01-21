@@ -6,8 +6,8 @@ export const HUB_ZONE: ZoneTemplate = {
   id: 'HUB',
   name: 'Liminal Citadel',
   theme: 'INDUSTRIAL',
-  // Constrained bounds to create a settlement feel
-  bounds: { minX: -1500, maxX: 1500, minY: -1500, maxY: 1600 },
+  // Expanded bounds for better camera framing
+  bounds: { minX: -1600, maxX: 1600, minY: -1600, maxY: 1800 },
   
   // Hierarchy Metadata
   regionType: 'hub',
@@ -15,14 +15,36 @@ export const HUB_ZONE: ZoneTemplate = {
 
   geometry: {
     walls: [
-      // Fortress Perimeter (Radius 1400)
-      ...MapUtils.createFortress(1400, 60, 250, '#27272a'),
+      // --- PERIMETER WALLS (Octagon-ish) ---
+      // North Wall (Behind Spire)
+      { x: 0, y: -1400, w: 1000, h: 60, height: 300, color: '#27272a' },
       
-      // The Spire (North)
+      // North-East Angle
+      { x: 1000, y: -1000, w: 60, h: 800, height: 300, color: '#27272a' }, // Vertical-ish
+      // East Wall
+      { x: 1400, y: 0, w: 60, h: 1400, height: 300, color: '#27272a' },
+      // South-East Angle
+      { x: 1000, y: 1000, w: 60, h: 800, height: 300, color: '#27272a' },
+
+      // North-West Angle
+      { x: -1000, y: -1000, w: 60, h: 800, height: 300, color: '#27272a' },
+      // West Wall
+      { x: -1400, y: 0, w: 60, h: 1400, height: 300, color: '#27272a' },
+      // South-West Angle
+      { x: -1000, y: 1000, w: 60, h: 800, height: 300, color: '#27272a' },
+
+      // --- SOUTH GATE COMPLEX ---
+      // The Gatehouse Walls (Thicker, taller)
+      { x: -400, y: 1400, w: 800, h: 100, height: 350, color: '#18181b' }, // Left Flank
+      { x: 400, y: 1400, w: 800, h: 100, height: 350, color: '#18181b' },  // Right Flank
+      
+      // The Physical Gate (Sliding Door) - Positioned in the gap
+      // ID is implicit by position for now, but logical locking is handled by SectorLoader
+      { x: 0, y: 1400, w: 300, h: 40, height: 300, color: '#3f3f46', type: 'GATE_SEGMENT', locked: true },
+
+      // --- INTERNAL STRUCTURES ---
+      // The Spire (North Center)
       { x: 0, y: -600, w: 200, h: 200, height: 600, color: '#06b6d4', type: 'MONOLITH' },
-      
-      // Main Gate (South Exit Barrier)
-      { x: 0, y: 1380, w: 400, h: 40, height: 300, color: '#3f3f46', type: 'GATE_SEGMENT', locked: true },
       
       // Medical District Enclosure (East)
       { x: 900, y: 0, w: 20, h: 600, height: 120, color: '#52525b' },
@@ -47,10 +69,10 @@ export const HUB_ZONE: ZoneTemplate = {
       { type: 'NPC', subType: 'TRADER', x: -1100, y: 0, data: { dialogueId: 'generic', color: '#eab308' } },
 
       // --- PATROLLING GUARDS ---
-      // Gate Guard (Static)
-      { type: 'NPC', subType: 'GUARD', x: 250, y: 1300, data: { dialogueId: 'gate_locked', color: '#3b82f6' } },
+      // Gate Guard (Standing visible in front of the gate structure)
+      { type: 'NPC', subType: 'GUARD', x: -180, y: 1320, data: { dialogueId: 'gate_locked', color: '#3b82f6' } },
       
-      // Plaza Patrol (Triangle Route)
+      // Plaza Patrol
       { 
         type: 'NPC', subType: 'GUARD', x: 0, y: 0, 
         data: { 
@@ -59,49 +81,30 @@ export const HUB_ZONE: ZoneTemplate = {
           patrolPoints: [{x: -300, y: 200}, {x: 300, y: 200}, {x: 0, y: -200}] 
         } 
       },
-      // Spire Patrol (Linear)
-      { 
-        type: 'NPC', subType: 'GUARD', x: 0, y: -800, 
-        data: { 
-          color: '#1d4ed8', 
-          dialogueId: 'generic_guard',
-          patrolPoints: [{x: -400, y: -800}, {x: 400, y: -800}] 
-        } 
-      },
-
-      // --- AMBIENT CITIZENS (Market & Slums) ---
-      // Market Crowd
-      { type: 'NPC', subType: 'CITIZEN', x: -900, y: -100, data: { dialogueId: 'citizen_bark', color: '#71717a', homeX: -900, homeY: -100, wanderRadius: 150 } },
-      { type: 'NPC', subType: 'CITIZEN', x: -1000, y: 150, data: { dialogueId: 'citizen_bark', color: '#52525b', homeX: -1000, homeY: 150, wanderRadius: 100 } },
-      { type: 'NPC', subType: 'CITIZEN', x: -850, y: 50, data: { dialogueId: 'citizen_bark', color: '#a1a1aa', homeX: -850, homeY: 50, wanderRadius: 120 } },
-      
-      // Med Bay Queue
-      { type: 'NPC', subType: 'CITIZEN', x: 950, y: 50, data: { dialogueId: 'citizen_bark', color: '#71717a', homeX: 950, homeY: 50, wanderRadius: 50 } },
-      { type: 'NPC', subType: 'CITIZEN', x: 950, y: -50, data: { dialogueId: 'citizen_bark', color: '#52525b', homeX: 950, homeY: -50, wanderRadius: 50 } },
 
       // --- DECORATIONS ---
       { type: 'DECORATION', subType: 'RUG', x: 1100, y: 0, data: { width: 400, height: 500, color: '#e2e8f0' } },
       { type: 'DECORATION', subType: 'RUG', x: -1100, y: 0, data: { width: 400, height: 500, color: '#1c1917' } },
-      { type: 'DECORATION', subType: 'VENDING_MACHINE', x: -1250, y: -100 },
-      { type: 'DECORATION', subType: 'VENDING_MACHINE', x: -1250, y: 100 },
+      
+      // Road to Gate
+      { type: 'DECORATION', subType: 'RUG', x: 0, y: 1000, data: { width: 300, height: 800, color: '#18181b' } },
+
+      // Gate Details
+      { type: 'DECORATION', subType: 'HOLO_TABLE', x: 200, y: 1320, data: { color: '#ef4444' } }, // Checkpoint scanner
 
       // Spire Cables
       { type: 'DECORATION', subType: 'CABLE', x: 0, y: -600, data: { targetX: 1100, targetY: -200, z: 400 } },
       { type: 'DECORATION', subType: 'CABLE', x: 0, y: -600, data: { targetX: -1100, targetY: -200, z: 350 } },
-      
-      // Plaza Decorations
-      { type: 'DECORATION', subType: 'HOLO_TABLE', x: 0, y: 400, data: { color: '#06b6d4' } },
-      { type: 'DECORATION', subType: 'BENCH', x: 200, y: 600 },
-      { type: 'DECORATION', subType: 'BENCH', x: -200, y: 600 },
     ],
     dynamic: []
   },
 
   exits: [
     // South Exit -> Sector 9 North (Main Gate)
+    // Placed slightly 'inside' the gate geometry logic so player walks *through* the open gate to trigger
     { 
       x: 0, 
-      y: 1500, 
+      y: 1420, 
       targetZoneId: 'SECTOR_9_N', 
       transitionType: 'GATE', 
       locked: true,

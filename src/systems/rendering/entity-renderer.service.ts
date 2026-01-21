@@ -66,8 +66,43 @@ export class EntityRendererService {
 
   drawExit(ctx: CanvasRenderingContext2D, e: Entity) {
       const pos = IsoUtils.toIso(e.x, e.y, e.z);
-      ctx.save(); ctx.translate(pos.x, pos.y); ctx.scale(1, 0.5);
-      ctx.fillStyle = e.color; ctx.beginPath(); ctx.arc(0, 0, e.radius, 0, Math.PI*2); ctx.fill();
+      ctx.save(); 
+      ctx.translate(pos.x, pos.y);
+      
+      const isGate = e.color === '#ef4444' || e.locked; // Logic to detect major gate transition or if explictly defined in future
+      
+      if (isGate) {
+          // Render as a floor threshold marker
+          // Flatten to floor
+          ctx.scale(1, 0.5); 
+          const pulse = Math.sin(Date.now() * 0.005);
+          
+          ctx.fillStyle = e.color; 
+          ctx.globalAlpha = 0.3 + pulse * 0.1;
+          
+          // Rectangular mat
+          const w = 120;
+          const h = 60;
+          ctx.fillRect(-w/2, -h/2, w, h);
+          
+          // Warning chevrons
+          ctx.strokeStyle = '#000';
+          ctx.lineWidth = 2;
+          ctx.globalAlpha = 0.5;
+          ctx.beginPath();
+          for(let i = -w/2; i < w/2; i+=20) {
+              ctx.moveTo(i, h/2);
+              ctx.lineTo(i+10, -h/2);
+          }
+          ctx.stroke();
+          
+      } else {
+          // Standard Circular Exit
+          ctx.scale(1, 0.5);
+          ctx.fillStyle = e.color; 
+          ctx.beginPath(); ctx.arc(0, 0, e.radius, 0, Math.PI*2); ctx.fill();
+      }
+      
       ctx.restore();
   }
   

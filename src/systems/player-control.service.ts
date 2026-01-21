@@ -43,12 +43,21 @@ export class PlayerControlService {
         
         // Narrative Checks (e.g. unlocking gates based on flags)
         if (this.narrative.getFlag('GATE_OPEN')) {
-            const gate = this.world.entities.find(e => e.type === 'EXIT' && e.locked);
-            if (gate) { 
-                gate.locked = false; 
-                gate.color = '#22c55e'; 
+            // Unlock Exits
+            const exit = this.world.entities.find(e => e.type === 'EXIT' && e.locked);
+            if (exit) { 
+                exit.locked = false; 
+                exit.color = '#22c55e'; 
                 const guard = this.world.entities.find(e => e.subType === 'GUARD' && e.dialogueId === 'gate_locked'); 
                 if (guard) guard.dialogueId = 'gate_unlocked'; 
+            }
+
+            // Unlock Physical Gate Walls (GATE_SEGMENT)
+            const gateWall = this.world.entities.find(e => e.type === 'WALL' && e.subType === 'GATE_SEGMENT' && e.locked);
+            if (gateWall) {
+                gateWall.locked = false;
+                gateWall.color = '#22c55e'; // Visual feedback: Green means open
+                this.haptic.success(); // Tactile feedback for gate opening
             }
         }
 
@@ -141,8 +150,12 @@ export class PlayerControlService {
     }
 
     private handleAutoAttack(player: Entity) {
-         let closest: Entity | null = null; let minD = BALANCE.COMBAT.AUTO_ATTACK_RANGE;
-         const nearbyTargets = this.spatialHash.query(player.x, player.y, BALANCE.COMBAT.AUTO_ATTACK_RANGE);
+         // CRITICAL FIX: Use current zoneId for spatial queries
+         const zoneId = this.world.currentZone().id;
+         const nearbyTargets = this.spatialHash.query(player.x, player.y, BALANCE.COMBAT.AUTO_ATTACK_RANGE, zoneId);
+         
+         let closest: Entity | null = null; 
+         let minD = BALANCE.COMBAT.AUTO_ATTACK_RANGE;
          
          nearbyTargets.forEach(e => {
             if ((isEnemy(e) || isDestructible(e)) && e.state !== 'DEAD') {

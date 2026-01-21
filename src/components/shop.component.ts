@@ -10,7 +10,8 @@ import { Item } from '../models/item.models';
 import { HapticService } from '../services/haptic.service';
 import { NarrativeService } from '../game/narrative.service';
 
-type ShopMode = 'BUY' | 'SELL' | 'SALVAGE';
+type MobileView = 'MERCHANT' | 'PLAYER';
+type InventoryMode = 'SELL' | 'SALVAGE';
 
 @Component({
   selector: 'app-shop',
@@ -54,42 +55,34 @@ type ShopMode = 'BUY' | 'SELL' | 'SALVAGE';
                 </div>
             </div>
 
-            <!-- MOBILE TABS (Visible only on small screens) -->
+            <!-- MOBILE TABS -->
             <div class="flex md:hidden border-b border-zinc-800 shrink-0">
-                <button (click)="setMode('BUY')" class="flex-1 py-3 text-[10px] font-bold uppercase tracking-widest transition-colors border-b-2"
-                        [style.border-color]="mode() === 'BUY' ? factionColor() : 'transparent'"
-                        [class.bg-zinc-900]="mode() === 'BUY'"
-                        [class.text-white]="mode() === 'BUY'"
-                        [class.text-zinc-500]="mode() !== 'BUY'">
-                    Acquire
+                <button (click)="mobileView.set('MERCHANT')" class="flex-1 py-3 text-[10px] font-bold uppercase tracking-widest transition-colors border-b-2"
+                        [style.border-color]="mobileView() === 'MERCHANT' ? factionColor() : 'transparent'"
+                        [class.bg-zinc-900]="mobileView() === 'MERCHANT'"
+                        [class.text-white]="mobileView() === 'MERCHANT'"
+                        [class.text-zinc-500]="mobileView() !== 'MERCHANT'">
+                    Requisition
                 </button>
-                <button (click)="setMode('SELL')" class="flex-1 py-3 text-[10px] font-bold uppercase tracking-widest transition-colors border-b-2"
-                        [class.border-yellow-600]="mode() === 'SELL'"
-                        [class.border-transparent]="mode() !== 'SELL'"
-                        [class.bg-zinc-900]="mode() === 'SELL'"
-                        [class.text-white]="mode() === 'SELL'"
-                        [class.text-zinc-500]="mode() !== 'SELL'">
-                    Liquidate
-                </button>
-                <button (click)="setMode('SALVAGE')" class="flex-1 py-3 text-[10px] font-bold uppercase tracking-widest transition-colors border-b-2"
-                        [class.border-red-600]="mode() === 'SALVAGE'"
-                        [class.border-transparent]="mode() !== 'SALVAGE'"
-                        [class.bg-zinc-900]="mode() === 'SALVAGE'"
-                        [class.text-white]="mode() === 'SALVAGE'"
-                        [class.text-zinc-500]="mode() !== 'SALVAGE'">
-                    Salvage
+                <button (click)="mobileView.set('PLAYER')" class="flex-1 py-3 text-[10px] font-bold uppercase tracking-widest transition-colors border-b-2"
+                        [class.border-zinc-500]="mobileView() === 'PLAYER'"
+                        [class.border-transparent]="mobileView() !== 'PLAYER'"
+                        [class.bg-zinc-900]="mobileView() === 'PLAYER'"
+                        [class.text-white]="mobileView() === 'PLAYER'"
+                        [class.text-zinc-500]="mobileView() !== 'PLAYER'">
+                    Inventory
                 </button>
             </div>
 
             <!-- CONTENT AREA -->
             <div class="flex-1 flex overflow-hidden relative">
                 
-                <!-- MERCHANT PANEL (Left on Desktop, Tab on Mobile) -->
+                <!-- MERCHANT PANEL (Left) -->
                 <div class="flex-1 flex flex-col bg-zinc-900/10 border-r border-zinc-800 transition-all duration-300"
-                     [class.hidden]="isMobile() && mode() !== 'BUY'"
-                     [class.block]="!isMobile() || mode() === 'BUY'">
+                     [class.hidden]="isMobile() && mobileView() !== 'MERCHANT'"
+                     [class.block]="!isMobile() || mobileView() === 'MERCHANT'">
                     
-                    <div class="p-3 bg-black/40 border-b border-zinc-800 text-center flex justify-between items-center md:justify-center">
+                    <div class="p-3 bg-black/40 border-b border-zinc-800 text-center flex justify-between items-center md:justify-center shrink-0">
                         <span class="text-[10px] font-bold tracking-[0.2em] uppercase" [style.color]="factionColor()">Stock // Requisition</span>
                     </div>
 
@@ -130,30 +123,25 @@ type ShopMode = 'BUY' | 'SELL' | 'SALVAGE';
                     </div>
                 </div>
 
-                <!-- PLAYER PANEL (Right on Desktop, Tab on Mobile) -->
+                <!-- PLAYER PANEL (Right) -->
                 <div class="flex-1 flex flex-col bg-zinc-950 transition-all duration-300"
-                     [class.hidden]="isMobile() && mode() === 'BUY'"
-                     [class.block]="!isMobile() || mode() !== 'BUY'">
+                     [class.hidden]="isMobile() && mobileView() !== 'PLAYER'"
+                     [class.block]="!isMobile() || mobileView() === 'PLAYER'">
                     
-                    <!-- Desktop Toggle for Sell/Salvage -->
-                    <div class="p-2 bg-black border-b border-zinc-800 flex justify-center gap-2" [class.hidden]="isMobile()">
-                        <button (click)="setMode('SELL')" class="px-6 py-1 text-[10px] font-bold uppercase tracking-widest border transition-all"
-                                [class]="mode() === 'SELL' ? 'bg-zinc-800 text-white border-yellow-600' : 'text-zinc-600 border-zinc-800 hover:text-zinc-400'">
+                    <!-- Mode Toggle Header -->
+                    <div class="flex border-b border-zinc-800 shrink-0">
+                        <button (click)="setInventoryMode('SELL')" 
+                                class="flex-1 py-3 text-[10px] font-bold uppercase tracking-widest transition-all border-b-2 relative overflow-hidden"
+                                [class]="inventoryMode() === 'SELL' ? 'bg-zinc-900 text-yellow-500 border-yellow-600' : 'text-zinc-600 border-transparent hover:text-zinc-400 hover:bg-zinc-900/50'">
                             SELL MODE
+                            @if(inventoryMode() === 'SELL') { <div class="absolute inset-0 bg-yellow-500/5 pointer-events-none"></div> }
                         </button>
-                        <button (click)="setMode('SALVAGE')" class="px-6 py-1 text-[10px] font-bold uppercase tracking-widest border transition-all"
-                                [class]="mode() === 'SALVAGE' ? 'bg-zinc-800 text-white border-red-600' : 'text-zinc-600 border-zinc-800 hover:text-zinc-400'">
+                        <button (click)="setInventoryMode('SALVAGE')" 
+                                class="flex-1 py-3 text-[10px] font-bold uppercase tracking-widest transition-all border-b-2 relative overflow-hidden"
+                                [class]="inventoryMode() === 'SALVAGE' ? 'bg-zinc-900 text-red-500 border-red-600' : 'text-zinc-600 border-transparent hover:text-zinc-400 hover:bg-zinc-900/50'">
                             SALVAGE MODE
+                            @if(inventoryMode() === 'SALVAGE') { <div class="absolute inset-0 bg-red-500/5 pointer-events-none"></div> }
                         </button>
-                    </div>
-
-                    <!-- Mobile Context Header -->
-                    <div class="p-2 bg-zinc-900/50 border-b border-zinc-800 text-center md:hidden">
-                        <span class="text-[10px] font-bold tracking-[0.2em] uppercase" 
-                              [class.text-yellow-500]="mode() === 'SELL'" 
-                              [class.text-red-500]="mode() === 'SALVAGE'">
-                            {{ mode() === 'SELL' ? 'Exchange for Credits' : 'Destroy for Scrap' }}
-                        </span>
                     </div>
 
                     <div class="flex-1 overflow-y-auto p-4 grid grid-cols-1 gap-2 content-start custom-scrollbar">
@@ -172,7 +160,7 @@ type ShopMode = 'BUY' | 'SELL' | 'SALVAGE';
                                             <span>L{{ item.level }} {{ item.type }}</span>
                                         </div>
                                         
-                                        @if (mode() === 'SELL') {
+                                        @if (inventoryMode() === 'SELL') {
                                             <button (click)="sell(item, i)" 
                                                     class="px-4 py-1.5 text-[10px] font-bold bg-zinc-900 hover:bg-yellow-900/30 border border-zinc-700 hover:border-yellow-500 text-zinc-300 hover:text-yellow-200 transition-all">
                                                 SELL {{ shop.getSellPrice(item) }}
@@ -188,8 +176,8 @@ type ShopMode = 'BUY' | 'SELL' | 'SALVAGE';
                             </div>
                         }
                         @if (inventory.bag().length === 0) {
-                            <div class="py-12 text-center text-zinc-700 text-xs tracking-widest uppercase">
-                                Inventory Empty
+                            <div class="flex-1 flex flex-col items-center justify-center text-zinc-700 opacity-50">
+                                <span class="text-xs tracking-[0.2em] uppercase font-bold">Inventory Empty</span>
                             </div>
                         }
                     </div>
@@ -217,7 +205,8 @@ export class ShopComponent {
   close = output<void>();
 
   // State
-  mode = signal<ShopMode>('BUY');
+  mobileView = signal<MobileView>('MERCHANT');
+  inventoryMode = signal<InventoryMode>('SELL');
   isMobile = signal(window.innerWidth < 768);
 
   // Computeds
@@ -233,7 +222,6 @@ export class ShopComponent {
   factionInitial = computed(() => this.shop.currentFaction().charAt(0));
   
   isVolatile = computed(() => {
-      // Logic for glitching: Low reputation or high random volatility
       const rep = this.narrative.getReputation(this.shop.currentFaction());
       return rep < -10; 
   });
@@ -244,12 +232,10 @@ export class ShopComponent {
 
   constructor() {
       window.addEventListener('resize', this.checkMobile);
-      // Ensure we start in SELL mode if on desktop right panel
-      if (!this.isMobile()) this.mode.set('SELL');
   }
 
-  setMode(m: ShopMode) {
-      this.mode.set(m);
+  setInventoryMode(m: InventoryMode) {
+      this.inventoryMode.set(m);
       this.haptic.impactLight();
   }
 
@@ -269,15 +255,11 @@ export class ShopComponent {
   salvage(item: Item, index: number) {
       if(confirm(`Destroy ${item.name} for scrap?`)) {
           this.shop.salvageItem(item, index);
-          this.haptic.explosion(); // Heavier feedback
+          this.haptic.explosion();
       }
   }
 
   checkMobile = () => {
       this.isMobile.set(window.innerWidth < 768);
-      if (!this.isMobile() && this.mode() === 'BUY') {
-          // If switching to desktop and in Buy mode, default right panel to Sell
-          this.mode.set('SELL');
-      }
   }
 }
