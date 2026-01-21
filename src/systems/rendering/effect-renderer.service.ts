@@ -109,15 +109,15 @@ export class EffectRendererService {
       ctx.save(); ctx.translate(this._pos.x, this._pos.y); ctx.scale(1, 0.5); ctx.strokeStyle = '#0f0'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(0, 0, e.radius, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
   }
 
-  drawInteractionIndicator(ctx: CanvasRenderingContext2D, e: Entity) {
+  drawInteractionIndicator(ctx: CanvasRenderingContext2D, e: Entity, label: string) {
       if (!e) return;
-      IsoUtils.toIso(e.x, e.y, 100, this._pos);
+      IsoUtils.toIso(e.x, e.y, e.radius * 2, this._pos);
       
       const time = Date.now() * 0.005;
       const hoverY = Math.sin(time) * 5;
       
       ctx.save();
-      ctx.translate(this._pos.x, this._pos.y + hoverY);
+      ctx.translate(this._pos.x, this._pos.y + hoverY - 40);
       
       // Draw Bracket
       ctx.strokeStyle = '#22c55e';
@@ -125,28 +125,45 @@ export class EffectRendererService {
       ctx.shadowColor = '#22c55e';
       ctx.shadowBlur = 10;
       
-      // Left Bracket
+      const w = 20;
+      const h = 20;
+
+      // Top-Left Corner
       ctx.beginPath();
-      ctx.moveTo(-15, -20);
-      ctx.lineTo(-20, -20);
-      ctx.lineTo(-20, 20);
-      ctx.lineTo(-15, 20);
+      ctx.moveTo(-w, -h + 5); ctx.lineTo(-w, -h); ctx.lineTo(-w + 5, -h);
+      ctx.stroke();
+
+      // Top-Right Corner
+      ctx.beginPath();
+      ctx.moveTo(w - 5, -h); ctx.lineTo(w, -h); ctx.lineTo(w, -h + 5);
+      ctx.stroke();
+
+      // Bottom-Left Corner
+      ctx.beginPath();
+      ctx.moveTo(-w, h - 5); ctx.lineTo(-w, h); ctx.lineTo(-w + 5, h);
+      ctx.stroke();
+
+      // Bottom-Right Corner
+      ctx.beginPath();
+      ctx.moveTo(w - 5, h); ctx.lineTo(w, h); ctx.lineTo(w, h - 5);
       ctx.stroke();
       
-      // Right Bracket
-      ctx.beginPath();
-      ctx.moveTo(15, -20);
-      ctx.lineTo(20, -20);
-      ctx.lineTo(20, 20);
-      ctx.lineTo(15, 20);
-      ctx.stroke();
+      // Label Background
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+      const textWidth = ctx.measureText(label).width * 2; // Est
+      ctx.fillRect(-40, -h - 25, 80, 16);
       
-      // Text "INTERACT"
-      ctx.font = 'bold 10px monospace';
+      // Label Text
+      ctx.font = 'bold 12px monospace';
       ctx.textAlign = 'center';
       ctx.fillStyle = '#fff';
-      ctx.shadowBlur = 0;
-      ctx.fillText("INTERACT", 0, -30);
+      ctx.fillText(label, 0, -h - 13);
+      
+      // Input Hint
+      ctx.font = '10px monospace';
+      ctx.fillStyle = '#4ade80';
+      ctx.fillText('[F] / TAP', 0, h + 15);
       
       ctx.restore();
   }

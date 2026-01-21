@@ -202,7 +202,8 @@ export class RenderService {
     // Draw Interaction Indicator
     const activeTarget = this.interaction.activeInteractable();
     if (activeTarget) {
-        this.effectRenderer.drawInteractionIndicator(this.ctx, activeTarget);
+        const label = this.interaction.getInteractLabel(activeTarget);
+        this.effectRenderer.drawInteractionIndicator(this.ctx, activeTarget, label);
     }
 
     this.ctx.restore();

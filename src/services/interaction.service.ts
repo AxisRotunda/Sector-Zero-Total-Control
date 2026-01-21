@@ -57,8 +57,7 @@ export class InteractionService {
           const dist = Math.hypot(dx, dy);
           const combinedRadius = player.radius + (e.radius || 20);
           
-          // 1. Exits (Auto-trigger check, no interaction prompt usually unless manual)
-          // Exits behave differently; they auto-trigger.
+          // 1. Exits
           if (e.type === 'EXIT') {
                if (dist < combinedRadius + 20) {
                     if (!e.locked) {
@@ -81,22 +80,15 @@ export class InteractionService {
           
           // 2. Selectable Targets (NPCs, Terminals)
           if (e.type === 'NPC' || (e.type === 'TERMINAL' && !e.accessed)) {
-               const interactRange = (e.interactionRadius || 100) + combinedRadius + 50; // +50 buffer
+               const interactRange = (e.interactionRadius || 100) + combinedRadius + 50; 
                
                if (dist < interactRange) {
-                   // Calculate "Facing Score"
-                   // Normalize direction to target
+                   // Calculate "Facing Score" to prioritize what player is looking at
                    const tDirX = dx / dist;
                    const tDirY = dy / dist;
-                   
-                   // Dot product: 1 = directly in front, -1 = behind
                    const dot = (pDirX * tDirX) + (pDirY * tDirY);
                    
-                   // Score: Lower is better. 
-                   // Distance is primary, but facing grants a significant "effective distance" reduction.
-                   // A target 150 units away in FRONT (dot=1) scores 150 - 100 = 50.
-                   // A target 80 units away BEHIND (dot=-1) scores 80 - (-100) = 180.
-                   // This biases selection towards what the player is looking at.
+                   // Score: Distance minus facing bonus.
                    const score = dist - (dot * 100);
 
                    if (score < bestScore) {
@@ -104,7 +96,7 @@ export class InteractionService {
                        bestTarget = e;
                    }
                    
-                   // Discovery check happens on proximity regardless of selection
+                   // Discovery check
                    if (e.subType && this.narrative.discoverEntity(e.subType)) {
                        this.eventBus.dispatch({ 
                            type: GameEvents.FLOATING_TEXT_SPAWN, 
@@ -123,11 +115,10 @@ export class InteractionService {
       this.nearbyInteractable.set(bestTarget);
   }
 
-  // Called by UI when user taps interact
   interact(target: Entity) {
       if (!target) return;
       
-      this.haptic.impactLight(); // Feedback on action
+      this.haptic.impactLight();
 
       if (target.subType === 'TRADER') {
           this.shopService.openShop(target);
