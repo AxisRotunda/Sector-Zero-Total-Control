@@ -20,7 +20,6 @@ export interface ZoneGeometry {
     locked?: boolean;
     depth?: number;
   }>;
-  // Floors can be added later, currently handled via ZoneTheme/Procedural
 }
 
 export interface ZoneEntityDef {
@@ -35,7 +34,8 @@ export interface ZoneExit {
   x: number;
   y: number;
   targetZoneId: string;
-  direction: 'UP' | 'DOWN';
+  direction?: 'UP' | 'DOWN'; // Deprecated in favor of generic transition
+  transitionType?: 'GATE' | 'PORTAL' | 'WALK';
   locked?: boolean;
 }
 
@@ -45,6 +45,12 @@ export interface ZoneTemplate {
   theme: ZoneTheme;
   bounds: ZoneBounds;
   
+  // Hierarchy Metadata
+  regionType?: 'hub' | 'segment' | 'dungeon' | 'poi';
+  cardinalDirection?: 'N' | 'E' | 'S' | 'W';
+  parentZoneId?: string;
+  childZoneIds?: string[];
+
   geometry: ZoneGeometry;
   
   entities: {
@@ -76,9 +82,11 @@ export interface WorldZoneConfig {
   id: string;
   displayName: string;
   template: ZoneTemplate;
-  adjacentZones: string[];
+  adjacentZones?: string[]; // Deprecated, use parent/child
   persistence: 'persistent' | 'transient' | 'instanced';
   maxInstances?: number;
+  parentZoneId?: string;
+  childZoneIds?: string[];
 }
 
 export interface WorldGraph {

@@ -13,7 +13,6 @@ export class SectorLoaderService {
   private narrative = inject(NarrativeService);
   private spatialHash = inject(SpatialHashService);
 
-  // Entities that should be baked into the static world layer and not updated dynamically
   private readonly STATIC_DECORATION_TYPES = new Set([
       'RUG', 'FLOOR_CRACK', 'GRAFFITI', 'TRASH', 'CABLE', 
       'VENDING_MACHINE', 'BENCH', 'STREET_LIGHT', 'SIGN_POST', 
@@ -22,6 +21,8 @@ export class SectorLoaderService {
 
   loadFromTemplate(world: WorldService, template: ZoneTemplate): void {
       try {
+          const zoneId = template.id;
+
           // 1. Set Global Zone Params
           world.currentZone.set({
               name: template.name,
@@ -36,64 +37,54 @@ export class SectorLoaderService {
           });
           world.mapBounds = template.bounds;
 
-          // 2. Clear current entities (important if not handled by caller)
-          // Note: WorldService usually handles reset, but we ensure here we start fresh for the loader
-          // (Caller ZoneManager handles proper reset of world.entities before calling this)
-          
-          // 3. Spawn Walls
+          // 2. Spawn Walls
           if (template.geometry.walls) {
-              template.geometry.walls.forEach(w => this.spawnWall(world, w));
+              template.geometry.walls.forEach(w => this.spawnWall(world, w, zoneId));
           }
 
-          // 4. Merge Walls optimization
+          // 3. Merge Walls optimization
           world.entities = MapUtils.mergeWalls(world.entities);
 
-          // 4b. Insert Walls into Static Spatial Hash
-          // Walls are in world.entities but are static. We must register them for collision/rendering.
+          // 4. Insert Walls into Static Spatial Hash
           world.entities.forEach(e => {
               if (e.type === 'WALL') {
-                  this.spatialHash.insert(e, true); // true = static
+                  this.spatialHash.insert(e, true);
               }
           });
 
           // 5. Spawn Entities (Static & Dynamic)
           if (template.entities.static) {
-              template.entities.static.forEach(e => this.spawnEntity(world, e));
+              template.entities.static.forEach(e => this.spawnEntity(world, e, zoneId));
           }
           if (template.entities.dynamic) {
-              template.entities.dynamic.forEach(e => this.spawnEntity(world, e));
+              template.entities.dynamic.forEach(e => this.spawnEntity(world, e, zoneId));
           }
 
-          // 5b. Insert Static Decorations into Static Spatial Hash
+          // 6. Insert Static Decorations into Static Spatial Hash
           world.staticDecorations.forEach(e => {
               this.spatialHash.insert(e, true);
           });
 
-          // 6. Spawn Exits
+          // 7. Spawn Exits
           if (template.exits) {
-              template.exits.forEach(e => this.spawnExit(world, e));
+              template.exits.forEach(e => this.spawnExit(world, e, zoneId));
           }
           
       } catch (e) {
           console.error("Critical Zone Load Error:", e);
           const fallback = this.entityPool.acquire('WALL');
           fallback.x = 100; fallback.y = 100; fallback.width = 100; fallback.height = 100; fallback.color = '#fff';
+          fallback.zoneId = 'ERROR';
           world.entities.push(fallback);
           this.spatialHash.insert(fallback, true);
       }
   }
 
-  // Deprecated legacy method wrapper for compatibility if needed
-  loadSector(world: WorldService, sectorId: string): void {
-      console.warn("SectorLoaderService.loadSector is deprecated. Use ZoneManagerService.");
-  }
-
-  private spawnWall(world: WorldService, def: any) {
+  private spawnWall(world: WorldService, def: any, zoneId: string) {
       const wall = this.entityPool.acquire('WALL', def.type as any);
-      wall.x = def.x;
-      wall.y = def.y;
-      wall.width = def.w;
-      wall.depth = def.h; // depth mapped to h from template geometry
+      wall.x = def.x; wall.y = def.y;
+      wall.width = def.w; wall.depth = def.h;
+      wall.zoneId = zoneId;
       
       if (def.height) wall.height = def.height;
       else wall.height = 100; 
@@ -109,10 +100,9 @@ export class SectorLoaderService {
       world.entities.push(wall);
   }
 
-  private spawnEntity(world: WorldService, def: ZoneEntityDef) {
+  private spawnEntity(world: WorldService, def: ZoneEntityDef, zoneId: string) {
       const e = this.entityPool.acquire(def.type as any, def.subType as any);
-      e.x = def.x;
-      e.y = def.y;
+      e.x = def.x; e.y = def.y; e.zoneId = zoneId;
       
       if (!e.radius) e.radius = 20;
       if (!e.color) e.color = '#fff';
@@ -138,7 +128,6 @@ export class SectorLoaderService {
           }
       }
       
-      // Defaults for specific types if not set in data
       if (e.type === 'NPC') {
           if (!e.radius) e.radius = 25;
           e.interactionRadius = 100;
@@ -154,7 +143,6 @@ export class SectorLoaderService {
       if (e.type === 'DECORATION' && !e.width) e.width = 40;
       if (e.type === 'DECORATION' && !e.height) e.height = 40;
 
-      // Categorize into Static (Hash-only) vs Dynamic (Update loop)
       if (e.type === 'DECORATION' && this.STATIC_DECORATION_TYPES.has(e.subType || '')) {
           world.staticDecorations.push(e);
       } else {
@@ -162,21 +150,21 @@ export class SectorLoaderService {
       }
   }
 
-  private spawnExit(world: WorldService, def: any) {
+  private spawnExit(world: WorldService, def: any, zoneId: string) {
       const exit = this.entityPool.acquire('EXIT');
-      exit.x = def.x;
-      exit.y = def.y;
-      exit.exitType = def.direction;
+      exit.x = def.x; exit.y = def.y;
+      exit.exitType = def.direction || 'DOWN'; // Legacy compat
       exit.targetX = 0;
-      exit.color = def.direction === 'DOWN' ? '#22c55e' : '#f97316';
+      exit.color = def.transitionType === 'GATE' ? '#ef4444' : '#f97316';
       exit.radius = 40; 
-      (exit as any).targetSector = def.targetZoneId; // Mapped from targetZoneId
+      exit.zoneId = zoneId;
+      (exit as any).targetSector = def.targetZoneId;
       
       if (def.locked) {
           const isOpen = this.narrative.getFlag('GATE_OPEN'); 
-          if (!isOpen && def.targetZoneId !== 'HUB') { 
+          if (!isOpen) { 
               exit.locked = true;
-              exit.color = '#ef4444';
+              exit.color = '#991b1b';
           }
       }
       world.entities.push(exit);
