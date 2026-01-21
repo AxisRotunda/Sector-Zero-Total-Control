@@ -49,7 +49,8 @@ export class WorldService implements OnDestroy {
   // Legacy Gen - kept for reference or hybrid usage
   generateFloor(depth: number) {
     this.player = this.createPlayer();
-    const result = this.worldGenerator.generate(depth);
+    // Default theme to INDUSTRIAL and scale difficulty with depth for legacy procedural generation
+    const result = this.worldGenerator.generate('INDUSTRIAL', 1.0 + (depth * 0.5), `PROCEDURAL_DEPTH_${depth}`);
     this.currentZone.set(result.zone);
     this.entities = result.entities;
     this.player.x = result.playerStart.x;
