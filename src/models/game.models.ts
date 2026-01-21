@@ -11,6 +11,7 @@ export interface Entity {
   subType?: 'GRUNT' | 'HEAVY' | 'STALKER' | 'BOSS' | 'SNIPER' | 'STEALTH' | 'SUPPORT' | 'CRATE' | 'BARREL' | 'HAZARD' | 'MEDIC' | 'TRADER' | 'HANDLER' | 'GUARD' | 'TURRET' | 'FLOOR_CRACK' | 'VENT' | 'BLOOD' | 'PIPE' | 'CONSOLE' | 'SERVER' | 'LIGHT' | 'RUG' | 'BARRIER' | 'HOLO_TABLE' | 'SPAWN_NODE' | 'SHRINE_DMG' | 'SHRINE_SPEED' | 'SHRINE_HEAL' | 'NEON' | 'FAN' | 'GRAFFITI' | 'CABLE' | 'TRASH' | 'SLUDGE' | 'CITIZEN' | 'BENCH' | 'STREET_LIGHT' | 'SIGN_POST' | 'VENDING_MACHINE' | 'PLANT_BOX' | 'MURAL' | 'ECHO' | 'MONOLITH' | 'GATE_SEGMENT' | 'PILLAR';
   source?: 'PLAYER' | 'ENEMY' | 'ENVIRONMENT' | 'PSIONIC' | 'DEFENSE';
   exitType?: 'UP' | 'DOWN'; 
+  transitionType?: 'GATE' | 'PORTAL' | 'WALK'; // Added for rendering context
   targetSector?: string; 
   x: number;
   y: number;

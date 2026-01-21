@@ -1,6 +1,7 @@
 
 import { WorldGraph } from "../../models/zone.models";
 import { HUB_ZONE } from "../zones/hub.zone";
+import { SECTOR_9_ZONE } from "../zones/sector-9.zone";
 import { SECTOR_9_N_ZONE } from "../zones/sector-9-segments/sector-9-north.zone";
 import { SECTOR_9_S_ZONE } from "../zones/sector-9-segments/sector-9-south.zone";
 import { SECTOR_9_E_ZONE } from "../zones/sector-9-segments/sector-9-east.zone";
@@ -15,14 +16,22 @@ export const WORLD_GRAPH: WorldGraph = {
       displayName: 'Safe Haven',
       template: HUB_ZONE,
       persistence: 'persistent',
-      childZoneIds: ['SECTOR_9_N'] // Primary exit leads to 9N
+      childZoneIds: ['SECTOR_9']
+    },
+    'SECTOR_9': {
+      id: 'SECTOR_9',
+      displayName: 'The Rust Sprawl',
+      template: SECTOR_9_ZONE,
+      persistence: 'persistent',
+      parentZoneId: 'HUB',
+      childZoneIds: ['SECTOR_9_N', 'SECTOR_9_S', 'SECTOR_9_E', 'SECTOR_9_W']
     },
     'SECTOR_9_N': {
       id: 'SECTOR_9_N',
       displayName: 'Sector 9: North',
       template: SECTOR_9_N_ZONE,
       persistence: 'persistent',
-      parentZoneId: 'HUB',
+      parentZoneId: 'SECTOR_9',
       childZoneIds: ['SECTOR_9_E', 'SECTOR_9_W', 'SECTOR_9_S']
     },
     'SECTOR_9_E': {
@@ -30,21 +39,21 @@ export const WORLD_GRAPH: WorldGraph = {
       displayName: 'Sector 9: East',
       template: SECTOR_9_E_ZONE,
       persistence: 'persistent',
-      parentZoneId: 'SECTOR_9_N' // Hierarchically a neighbor, logically managed via N/S
+      parentZoneId: 'SECTOR_9'
     },
     'SECTOR_9_W': {
       id: 'SECTOR_9_W',
       displayName: 'Sector 9: West',
       template: SECTOR_9_W_ZONE,
       persistence: 'persistent',
-      parentZoneId: 'SECTOR_9_N'
+      parentZoneId: 'SECTOR_9'
     },
     'SECTOR_9_S': {
       id: 'SECTOR_9_S',
       displayName: 'Sector 9: South',
       template: SECTOR_9_S_ZONE,
       persistence: 'persistent',
-      parentZoneId: 'SECTOR_9_N',
+      parentZoneId: 'SECTOR_9',
       childZoneIds: ['SECTOR_8']
     },
     'SECTOR_8': {

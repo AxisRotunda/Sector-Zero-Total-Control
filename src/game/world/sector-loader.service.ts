@@ -2,8 +2,10 @@
 import { Injectable, inject } from '@angular/core';
 import { WorldService } from './world.service';
 import { EntityPoolService } from '../../services/entity-pool.service';
-import { ZoneTemplate, ZoneEntityDef } from '../../models/zone.models';
+import { SectorDefinition } from '../../models/map.models';
+import { ZoneTemplate } from '../../models/zone.models';
 import { NarrativeService } from '../narrative.service';
+import { SECTORS } from '../../config/maps.config';
 import { MapUtils } from '../../utils/map-utils';
 import { SpatialHashService } from '../../systems/spatial-hash.service';
 
@@ -19,72 +21,137 @@ export class SectorLoaderService {
       'PLANT_BOX', 'MURAL', 'MONOLITH', 'NEON', 'HOLO_TABLE'
   ]);
 
-  loadFromTemplate(world: WorldService, template: ZoneTemplate): void {
-      try {
-          const zoneId = template.id;
+  loadFromTemplate(world: WorldService, template: ZoneTemplate) {
+      // 1. Set Global Zone Params
+      world.currentZone.set({
+          id: template.id,
+          name: template.name,
+          theme: template.theme,
+          groundColor: template.environment.colors.ground,
+          wallColor: template.environment.colors.wall,
+          detailColor: template.environment.colors.detail,
+          minDepth: 0,
+          difficultyMult: template.metadata.difficulty,
+          weather: template.environment.weather,
+          floorPattern: template.environment.floorPattern
+      });
+      world.mapBounds = template.bounds;
 
-          // 1. Set Global Zone Params
-          world.currentZone.set({
-              id: template.id, // Set ID
-              name: template.name,
-              theme: template.theme,
-              groundColor: template.environment.colors.ground,
-              wallColor: template.environment.colors.wall,
-              detailColor: template.environment.colors.detail,
-              minDepth: 0,
-              difficultyMult: template.metadata.difficulty,
-              weather: template.environment.weather,
-              floorPattern: template.environment.floorPattern
-          });
-          world.mapBounds = template.bounds;
+      // 2. Spawn Walls
+      if (template.geometry && template.geometry.walls) {
+          template.geometry.walls.forEach(w => this.spawnWall(world, w, template.id));
+      }
 
-          // 2. Spawn Walls
-          if (template.geometry.walls) {
-              template.geometry.walls.forEach(w => this.spawnWall(world, w, zoneId));
+      // 3. Merge Walls
+      world.entities = MapUtils.mergeWalls(world.entities);
+
+      // 4. Insert Walls into Static Spatial Hash
+      world.entities.forEach(e => {
+          if (e.type === 'WALL') {
+              this.spatialHash.insert(e, true);
           }
+      });
 
-          // 3. Merge Walls optimization
-          world.entities = MapUtils.mergeWalls(world.entities);
-
-          // 4. Insert Walls into Static Spatial Hash
-          world.entities.forEach(e => {
-              if (e.type === 'WALL') {
-                  this.spatialHash.insert(e, true);
-              }
-          });
-
-          // 5. Spawn Entities (Static & Dynamic)
+      // 5. Spawn Entities (Static & Dynamic)
+      if (template.entities) {
           if (template.entities.static) {
-              template.entities.static.forEach(e => this.spawnEntity(world, e, zoneId));
+              template.entities.static.forEach(e => this.spawnEntity(world, e, template.id));
           }
           if (template.entities.dynamic) {
-              template.entities.dynamic.forEach(e => this.spawnEntity(world, e, zoneId));
+              template.entities.dynamic.forEach(e => this.spawnEntity(world, e, template.id));
           }
-
-          // 6. Insert Static Decorations into Static Spatial Hash
-          world.staticDecorations.forEach(e => {
-              this.spatialHash.insert(e, true);
-          });
-
-          // 7. Spawn Exits
-          if (template.exits) {
-              template.exits.forEach(e => this.spawnExit(world, e, zoneId));
-          }
-          
-      } catch (e) {
-          console.error("Critical Zone Load Error:", e);
-          const fallback = this.entityPool.acquire('WALL');
-          fallback.x = 100; fallback.y = 100; fallback.width = 100; fallback.height = 100; fallback.color = '#fff';
-          fallback.zoneId = 'ERROR';
-          world.entities.push(fallback);
-          this.spatialHash.insert(fallback, true);
       }
+
+      // 6. Insert Static Decorations into Static Spatial Hash
+      world.staticDecorations.forEach(e => {
+          this.spatialHash.insert(e, true);
+      });
+
+      // 7. Spawn Exits
+      if (template.exits) {
+          template.exits.forEach(e => this.spawnExit(world, e, template.id));
+      }
+  }
+
+  loadSector(world: WorldService, sectorId: string): void {
+      const def = SECTORS[sectorId];
+      if (!def) { console.error('Sector not found:', sectorId); return; }
+
+      // 1. Set Global Zone Params
+      world.currentZone.set({
+          id: def.id,
+          name: def.name,
+          theme: def.theme,
+          groundColor: def.groundColor,
+          wallColor: def.wallColor,
+          detailColor: def.detailColor,
+          minDepth: 0,
+          difficultyMult: def.difficulty,
+          weather: def.weather,
+          floorPattern: def.floorPattern
+      });
+      world.mapBounds = def.bounds;
+
+      // 2. Spawn Walls
+      if (def.walls) {
+          def.walls.forEach(w => this.spawnWall(world, w, sectorId));
+      }
+
+      // 3. Merge Walls
+      world.entities = MapUtils.mergeWalls(world.entities);
+
+      // 4. Insert Walls into Static Spatial Hash
+      world.entities.forEach(e => {
+          if (e.type === 'WALL') {
+              this.spatialHash.insert(e, true);
+          }
+      });
+
+      // 5. Spawn Entities (Static & Dynamic)
+      if (def.entities) {
+          def.entities.forEach(e => this.spawnEntity(world, e, sectorId));
+      }
+
+      // 6. Insert Static Decorations into Static Spatial Hash
+      world.staticDecorations.forEach(e => {
+          this.spatialHash.insert(e, true);
+      });
+
+      // 7. Spawn Exits
+      if (def.exits) {
+          def.exits.forEach(e => this.spawnExit(world, e, sectorId));
+      }
+  }
+
+  loadStaticDecorationsOnly(world: WorldService, sectorId: string) {
+      const def = SECTORS[sectorId];
+      if (!def) return;
+      
+      world.staticDecorations = [];
+      
+      // Walls
+      if (def.walls) def.walls.forEach(w => this.spawnWall(world, w, sectorId));
+      world.entities = MapUtils.mergeWalls(world.entities);
+      world.entities.filter(e => e.type === 'WALL').forEach(w => this.spatialHash.insert(w, true));
+
+      // Entities
+      if (def.entities) {
+          def.entities.forEach(e => {
+              if (e.type === 'DECORATION' || e.type === 'NPC') {
+                  this.spawnEntity(world, e, sectorId);
+              }
+          });
+      }
+      
+      world.staticDecorations.forEach(e => this.spatialHash.insert(e, true));
+      
+      if (def.exits) def.exits.forEach(e => this.spawnExit(world, e, sectorId));
   }
 
   private spawnWall(world: WorldService, def: any, zoneId: string) {
       const wall = this.entityPool.acquire('WALL', def.type as any);
       wall.x = def.x; wall.y = def.y;
-      wall.width = def.w; wall.depth = def.h;
+      wall.width = def.w; wall.depth = def.h || def.depth;
       wall.zoneId = zoneId;
       
       if (def.height) wall.height = def.height;
@@ -101,7 +168,7 @@ export class SectorLoaderService {
       world.entities.push(wall);
   }
 
-  private spawnEntity(world: WorldService, def: ZoneEntityDef, zoneId: string) {
+  private spawnEntity(world: WorldService, def: any, zoneId: string) {
       const e = this.entityPool.acquire(def.type as any, def.subType as any);
       e.x = def.x; e.y = def.y; e.zoneId = zoneId;
       
@@ -144,6 +211,11 @@ export class SectorLoaderService {
       if (e.type === 'DECORATION' && !e.width) e.width = 40;
       if (e.type === 'DECORATION' && !e.height) e.height = 40;
 
+      if (e.subType === 'CABLE') {
+          world.staticDecorations.push(e);
+          return;
+      }
+
       if (e.type === 'DECORATION' && this.STATIC_DECORATION_TYPES.has(e.subType || '')) {
           world.staticDecorations.push(e);
       } else {
@@ -154,12 +226,13 @@ export class SectorLoaderService {
   private spawnExit(world: WorldService, def: any, zoneId: string) {
       const exit = this.entityPool.acquire('EXIT');
       exit.x = def.x; exit.y = def.y;
-      exit.exitType = def.direction || 'DOWN'; // Legacy compat
+      exit.exitType = def.direction || 'DOWN'; 
+      exit.transitionType = def.transitionType || 'WALK';
       exit.targetX = 0;
-      exit.color = def.transitionType === 'GATE' ? '#ef4444' : '#f97316';
+      exit.color = def.transitionType === 'GATE' ? '#ef4444' : (def.transitionType === 'WALK' ? 'transparent' : '#f97316');
       exit.radius = 40; 
       exit.zoneId = zoneId;
-      (exit as any).targetSector = def.targetZoneId;
+      (exit as any).targetSector = def.targetSector || def.targetZoneId;
       
       if (def.locked) {
           const isOpen = this.narrative.getFlag('GATE_OPEN'); 

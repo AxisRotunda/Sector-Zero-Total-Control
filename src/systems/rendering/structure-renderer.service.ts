@@ -27,7 +27,7 @@ export class StructureRendererService {
       const cacheKey = `STRUCT_${e.type}_${e.subType}_${w}_${d}_${h}_${e.color}_${e.locked}`;
       
       const isoBounds = this.calculateIsoBounds(w, d, h);
-      const padding = 40; // Increased padding for glows/effects
+      const padding = 60; // Increased padding for glows
       const canvasW = Math.ceil(isoBounds.maxX - isoBounds.minX + padding * 2);
       const canvasH = Math.ceil(isoBounds.maxY - isoBounds.minY + padding * 2);
       
@@ -64,11 +64,11 @@ export class StructureRendererService {
           const p4 = IsoUtils.toIso(-w/2, h/2, 0);
           
           ctx.fillStyle = e.color || '#333';
-          ctx.globalAlpha = 0.5;
+          ctx.globalAlpha = 0.8; // Increased opacity for better visibility
           ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.fill();
           
           // Border for Rugs to look like designated zones
-          ctx.lineWidth = 2; ctx.strokeStyle = this.adjustColor(e.color, 40); 
+          ctx.lineWidth = 3; ctx.strokeStyle = this.adjustColor(e.color, 40); 
           ctx.stroke();
           
           ctx.globalAlpha = 1.0;
@@ -86,6 +86,22 @@ export class StructureRendererService {
           ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI*2); ctx.fill();
           ctx.fillStyle = '#3f3f46';
           ctx.beginPath(); ctx.arc(5, 2, 6, 0, Math.PI*2); ctx.fill();
+      } else if (e.subType === 'CABLE') {
+          // Draw hanging cables between start and target
+          if (e.targetX !== undefined && e.targetY !== undefined) {
+              const start = { x: 0, y: -e.z }; // Relative to e.x,e.y
+              const targetWorldX = e.targetX - e.x;
+              const targetWorldY = e.targetY - e.y;
+              const targetIso = IsoUtils.toIso(targetWorldX, targetWorldY, e.z);
+              
+              ctx.strokeStyle = '#1e293b';
+              ctx.lineWidth = 3;
+              ctx.beginPath();
+              ctx.moveTo(0, -e.z); // Start height
+              // Bezier curve for slack
+              ctx.quadraticCurveTo(targetIso.x / 2, targetIso.y / 2 + 150, targetIso.x, targetIso.y - e.z);
+              ctx.stroke();
+          }
       }
       ctx.restore();
   }
@@ -132,9 +148,8 @@ export class StructureRendererService {
       ctx.beginPath(); ctx.moveTo(topL.x, topL.y); ctx.lineTo(topB.x, topB.y); ctx.lineTo(topR.x, topR.y); ctx.stroke();
 
       if (e.subType === 'PILLAR') {
-          // Extra detail for pillars
           ctx.fillStyle = this.adjustColor(e.color, 20);
-          ctx.beginPath(); ctx.arc(topB.x, topB.y, 4, 0, Math.PI*2); ctx.fill();
+          ctx.beginPath(); ctx.arc(topB.x, topB.y, 6, 0, Math.PI*2); ctx.fill();
       } else {
           this.applyProceduralDecay(ctx, e, w, d, h, topL, topR, topB);
       }
@@ -144,27 +159,26 @@ export class StructureRendererService {
   private renderGateToBuffer(ctx: any, e: Entity, w: number, d: number, h: number, anchorX: number, anchorY: number) {
       this.renderStructureToBuffer(ctx, e, w, d, h, anchorX, anchorY);
       
-      // Add Hazard Stripes and Lights
       const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
       const topB = p(w/2, d/2, h);
       const baseB = p(w/2, d/2, 0);
       
       // Status Light
       ctx.beginPath();
-      ctx.arc(topB.x, topB.y + 20, 5, 0, Math.PI * 2);
+      ctx.arc(topB.x, topB.y + 30, 8, 0, Math.PI * 2);
       ctx.fillStyle = e.locked ? '#ef4444' : '#22c55e';
       ctx.fill();
       ctx.shadowColor = e.locked ? '#ef4444' : '#22c55e';
-      ctx.shadowBlur = 10;
+      ctx.shadowBlur = 15;
       ctx.stroke();
       ctx.shadowBlur = 0;
 
       // Hazard Stripes
       ctx.strokeStyle = '#facc15';
-      ctx.lineWidth = 4;
+      ctx.lineWidth = 6;
       ctx.beginPath();
-      ctx.moveTo(baseB.x - 10, baseB.y - 10);
-      ctx.lineTo(baseB.x + 10, baseB.y + 10);
+      ctx.moveTo(baseB.x - 20, baseB.y - 20);
+      ctx.lineTo(baseB.x + 20, baseB.y + 20);
       ctx.stroke();
   }
 
@@ -179,8 +193,8 @@ export class StructureRendererService {
 
       // Gradient Fill
       const grad = ctx.createLinearGradient(0, topT.y, 0, baseB.y);
-      grad.addColorStop(0, '#3b82f6');
-      grad.addColorStop(1, '#1e1b4b');
+      grad.addColorStop(0, '#0ea5e9'); // Sky Blue
+      grad.addColorStop(1, '#0f172a'); // Slate 900
 
       ctx.fillStyle = grad;
       // Draw faces
@@ -188,15 +202,24 @@ export class StructureRendererService {
       ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(baseL.x, baseL.y); ctx.lineTo(topL.x, topL.y); ctx.lineTo(topB.x, topB.y); ctx.fill();
       
       // Glowing Top
-      ctx.shadowBlur = 30; ctx.shadowColor = '#06b6d4';
+      ctx.shadowBlur = 40; ctx.shadowColor = '#06b6d4';
       ctx.fillStyle = '#cffafe';
       ctx.beginPath(); ctx.moveTo(topT.x, topT.y); ctx.lineTo(topR.x, topR.y); ctx.lineTo(topB.x, topB.y); ctx.lineTo(topL.x, topL.y); ctx.fill();
       ctx.shadowBlur = 0;
 
-      // Data Lines
-      ctx.strokeStyle = 'rgba(6, 182, 212, 0.5)';
+      // Data Lines / Circuitry Pattern
+      ctx.strokeStyle = 'rgba(6, 182, 212, 0.4)';
       ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(topB.x, topB.y); ctx.stroke();
+      ctx.beginPath(); 
+      ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(topB.x, topB.y); // Center Line
+      
+      // Horizontal bands
+      for(let i=0.1; i<1; i+=0.1) {
+          const y = baseB.y + (topB.y - baseB.y) * i;
+          ctx.moveTo(baseL.x + (topL.x - baseL.x)*i, y);
+          ctx.lineTo(baseR.x + (topR.x - baseR.x)*i, y);
+      }
+      ctx.stroke();
   }
 
   private applyProceduralDecay(ctx: any, e: Entity, w: number, d: number, h: number, tl: any, tr: any, tb: any) {
