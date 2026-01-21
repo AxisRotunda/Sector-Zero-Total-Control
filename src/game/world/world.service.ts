@@ -7,6 +7,7 @@ import { ParticleService } from '../../systems/particle.service';
 import { EventBusService } from '../../core/events/event-bus.service';
 import { GameEvents, FloatingTextPayload } from '../../core/events/game-events';
 import { SpatialHashService } from '../../systems/spatial-hash.service';
+import { ChunkManagerService } from './chunk-manager.service';
 import { WorldGeneratorService } from './world-generator.service';
 import { Subscription } from 'rxjs';
 
@@ -16,6 +17,7 @@ export class WorldService implements OnDestroy {
   public particleService = inject(ParticleService);
   private eventBus = inject(EventBusService);
   public spatialHash = inject(SpatialHashService);
+  public chunkManager = inject(ChunkManagerService);
   private worldGenerator = inject(WorldGeneratorService);
   private subscriptions: Subscription[] = [];
 
@@ -26,6 +28,7 @@ export class WorldService implements OnDestroy {
   public entities: Entity[] = [];
   
   // Static decorations (Baked into floor cache or Static Hash)
+  // DEPRECATED: Use ChunkManager for static wall/structure storage
   public staticDecorations: Entity[] = [];
 
   public mapBounds = { minX: -2000, maxX: 2000, minY: -2000, maxY: 2000 };
@@ -49,7 +52,6 @@ export class WorldService implements OnDestroy {
   // Legacy Gen - kept for reference or hybrid usage
   generateFloor(depth: number) {
     this.player = this.createPlayer();
-    // Default theme to INDUSTRIAL and scale difficulty with depth for legacy procedural generation
     const result = this.worldGenerator.generate('INDUSTRIAL', 1.0 + (depth * 0.5), `PROCEDURAL_DEPTH_${depth}`);
     this.currentZone.set(result.zone);
     this.entities = result.entities;
@@ -59,12 +61,18 @@ export class WorldService implements OnDestroy {
     this.camera.y = result.playerStart.y;
     this.mapBounds = result.bounds;
     
-    // Insert into hash manually or let update loop do it
-    this.entities.forEach(e => this.spatialHash.insert(e, e.type === 'WALL'));
+    // Register walls into ChunkManager
+    this.chunkManager.reset();
+    this.entities.forEach(e => {
+        if (e.type === 'WALL') {
+            this.chunkManager.registerStaticEntity(e);
+        } else {
+            this.spatialHash.insert(e, false);
+        }
+    });
+    // Remove walls from dynamic update list
+    this.entities = this.entities.filter(e => e.type !== 'WALL');
   }
-
-  // Load Sector logic moved to ZoneManagerService to prevent circular dependency and separation of concerns.
-  // WorldService is now a data container.
 
   createPlayer(): Entity {
     return { id: 0, type: 'PLAYER', x: 0, y: 0, z: 0, vx: 0, vy: 0, angle: -Math.PI/4, radius: 20, hp: 100, maxHp: 100, armor: 5, color: '#e4e4e7', state: 'IDLE', animFrame: 0, animFrameTimer: 0, timer: 0, speed: 0, hitFlash: 0, xpValue: 0, trail: [], status: { stun: 0, slow: 0, poison: null, burn: null, weakness: null, bleed: null } };
@@ -75,11 +83,8 @@ export class WorldService implements OnDestroy {
   }
 
   cleanup() {
-     // Player is not in entities list, so we can iterate full array safely
      for (let i = this.entities.length - 1; i >= 0; i--) { 
         const e = this.entities[i];
-        // Don't cleanup NPCs in the Hub, they are persistent fixtures.
-        // With ZoneManager, this logic should check the zone config, but for now name check suffices.
         if (e.type === 'SPAWNER' || e.type === 'SHRINE' || e.type === 'WALL') continue;
         if (this.currentZone().name === 'Liminal Citadel' && e.type === 'NPC') continue;
         

@@ -15,6 +15,7 @@ import { RENDER_CONFIG } from './rendering/render.config';
 import { InputService } from '../services/input.service';
 import { SpatialHashService } from './spatial-hash.service';
 import { InteractionService } from '../services/interaction.service';
+import { ChunkManagerService } from '../game/world/chunk-manager.service';
 
 @Injectable({
   providedIn: 'root'
@@ -28,6 +29,7 @@ export class RenderService {
   private sorter = inject(EntitySorterService);
   private inputService = inject(InputService);
   private spatialHash = inject(SpatialHashService);
+  private chunkManager = inject(ChunkManagerService);
   private interaction = inject(InteractionService);
   
   private floorRenderer = inject(FloorRendererService);
@@ -40,14 +42,20 @@ export class RenderService {
   private player = inject(PlayerService);
   
   debugMode = signal(false);
+  
+  // Performance Tiering
+  private isHighEnd = true;
 
   private camCenter = { x: 0, y: 0 };
-  private _tempIso = { x: 0, y: 0 }; // Reusable vector
 
   init(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d', { alpha: false });
     this.inputService.setCanvas(canvas);
+    
+    // Simple hardware check
+    this.isHighEnd = navigator.hardwareConcurrency > 4 && !/Mobile|Android/.test(navigator.userAgent);
+    
     this.resize();
     this.resizeListener = () => this.resize();
     window.addEventListener('resize', this.resizeListener);
@@ -120,16 +128,24 @@ export class RenderService {
     this.ctx.scale(cam.zoom, cam.zoom);
     this.ctx.translate(-this.camCenter.x, -this.camCenter.y);
 
-    // --- PASS 1: BACKGROUND (Floor Cache) ---
+    // --- PASS 1: BACKGROUND (Cached Floor) ---
     this.floorRenderer.drawFloor(this.ctx, cam, zone, this.world.mapBounds, w, h);
 
-    // --- PASS 2: EFFICIENT CULLING VIA SPATIAL HASH ---
+    // --- PASS 2: CULLING ---
     const frustum = this.calculateFrustum(cam, w, h);
     
-    const visibleEntitiesInRect = this.spatialHash.queryRect(frustum.minX, frustum.minY, frustum.maxX, frustum.maxY, zone.id);
+    // A. Get Static Structures from ChunkManager (Walls, Buildings)
+    const staticEntities = this.chunkManager.getVisibleStaticEntities(cam, w, h);
     
-    // Only filter out strictly FLAT decorations. Cables and HoloTables are 3D.
-    const renderableEntities = visibleEntitiesInRect.filter(e => 
+    // B. Get Dynamic Entities from SpatialHash (Enemies, Projectiles, Props)
+    const dynamicEntities = this.spatialHash.queryRect(frustum.minX, frustum.minY, frustum.maxX, frustum.maxY, zone.id);
+    
+    // Filter out items already drawn in floor cache (Decorations)
+    // Note: If ChunkManager handles Walls, SpatialHash might still contain them if not cleared carefully.
+    // Ideally, spatialHash should NOT contain static walls if ChunkManager does.
+    // For safety, we deduplicate or filter.
+    const renderableDynamic = dynamicEntities.filter(e => 
+        e.type !== 'WALL' && 
         !(e.type === 'DECORATION' && (e.subType === 'RUG' || e.subType === 'FLOOR_CRACK' || e.subType === 'GRAFFITI'))
     );
     
@@ -139,67 +155,80 @@ export class RenderService {
     );
 
     // --- PASS 3: SORTING ---
-    const sortedRenderList = this.sorter.sortForRender(renderableEntities, visibleParticles, player);
+    // Merge lists: Static Chunks + Dynamic Entities + Player + Particles
+    const renderList: (Entity | Particle)[] = [...staticEntities, ...renderableDynamic, player, ...visibleParticles];
+    const sortedList = this.sorter.sortForRender(renderList, player);
     
-    // --- PASS 4: SHADOWS ---
-    for (const e of sortedRenderList) {
-        if (!e.type) continue; // Skip particles
-        if (e.type === 'PLAYER' || e.type === 'ENEMY' || e.type === 'NPC') {
-            this.shadowRenderer.drawUnitShadow(this.ctx, e);
-        } else if (e.type === 'WALL' || e.type === 'DECORATION') {
-            if (e.height && e.height > 50 && e.subType !== 'CABLE') { // Cables don't cast simple shadows
-                this.shadowRenderer.drawStructureShadow(this.ctx, e);
+    // --- PASS 4: SHADOWS (High End Only) ---
+    if (this.isHighEnd) {
+        for (const e of renderList) {
+            if (!(e as any).type) continue; // Skip particles
+            const ent = e as Entity;
+            if (ent.type === 'PLAYER' || ent.type === 'ENEMY' || ent.type === 'NPC') {
+                this.shadowRenderer.drawUnitShadow(this.ctx, ent);
+            } else if (ent.type === 'WALL' || ent.type === 'DECORATION') {
+                if (ent.height && ent.height > 50 && ent.subType !== 'CABLE') { 
+                    this.shadowRenderer.drawStructureShadow(this.ctx, ent);
+                }
             }
         }
     }
 
-    // --- PASS 5: ENTITIES & PARTICLES ---
-    let playerDrawn = false;
-    const len = sortedRenderList.length;
+    // --- PASS 5: MAIN DRAW LOOP ---
+    const len = sortedList.length;
     for (let i = 0; i < len; i++) {
-        const obj = sortedRenderList[i];
-
-        if (obj.type === 'PLAYER') {
-          playerDrawn = true;
-          this.effectRenderer.drawPsionicWave(this.ctx, obj); 
-          this.unitRenderer.drawHumanoid(this.ctx, obj);
+        const obj = sortedList[i];
+        
+        // Type Guard Hack for Particle vs Entity
+        if ((obj as Particle).life !== undefined) {
+            this.effectRenderer.drawParticleIso(this.ctx, obj as Particle);
+            continue;
         }
-        else if (obj.type === 'ENEMY') this.unitRenderer.drawHumanoid(this.ctx, obj);
-        else if (obj.type === 'NPC') this.unitRenderer.drawNPC(this.ctx, obj);
-        else if (obj.type === 'WALL') this.structureRenderer.drawStructure(this.ctx, obj, zone);
-        else if (obj.type === 'DECORATION') this.entityRenderer.drawDecoration(this.ctx, obj);
-        else if (obj.type === 'EXIT') this.entityRenderer.drawExit(this.ctx, obj);
-        else if (obj.type === 'SHRINE') this.entityRenderer.drawShrine(this.ctx, obj);
-        else if (obj.type === 'DESTRUCTIBLE') this.entityRenderer.drawDestructible(this.ctx, obj);
-        else if (obj.type === 'PICKUP') this.entityRenderer.drawPickup(this.ctx, obj);
-        else if (obj.type === 'HITBOX') {
-            if (obj.psionicEffect === 'wave') this.effectRenderer.drawPsionicWave(this.ctx, obj);
-            else if (obj.subType === 'VENT' && obj.state === 'ACTIVE') this.effectRenderer.drawSteamColumn(this.ctx, obj);
-            else if (obj.subType === 'SLUDGE') this.effectRenderer.drawSludge(this.ctx, obj);
-            else this.effectRenderer.drawHitboxIso(this.ctx, obj);
-        }
-        else if (obj.life !== undefined) this.effectRenderer.drawParticleIso(this.ctx, obj);
 
-        if (this.debugMode() && obj.radius) {
-            this.effectRenderer.drawDebugHitbox(this.ctx, obj);
+        const e = obj as Entity;
+
+        if (e.type === 'PLAYER') {
+          this.effectRenderer.drawPsionicWave(this.ctx, e); 
+          this.unitRenderer.drawHumanoid(this.ctx, e);
+        }
+        else if (e.type === 'ENEMY') this.unitRenderer.drawHumanoid(this.ctx, e);
+        else if (e.type === 'NPC') this.unitRenderer.drawNPC(this.ctx, e);
+        else if (e.type === 'WALL') this.structureRenderer.drawStructure(this.ctx, e, zone);
+        else if (e.type === 'DECORATION') this.entityRenderer.drawDecoration(this.ctx, e);
+        else if (e.type === 'EXIT') this.entityRenderer.drawExit(this.ctx, e);
+        else if (e.type === 'SHRINE') this.entityRenderer.drawShrine(this.ctx, e);
+        else if (e.type === 'DESTRUCTIBLE') this.entityRenderer.drawDestructible(this.ctx, e);
+        else if (e.type === 'PICKUP') this.entityRenderer.drawPickup(this.ctx, e);
+        else if (e.type === 'HITBOX') {
+            if (e.psionicEffect === 'wave') this.effectRenderer.drawPsionicWave(this.ctx, e);
+            else if (e.subType === 'VENT' && e.state === 'ACTIVE') this.effectRenderer.drawSteamColumn(this.ctx, e);
+            else if (e.subType === 'SLUDGE') this.effectRenderer.drawSludge(this.ctx, e);
+            else this.effectRenderer.drawHitboxIso(this.ctx, e);
+        }
+
+        if (this.debugMode() && e.radius) {
+            this.effectRenderer.drawDebugHitbox(this.ctx, e);
         }
     }
 
-    // --- PASS 5.5: X-RAY SILHOUETTE ---
-    const obscured = this.checkOcclusion(player, zone.id);
-    if (obscured) {
+    // --- PASS 6: OCCLUSION X-RAY ---
+    // If player is behind a tall structure in the sort list, we draw a silhouette
+    const playerIndex = sortedList.indexOf(player);
+    // Heuristic: If player is drawn early in the list, and there are Walls after it that obscure pos
+    // This is complex to check perfectly in 2D list. 
+    // Simpler: Check specific neighbors in spatial hash or Chunk manager near player pos
+    if (this.checkOcclusion(player)) {
         this.ctx.save();
-        this.ctx.globalAlpha = 0.25;
+        this.ctx.globalAlpha = 0.3;
         this.ctx.globalCompositeOperation = 'source-over'; 
         this.unitRenderer.drawHumanoid(this.ctx, player);
         this.ctx.restore();
     }
 
-    // --- PASS 6: EFFECTS & UI OVERLAYS ---
-    this.effectRenderer.drawGlobalEffects(this.ctx, renderableEntities, player, zone, rainDrops);
+    // --- PASS 7: EFFECTS & UI ---
+    this.effectRenderer.drawGlobalEffects(this.ctx, sortedList as Entity[], player, zone, rainDrops);
     this.effectRenderer.drawFloatingTexts(this.ctx, texts, cam);
     
-    // Draw Interaction Indicator
     const activeTarget = this.interaction.activeInteractable();
     if (activeTarget) {
         const label = this.interaction.getInteractLabel(activeTarget);
@@ -208,25 +237,28 @@ export class RenderService {
 
     this.ctx.restore();
     
-    // --- PASS 7: POST-PROCESSING ---
+    // --- PASS 8: POST-PROCESSING ---
     this.applyPostEffects(w, h);
   }
 
-  private checkOcclusion(player: Entity, zoneId: string): boolean {
-      const searchRadius = 150;
-      const nearby = this.spatialHash.query(player.x, player.y, searchRadius, zoneId);
+  private checkOcclusion(player: Entity): boolean {
+      // Check for walls south-east/south-west of player (visually "in front")
+      const checkDist = 150;
+      // Get static entities from chunks near player
+      const statics = this.chunkManager.getVisibleStaticEntities(this.world.camera, 100, 100); 
+      // This is inefficient to query ALL visible, but ChunkManager returns subsets.
+      // Better: ask spatial hash for walls? But we moved walls to ChunkManager.
+      // Let's iterate the visible statics since it's a culled list.
       
-      for (const e of nearby) {
-          if (e.type === 'WALL' || (e.type === 'DECORATION' && e.height && e.height > 80)) {
-              const wallDepth = e.x + e.y;
-              const playerDepth = player.x + player.y;
-              
-              if (wallDepth > playerDepth) {
-                  // Basic overlap check
-                  const dist = Math.hypot(e.x - player.x, e.y - player.y);
-                  if (dist < (e.width || 50) + 20) {
-                      return true;
-                  }
+      for (const e of statics) {
+          if (e.type === 'WALL' && (e.height || 0) > 80) {
+              const dist = Math.hypot(e.x - player.x, e.y - player.y);
+              if (dist < 100) {
+                  // Simple depth check: Is the wall "visually below" the player?
+                  // In iso, Y down is "forward/down".
+                  const pIso = IsoUtils.toIso(player.x, player.y);
+                  const wIso = IsoUtils.toIso(e.x, e.y);
+                  if (wIso.y > pIso.y) return true;
               }
           }
       }
@@ -251,6 +283,7 @@ export class RenderService {
   private applyPostEffects(w: number, h: number) {
       if (!this.ctx) return;
       
+      // Vignette
       const grad = this.ctx.createRadialGradient(w/2, h/2, h/2, w/2, h/2, h);
       grad.addColorStop(0, 'transparent');
       grad.addColorStop(1, 'rgba(0,0,0,0.85)');
@@ -258,15 +291,13 @@ export class RenderService {
       this.ctx.globalCompositeOperation = 'source-over';
       this.ctx.fillRect(0, 0, w, h);
 
+      // Low Health / Glitch
       const integrity = this.player.stats.playerHp() / this.player.stats.playerStats().hpMax;
-      const energy = this.player.stats.psionicEnergy() / this.player.stats.maxPsionicEnergy();
-      const glitchChance = (integrity < 0.3 ? 0.3 : 0) + (energy > 0.9 ? 0.2 : 0);
-      
-      if (Math.random() < glitchChance) {
-          const offset = Math.random() * 4 * (1.5 - integrity);
+      if (integrity < 0.3 && Math.random() < 0.1) {
+          const offset = Math.random() * 10;
           this.ctx.save();
-          this.ctx.globalCompositeOperation = 'screen';
-          this.ctx.fillStyle = 'rgba(255, 0, 0, 0.1)';
+          this.ctx.globalCompositeOperation = 'color-dodge';
+          this.ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
           this.ctx.translate(offset, 0);
           this.ctx.fillRect(0, 0, w, h);
           this.ctx.restore();

@@ -2,6 +2,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Entity } from '../models/game.models';
 import { SpatialHashService } from './spatial-hash.service';
+import { ChunkManagerService } from '../game/world/chunk-manager.service';
 import { isDestructible } from '../utils/type-guards';
 import * as BALANCE from '../config/balance.config';
 import { WorldService } from '../game/world/world.service';
@@ -9,6 +10,7 @@ import { WorldService } from '../game/world/world.service';
 @Injectable({ providedIn: 'root' })
 export class PhysicsService {
   private spatialHash = inject(SpatialHashService);
+  private chunkManager = inject(ChunkManagerService);
   private world = inject(WorldService);
 
   public updateEntityPhysics(e: Entity, stats?: { speed: number }, inputVec?: { x: number, y: number }): boolean {
@@ -33,7 +35,8 @@ export class PhysicsService {
 
     // 1.5 Separation / Steering Behaviors
     if ((e.type === 'ENEMY' || e.type === 'PLAYER') && e.state !== 'DEAD') {
-        const neighbors = this.spatialHash.query(e.x, e.y, e.radius * 1.5);
+        const zoneId = this.world.currentZone().id;
+        const neighbors = this.spatialHash.query(e.x, e.y, e.radius * 1.5, zoneId);
         for (const n of neighbors) {
             if (n.id === e.id || n.state === 'DEAD' || n.type === 'WALL' || n.type === 'DECORATION' || n.type === 'PICKUP') continue;
             
@@ -72,23 +75,20 @@ export class PhysicsService {
     const stepVy = e.vy / steps;
 
     for (let i = 0; i < steps; i++) {
-        // Try X Movement
         const prevX = e.x;
         e.x += stepVx;
         if (this.checkCollision(e)) {
             e.x = prevX;
-            e.vx = 0; // Hit wall on X, stop X
+            e.vx = 0;
         }
 
-        // Try Y Movement
         const prevY = e.y;
         e.y += stepVy;
         if (this.checkCollision(e)) {
             e.y = prevY;
-            e.vy = 0; // Hit wall on Y, stop Y
+            e.vy = 0;
         }
 
-        // Map Bounds Check
         const bounds = this.world.mapBounds;
         if (e.x < bounds.minX + r) { e.x = bounds.minX + r; e.vx = 0; }
         if (e.x > bounds.maxX - r) { e.x = bounds.maxX - r; e.vx = 0; }
@@ -96,7 +96,6 @@ export class PhysicsService {
         if (e.y > bounds.maxY - r) { e.y = bounds.maxY - r; e.vy = 0; }
     }
     
-    // Trail Effect
     if (isPlayer && isMoving && e.trail && performance.now() % 5 === 0) {
         e.trail.push({x: e.x, y: e.y, alpha: 0.2});
     }
@@ -107,9 +106,17 @@ export class PhysicsService {
   private checkCollision(e: Entity): boolean {
       const radius = e.radius || 20;
       const zoneId = this.world.currentZone().id;
-      const nearby = this.spatialHash.query(e.x, e.y, radius + 20, zoneId); 
+      
+      // Check Dynamic Entities via Spatial Hash
+      const nearbyDynamic = this.spatialHash.query(e.x, e.y, radius + 20, zoneId); 
+      
+      // Check Static Entities via Chunk Manager
+      // We simulate a camera at entity position to reuse the chunk logic (hacky but efficient reuse)
+      const nearbyStatic = this.chunkManager.getVisibleStaticEntities({ x: e.x, y: e.y, zoom: 1 }, 200, 200);
 
-      for (const obs of nearby) {
+      const candidates = [...nearbyDynamic, ...nearbyStatic];
+
+      for (const obs of candidates) {
           if (obs.id === e.id) continue;
           
           if (obs.type === 'WALL' || (isDestructible(obs) && obs.state !== 'DEAD')) {
@@ -130,7 +137,6 @@ export class PhysicsService {
                   const dy = e.y - closestY;
                   const distSq = dx * dx + dy * dy;
                   
-                  // Epsilon buffer
                   if (distSq < (radius * radius) - 0.1) {
                       return true;
                   }

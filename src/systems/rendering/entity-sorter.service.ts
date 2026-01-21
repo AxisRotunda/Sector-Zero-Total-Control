@@ -5,55 +5,68 @@ import { Entity, Particle } from '../../models/game.models';
 @Injectable({ providedIn: 'root' })
 export class EntitySorterService {
   
-  // Reuse bucket arrays to reduce allocation
-  private buckets = new Map<number, any[]>();
-  private readonly BUCKET_SIZE = 100;
-
-  sortForRender(visibleEntities: Entity[], particles: Particle[], player: Entity): any[] {
-    // Merge all renderable objects
-    // Note: renderableEntities input is already filtered by RenderService to exclude floor decorations
-    const renderList = [...visibleEntities, ...particles];
+  // Isometric depth calculation
+  // Depth = (x + y) - z
+  // We prioritize floor position (x+y) but subtract height (z) so higher objects draw *after* floor objects at same x,y?
+  // Wait, in Painter's algorithm (Back-to-Front):
+  // Furthest back = Lowest Depth value.
+  // Standard Iso: X goes Right-Down, Y goes Left-Down.
+  // "Down" the screen is increasing Y_screen.
+  // ScreenY = (x + y) * 0.5 - z.
+  // So objects with higher (x+y) are "lower" on screen (closer to viewer).
+  // Objects with higher z are "higher" on screen (further 'up' visually, but physically above).
+  
+  // Correct Sort Order:
+  // We want to draw objects with LOWER (x+y) first (Background).
+  // Then HIGHER (x+y) (Foreground).
+  // Z complicates this. An object at z=100 is "above" z=0.
+  // If we just sort by (x+y), a bird at (10,10, 100) has same depth as a rock at (10,10,0).
+  // The bird should be drawn AFTER the rock if it's "on top".
+  
+  // Revised Metric: `isoDepth = (x + y)`. Z is handled by draw order relative to footprint?
+  // Actually, for pure occlusion, we often sort by the *screen Y* of the *base* of the object.
+  // But let's use the robust topological metric:
+  // depth = x + y + z_layer_bias
+  
+  sortForRender(entities: (Entity | Particle)[], player: Entity): (Entity | Particle)[] {
     
-    // Bucket Sort Optimization
-    this.buckets.clear();
-    
-    // 1. Distribute into buckets based on ISO depth approximation (x + y)
-    for (const e of renderList) {
-        // Handle both Entity and Particle types safely
-        const depthVal = e.x + e.y;
-        const bucketIndex = Math.floor(depthVal / this.BUCKET_SIZE);
+    // 1. Calculate Depth Key for all items
+    for (let i = 0; i < entities.length; i++) {
+        const e = entities[i];
         
-        if (!this.buckets.has(bucketIndex)) {
-            this.buckets.set(bucketIndex, []);
+        // For entities with volume (Walls), we ideally use the "furthest back" point of their footprint
+        // But for a simple center-sort:
+        
+        // Base Iso Depth (Footprint center)
+        let depth = e.x + e.y;
+        
+        // Bias for specific types to fix z-fighting
+        if ((e as any).type === 'DECORATION' && (e as any).subType === 'RUG') {
+            depth -= 5000; // Floor decals always first
+        } else if ((e as any).type === 'WALL') {
+            // Walls: Sort by their base center. 
+            // Note: Large walls might need splitting for perfect sorting, 
+            // but center-sort works if objects aren't intersecting.
+        } else if ((e as any).type === 'HITBOX' && (e as any).z > 10) {
+            // Flying projectiles: add small bias to draw in front of things at same footprint
+            depth += 10; 
+        } else if ((e as any).type === 'PARTICLE') {
+             // Particles often have Z. 
+             // Ideally we sort particles into the scene geometry.
+             depth += (e as any).z; 
         }
-        this.buckets.get(bucketIndex)!.push(e);
+
+        // Store calculated depth on the object (transiently)
+        (e as any).isoDepth = depth;
     }
 
-    // 2. Sort buckets by index
-    const sortedBucketIndices = Array.from(this.buckets.keys()).sort((a, b) => a - b);
+    // 2. Sort
+    // Native sort is usually Timsort (stable, fast for partially sorted arrays)
+    // We sort Ascending (Lowest depth first -> Background)
+    entities.sort((a: any, b: any) => {
+        return a.isoDepth - b.isoDepth;
+    });
     
-    const sortedResult: any[] = [];
-
-    // 3. Sort within buckets and merge
-    for (const idx of sortedBucketIndices) {
-        const bucket = this.buckets.get(idx)!;
-        
-        // Timsort (native) is efficient for small arrays
-        bucket.sort((a, b) => {
-            // Cable logic: Render cables behind other entities in same bucket if possible
-            const isCableA = (a as any).subType === 'CABLE';
-            const isCableB = (b as any).subType === 'CABLE';
-            if (isCableA && !isCableB) return -1;
-            if (!isCableA && isCableB) return 1;
-
-            return (a.x + a.y) - (b.x + b.y);
-        });
-        
-        for (const item of bucket) {
-            sortedResult.push(item);
-        }
-    }
-    
-    return sortedResult;
+    return entities;
   }
 }
