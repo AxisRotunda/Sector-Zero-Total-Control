@@ -1,6 +1,6 @@
 
 import { Injectable, inject, signal } from '@angular/core';
-import { Entity, Zone, FloatingText, Camera, Particle } from '../models/game.models';
+import { Entity, Zone, FloatingText, Camera, Particle } from '../../models/game.models';
 import { WorldService } from '../game/world/world.service';
 import { FloorRendererService } from './rendering/floor-renderer.service';
 import { StructureRendererService } from './rendering/structure-renderer.service';
@@ -151,11 +151,13 @@ export class RenderService {
     }
 
     // --- PASS 5: ENTITIES & PARTICLES ---
+    let playerDrawn = false;
     const len = sortedRenderList.length;
     for (let i = 0; i < len; i++) {
         const obj = sortedRenderList[i];
 
         if (obj.type === 'PLAYER') {
+          playerDrawn = true;
           this.effectRenderer.drawPsionicWave(this.ctx, obj); 
           this.unitRenderer.drawHumanoid(this.ctx, obj);
         }
@@ -180,6 +182,21 @@ export class RenderService {
         }
     }
 
+    // --- PASS 5.5: X-RAY SILHOUETTE ---
+    // If the player was drawn earlier in the stack than the last item (meaning something was drawn ON TOP of them)
+    // AND that something is close to the player, we draw a silhouette.
+    // A simpler heuristic for isometric: If player is behind a tall wall.
+    
+    // Check if player is obscured by querying nearby static walls that are "in front" of the player
+    const obscured = this.checkOcclusion(player, zone.id);
+    if (obscured) {
+        this.ctx.save();
+        this.ctx.globalAlpha = 0.25;
+        this.ctx.globalCompositeOperation = 'source-over'; // Just draw semi-transparent on top
+        this.unitRenderer.drawHumanoid(this.ctx, player);
+        this.ctx.restore();
+    }
+
     // --- PASS 6: EFFECTS & UI OVERLAYS ---
     this.effectRenderer.drawGlobalEffects(this.ctx, renderableEntities, player, zone, rainDrops);
     this.effectRenderer.drawFloatingTexts(this.ctx, texts, cam);
@@ -188,6 +205,47 @@ export class RenderService {
     
     // --- PASS 7: POST-PROCESSING ---
     this.applyPostEffects(w, h);
+  }
+
+  private checkOcclusion(player: Entity, zoneId: string): boolean {
+      // Find walls that are physically south/east of player (higher X+Y in screen space logic) 
+      // but close enough to obscure.
+      const searchRadius = 150;
+      const nearby = this.spatialHash.query(player.x, player.y, searchRadius, zoneId);
+      
+      for (const e of nearby) {
+          if (e.type === 'WALL' || (e.type === 'DECORATION' && e.height && e.height > 80)) {
+              // Basic Isometric depth check: e is "in front" if e.x + e.y > player.x + player.y
+              // AND e is physically overlapping the player's screen position
+              const wallDepth = e.x + e.y;
+              const playerDepth = player.x + player.y;
+              
+              if (wallDepth > playerDepth) {
+                  // Check screen space bounding box overlap approximately
+                  const pPos = IsoUtils.toIso(player.x, player.y, 0);
+                  const wPos = IsoUtils.toIso(e.x, e.y, 0);
+                  
+                  // Wall sprite usually extends UP from wPos.y
+                  // Player sprite is around pPos.y
+                  // If wall is in front, wPos.y is lower (visually lower on screen? No, higher Y value is lower on screen)
+                  // In Canvas coordinates: Higher Y is "down".
+                  // IsoUtils: out.y = (x+y)*0.5 - z. Higher world x/y means higher screen Y (lower on screen).
+                  // So things "in front" have higher screen Y.
+                  
+                  // If wall is in front, it's drawn LAST.
+                  // We need to know if the wall's pixels cover the player's pixels.
+                  // Wall base is at wPos. Wall top is at wPos.y - height.
+                  // Player base is at pPos. Player top is pPos.y - 60.
+                  
+                  // Simple radial check + depth check
+                  const dist = Math.hypot(e.x - player.x, e.y - player.y);
+                  if (dist < (e.width || 50) + 20) {
+                      return true;
+                  }
+              }
+          }
+      }
+      return false;
   }
 
   private calculateFrustum(cam: Camera, width: number, height: number) {

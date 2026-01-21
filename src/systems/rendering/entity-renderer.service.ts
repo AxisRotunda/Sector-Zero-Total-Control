@@ -6,18 +6,21 @@ import { StructureRendererService } from './structure-renderer.service';
 import { UnitRendererService } from './unit-renderer.service';
 import { EffectRendererService } from './effect-renderer.service';
 import { IsoUtils } from '../../utils/iso-utils';
+import { WorldService } from '../../game/world/world.service';
 
 @Injectable({ providedIn: 'root' })
 export class EntityRendererService {
   private structureRenderer = inject(StructureRendererService);
   private unitRenderer = inject(UnitRendererService);
   private effectRenderer = inject(EffectRendererService);
+  private world = inject(WorldService); // Inject world to get current zone context if needed
 
   drawDecoration(ctx: CanvasRenderingContext2D, e: Entity) {
       if (['RUG', 'FLOOR_CRACK', 'GRAFFITI', 'TRASH'].includes(e.subType || '')) {
           this.structureRenderer.drawFloorDecoration(ctx, e);
       } else {
-          this.structureRenderer.drawStructure(ctx, e, {} as Zone);
+          // Use current zone from world service to ensure theme consistency
+          this.structureRenderer.drawStructure(ctx, e, this.world.currentZone());
       }
   }
 
@@ -69,10 +72,10 @@ export class EntityRendererService {
   }
   
   drawDestructible(ctx: CanvasRenderingContext2D, e: Entity) {
-      this.structureRenderer.drawStructure(ctx, e, {} as any);
+      this.structureRenderer.drawStructure(ctx, e, this.world.currentZone());
   }
   
   drawShrine(ctx: CanvasRenderingContext2D, e: Entity) {
-      this.structureRenderer.drawStructure(ctx, e, {} as any);
+      this.structureRenderer.drawStructure(ctx, e, this.world.currentZone());
   }
 }

@@ -1,8 +1,9 @@
+
 # SYSTEM: Render System
 
 **META**
 - **ID**: `render-system`
-- **LAST_UPDATED**: `2026-01-25T12:00:00Z`
+- **LAST_UPDATED**: `2026-01-28T12:00:00Z`
 - **PRIMARY_FILES**:
   - `src/systems/render.service.ts`
   - `src/systems/rendering/floor-renderer.service.ts`
@@ -25,8 +26,10 @@
 - **Pipeline Coordinator**: `RenderService` acts as the main entry point. It clears the canvas, sets up the camera transform, and calls the sub-renderers in order.
 - **Floor Caching**: `FloorRendererService` draws the static world geometry (ground tiles, static decorations). Crucially, it renders to an off-screen canvas (cache) and only updates when the camera moves significantly or the zone changes. This is a massive performance optimization.
 - **Procedural Rendering**: `UnitRendererService` and `StructureRendererService` handle complex procedural drawing for units (Player, Enemies, NPCs) and structures (Walls).
+- **Texturing & Noise**: `StructureRendererService` now generates static noise patterns at runtime to apply grime, rust, and texture to walls, avoiding flat-colored primitives without requiring external asset loading.
 - **Sprite Caching**: `SpriteCacheService` stores the rendered output of procedural structures (like walls) to an off-screen canvas. Subsequent draws of identical structures blit the cached image instead of re-rendering, saving significant CPU time.
 - **Optimized Z-Sorting**: `EntitySorterService` uses a bucket sort algorithm to efficiently sort all dynamic entities by their isometric depth `(x + y)` before drawing, ensuring correct occlusion.
+- **Occlusion (X-Ray)**: `RenderService` performs a final check for player occlusion by tall structures. If obscured, it renders a semi-transparent silhouette of the player on top of the geometry.
 - **Effect Rendering**: `EffectRendererService` handles transient visuals: particles, projectiles (hitboxes), weather (rain/ash), and UI overlays like floating text.
 - **Post-Processing**: `RenderService` applies final screen-space effects, such as vignettes and glitch effects based on player health.
 
@@ -56,8 +59,17 @@
     4. Loop sorted entities:
        - Call `UnitRenderer`, `StructureRenderer`, etc. for physical objects.
        - Call `EffectRenderer` for particles/projectiles.
-    5. `EffectRenderer.drawGlobalEffects()` (Weather, overlays).
-    6. Post-Processing (Glitch/Vignette).
+    5. **Occlusion Check**: Redraw player silhouette if obscured.
+    6. `EffectRenderer.drawGlobalEffects()` (Weather, overlays).
+    7. Post-Processing (Glitch/Vignette).
+
+### `src/systems/rendering/structure-renderer.service.ts`
+
+#### `StructureRendererService`
+
+**PUBLIC_METHODS**:
+- `drawStructure(...)`: Determines specific render method (`Monolith`, `Gate`, `Wall`) based on entity subtype. Uses `SpriteCacheService` to retrieve or generate the sprite.
+- **Internal**: Initializes procedural noise patterns for texturing.
 
 ### `src/systems/rendering/floor-renderer.service.ts`
 
@@ -65,11 +77,3 @@
 
 **PUBLIC_METHODS**:
 - `drawFloor(...)`: Manages the cache canvas. Checks if invalidation is needed (zoom change, view pan threshold). Redraws cache if dirty, then draws cache to main context.
-
-### `src/systems/rendering/unit-renderer.service.ts`
-
-#### `UnitRendererService`
-
-**PUBLIC_METHODS**:
-- `drawHumanoid(...)`: Procedural sprite generation for characters, including animation logic.
-- `drawNPC(...)`: Renders NPCs, including unique elements like vendor stalls.

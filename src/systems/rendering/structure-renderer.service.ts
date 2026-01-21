@@ -1,12 +1,109 @@
 
 import { Injectable, inject } from '@angular/core';
-import { Entity, Zone } from '../../models/game.models';
+import { Entity, Zone, ZoneTheme } from '../../models/game.models';
 import { IsoUtils } from '../../utils/iso-utils';
 import { SpriteCacheService } from './sprite-cache.service';
+
+interface ThemeVisuals {
+    pattern: CanvasPattern | null;
+    edgeColor: string;
+    erosionLevel: number; // 0 to 1
+    rimLight: boolean;
+    fillOpacity: number;
+    overlayColor?: string;
+}
 
 @Injectable({ providedIn: 'root' })
 export class StructureRendererService {
   private cache = inject(SpriteCacheService);
+  
+  // Patterns
+  private patterns: Record<string, CanvasPattern | null> = {
+      noise: null,
+      rust: null,
+      moss: null,
+      grid: null,
+      void: null
+  };
+
+  constructor() {
+      this.initPatterns();
+  }
+
+  private initPatterns() {
+      if (typeof document === 'undefined') return;
+      
+      const createPattern = (w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void) => {
+          const c = document.createElement('canvas');
+          c.width = w; c.height = h;
+          const ctx = c.getContext('2d')!;
+          draw(ctx);
+          return ctx.createPattern(c, 'repeat');
+      };
+
+      // 1. General Grime
+      this.patterns.noise = createPattern(64, 64, (ctx) => {
+          for(let i=0; i<400; i++) {
+              ctx.fillStyle = `rgba(0,0,0,${Math.random() * 0.15})`;
+              ctx.fillRect(Math.random()*64, Math.random()*64, 2, 2);
+          }
+      });
+
+      // 2. Rust (Industrial)
+      this.patterns.rust = createPattern(128, 128, (ctx) => {
+          for(let i=0; i<50; i++) {
+              const size = Math.random() * 20;
+              ctx.fillStyle = `rgba(180, 80, 50, ${Math.random() * 0.2})`;
+              ctx.beginPath(); ctx.arc(Math.random()*128, Math.random()*128, size, 0, Math.PI*2); ctx.fill();
+          }
+      });
+
+      // 3. Moss (Organic)
+      this.patterns.moss = createPattern(128, 128, (ctx) => {
+          for(let i=0; i<80; i++) {
+              const size = Math.random() * 15;
+              ctx.fillStyle = `rgba(20, 100, 40, ${Math.random() * 0.3})`;
+              ctx.beginPath(); ctx.arc(Math.random()*128, Math.random()*128, size, 0, Math.PI*2); ctx.fill();
+          }
+      });
+
+      // 4. Hex Grid (High Tech)
+      this.patterns.grid = createPattern(64, 64, (ctx) => {
+          ctx.strokeStyle = 'rgba(6, 182, 212, 0.15)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(0, 32); ctx.lineTo(16, 0); ctx.lineTo(48, 0); ctx.lineTo(64, 32); ctx.lineTo(48, 64); ctx.lineTo(16, 64); ctx.closePath();
+          ctx.stroke();
+          ctx.fillStyle = 'rgba(6, 182, 212, 0.05)';
+          ctx.fill();
+      });
+      
+      // 5. Void Glitch
+      this.patterns.void = createPattern(64, 64, (ctx) => {
+          ctx.fillStyle = 'rgba(147, 51, 234, 0.1)';
+          for(let i=0; i<10; i++) {
+              ctx.fillRect(Math.random()*64, Math.random()*64, Math.random()*20, 2);
+          }
+      });
+  }
+
+  private getThemeVisuals(theme: ZoneTheme = 'INDUSTRIAL', overrideColor?: string): ThemeVisuals {
+      const base: ThemeVisuals = { pattern: this.patterns.noise, edgeColor: '#000000', erosionLevel: 0.1, rimLight: false, fillOpacity: 1.0 };
+      
+      switch(theme) {
+          case 'RESIDENTIAL':
+              return { ...base, pattern: this.patterns.noise, edgeColor: '#1e1b4b', erosionLevel: 0.05, rimLight: true, overlayColor: '#f472b6' };
+          case 'HIGH_TECH':
+              return { ...base, pattern: this.patterns.grid, edgeColor: '#0ea5e9', erosionLevel: 0.0, rimLight: true, fillOpacity: 0.9 };
+          case 'ORGANIC':
+              return { ...base, pattern: this.patterns.moss, edgeColor: '#052e16', erosionLevel: 0.4, rimLight: false };
+          case 'VOID':
+              return { ...base, pattern: this.patterns.void, edgeColor: '#581c87', erosionLevel: 0.3, rimLight: true, overlayColor: '#a855f7' };
+          case 'INDUSTRIAL':
+          default:
+              return { ...base, pattern: this.patterns.rust, edgeColor: '#000000', erosionLevel: 0.2, rimLight: false };
+      }
+  }
 
   private adjustColor(hex: string, percent: number) {
       if (!hex) return '#333333';
@@ -23,12 +120,13 @@ export class StructureRendererService {
       const w = e.width || 40; 
       const d = e.depth || w;
       const h = e.height || 100;
+      const theme = zone ? zone.theme : 'INDUSTRIAL';
       
-      // Cache Key: Includes specific types now to ensure unique sprites
-      const cacheKey = `STRUCT_${e.type}_${e.subType}_${w}_${d}_${h}_${e.color}_${e.locked}`;
+      // Cache Key: Includes zone theme to ensure visual variety per sector
+      const cacheKey = `STRUCT_${e.type}_${e.subType}_${w}_${d}_${h}_${e.color}_${theme}_${e.locked}`;
       
       const isoBounds = this.calculateIsoBounds(w, d, h);
-      const padding = 60; // Increased padding for glows/effects
+      const padding = 60; 
       const canvasW = Math.ceil(isoBounds.maxX - isoBounds.minX + padding * 2);
       const canvasH = Math.ceil(isoBounds.maxY - isoBounds.minY + padding * 2);
       
@@ -38,18 +136,15 @@ export class StructureRendererService {
       const anchorY = -isoBounds.minY + padding;
 
       const sprite = this.cache.getOrRender(cacheKey, canvasW, canvasH, (bufferCtx) => {
-          if (e.subType === 'MONOLITH') {
-              this.renderMonolithToBuffer(bufferCtx, e, w, d, h, anchorX, anchorY);
-          } else if (e.subType === 'GATE_SEGMENT') {
-              this.renderGateToBuffer(bufferCtx, e, w, d, h, anchorX, anchorY);
-          } else if (e.subType === 'HOLO_TABLE') {
-              this.renderHoloTableToBuffer(bufferCtx, e, w, d, h, anchorX, anchorY);
-          } else if (e.subType === 'VENDING_MACHINE') {
-              this.renderVendingMachineToBuffer(bufferCtx, e, w, d, h, anchorX, anchorY);
-          } else if (e.subType === 'BENCH') {
-              this.renderBenchToBuffer(bufferCtx, e, w, d, h, anchorX, anchorY);
-          } else {
-              this.renderStructureToBuffer(bufferCtx, e, w, d, h, anchorX, anchorY);
+          const visuals = this.getThemeVisuals(theme, e.color);
+          
+          switch (e.subType) {
+              case 'MONOLITH': this.renderMonolith(bufferCtx, e, w, d, h, anchorX, anchorY, visuals); break;
+              case 'GATE_SEGMENT': this.renderGate(bufferCtx, e, w, d, h, anchorX, anchorY, visuals); break;
+              case 'HOLO_TABLE': this.renderHoloTable(bufferCtx, e, w, d, h, anchorX, anchorY); break;
+              case 'VENDING_MACHINE': this.renderVendingMachine(bufferCtx, e, w, d, h, anchorX, anchorY); break;
+              case 'BENCH': this.renderBench(bufferCtx, e, w, d, h, anchorX, anchorY); break;
+              default: this.renderGenericWall(bufferCtx, e, w, d, h, anchorX, anchorY, visuals); break;
           }
       });
 
@@ -57,79 +152,216 @@ export class StructureRendererService {
       ctx.drawImage(sprite, Math.floor(pos.x - anchorX), Math.floor(pos.y - anchorY)); 
   }
 
-  drawFloorDecoration(ctx: CanvasRenderingContext2D, e: Entity) {
-      const pos = IsoUtils.toIso(e.x, e.y, e.z || 0);
-      ctx.save();
-      ctx.translate(pos.x, pos.y);
-      
-      if (e.subType === 'RUG') {
-          const w = e.width || 400; const h = e.height || 400;
-          const p1 = IsoUtils.toIso(-w/2, -h/2, 0);
-          const p2 = IsoUtils.toIso(w/2, -h/2, 0);
-          const p3 = IsoUtils.toIso(w/2, h/2, 0);
-          const p4 = IsoUtils.toIso(-w/2, h/2, 0);
-          
-          ctx.fillStyle = e.color || '#333';
-          ctx.globalAlpha = 0.5;
+  // --- PRIMITIVE RENDERER WITH EROSION ---
+  
+  private renderPrism(ctx: any, w: number, d: number, h: number, anchorX: number, anchorY: number, color: string, visuals: ThemeVisuals) {
+      ctx.translate(anchorX, anchorY);
+      const halfW = w / 2; const halfD = d / 2;
+      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
+
+      const baseL = p(-halfW, halfD, 0); const baseR = p(halfW, -halfD, 0); const baseB = p(halfW, halfD, 0); 
+      const topL = p(-halfW, halfD, h); const topR = p(halfW, -halfD, h); const topB = p(halfW, halfD, h); const topT = p(-halfW, -halfD, h);
+
+      // Faces
+      const drawFace = (p1: any, p2: any, p3: any, p4: any, shade: number) => {
+          ctx.fillStyle = this.adjustColor(color, shade); 
           ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.fill();
+          if (visuals.pattern) {
+              ctx.fillStyle = visuals.pattern;
+              ctx.globalAlpha = visuals.fillOpacity * 0.4;
+              ctx.fill();
+              ctx.globalAlpha = 1.0;
+          }
+      };
+
+      // Right Face (Darkest)
+      drawFace(baseB, baseR, topR, topB, -30);
+      // Left Face (Mid)
+      drawFace(baseB, baseL, topL, topB, -10);
+      // Top Face (Lightest)
+      drawFace(topT, topR, topB, topL, 0);
+
+      // Edges/Highlights
+      ctx.lineWidth = visuals.rimLight ? 2 : 1; 
+      ctx.strokeStyle = visuals.rimLight ? visuals.edgeColor : this.adjustColor(color, 40);
+      if (visuals.rimLight) { ctx.shadowColor = visuals.edgeColor; ctx.shadowBlur = 10; }
+      
+      ctx.beginPath(); ctx.moveTo(topL.x, topL.y); ctx.lineTo(topB.x, topB.y); ctx.lineTo(topR.x, topR.y); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(topB.x, topB.y); ctx.lineTo(baseB.x, baseB.y); ctx.stroke();
+      
+      ctx.shadowBlur = 0;
+
+      // Ambient Occlusion
+      const grad = ctx.createLinearGradient(0, baseB.y - 40, 0, baseB.y);
+      grad.addColorStop(0, 'rgba(0,0,0,0)'); grad.addColorStop(1, 'rgba(0,0,0,0.6)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(baseR.x, baseR.y); ctx.lineTo(topR.x, topR.y - h + 40); ctx.lineTo(topB.x, topB.y - h + 40);
+      ctx.lineTo(topL.x, topL.y - h + 40); ctx.lineTo(baseL.x, baseL.y);
+      ctx.fill();
+
+      // PROCEDURAL EROSION (Carve out chunks from edges)
+      if (visuals.erosionLevel > 0) {
+          ctx.globalCompositeOperation = 'destination-out';
+          const seed = w + h + d; // Pseudo-seed
+          const cuts = Math.floor(h * visuals.erosionLevel * 0.2);
           
-          // Border for Rugs to look like designated zones
-          ctx.lineWidth = 2; ctx.strokeStyle = this.adjustColor(e.color, 40); 
-          ctx.stroke();
-          
-          ctx.globalAlpha = 1.0;
-      } else if (e.subType === 'FLOOR_CRACK') {
-          ctx.scale(1, 0.5);
-          ctx.strokeStyle = '#18181b'; ctx.lineWidth = 2;
-          ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(5, 5); ctx.lineTo(15, -5); ctx.lineTo(25, 0); ctx.stroke();
-      } else if (e.subType === 'GRAFFITI') {
-          ctx.scale(1, 0.5);
-          ctx.font = 'bold 20px monospace'; ctx.fillStyle = e.color || '#ef4444';
-          ctx.fillText('⚠', 0, 0);
-      } else if (e.subType === 'TRASH') {
-          ctx.scale(1, 0.5);
-          ctx.fillStyle = '#52525b';
-          ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI*2); ctx.fill();
-          ctx.fillStyle = '#3f3f46';
-          ctx.beginPath(); ctx.arc(5, 2, 6, 0, Math.PI*2); ctx.fill();
+          for(let i=0; i<cuts; i++) {
+              // Edge: TopB to BaseB (Vertical Corner)
+              const t = Math.random();
+              const ex = topB.x + (baseB.x - topB.x) * t;
+              const ey = topB.y + (baseB.y - topB.y) * t;
+              const size = Math.random() * 10 + 2;
+              
+              ctx.beginPath();
+              ctx.arc(ex, ey, size, 0, Math.PI*2);
+              ctx.fill();
+              
+              // Top Edges
+              if (Math.random() > 0.5) {
+                  const tx = topL.x + (topR.x - topL.x) * Math.random();
+                  const ty = topL.y + (topR.y - topL.y) * Math.random();
+                  ctx.beginPath(); ctx.arc(tx, ty, size * 0.8, 0, Math.PI*2); ctx.fill();
+              }
+          }
+          ctx.globalCompositeOperation = 'source-over';
       }
-      ctx.restore();
+
+      // Reset Transform
+      ctx.translate(-anchorX, -anchorY);
+      return { topL, topR, topB, topT, baseB };
   }
 
-  // --- CABLE (Dynamic Rendering, No Cache) ---
-  private drawCable(ctx: CanvasRenderingContext2D, e: Entity) {
-      if (!e.targetX || !e.targetY) return;
-      
-      const start = IsoUtils.toIso(e.x, e.y, e.z);
-      // Assuming targetZ is stored in e.height or passed differently? 
-      // Based on Hub config, target Z is in data.z, but loader maps data.z -> e.z usually.
-      // Let's assume e.z is startZ. e.height is endZ if mapped, or we need a property.
-      // Loader maps data.z -> e.z. So e.z is actually the Z value from config.
-      // Wait, Hub config has: x:0, y:-600, data: { targetX: 1100, targetY: -200, z: 400 }
-      // This maps to e.z = 400.
-      // The start height of a cable attached to a spire should be high.
-      // The end height is usually lower.
-      
-      const endZ = 120; // Default connection height (approx wall height)
-      const end = IsoUtils.toIso(e.targetX, e.targetY, endZ);
+  // --- SPECIALIZED RENDERERS ---
 
-      // Draw Catenary
-      ctx.strokeStyle = '#18181b';
-      ctx.lineWidth = 2;
+  private renderGenericWall(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number, visuals: ThemeVisuals) {
+      const coords = this.renderPrism(ctx, w, d, h, ax, ay, e.color, visuals);
+      
+      // Theme Overlays
+      if (visuals.overlayColor && Math.random() > 0.7) {
+          // Glitch/Neon Graffiti
+          ctx.translate(ax, ay);
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.fillStyle = visuals.overlayColor;
+          ctx.globalAlpha = 0.6;
+          const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
+          const pos = p(w/2 + 2, d/4, h/2); // Stick to side
+          ctx.beginPath(); ctx.arc(pos.x, pos.y, 10, 0, Math.PI*2); ctx.fill();
+          ctx.globalAlpha = 1.0;
+          ctx.translate(-ax, -ay);
+      }
+
+      if (e.subType === 'PILLAR') {
+          // Add banding
+          ctx.translate(ax, ay);
+          ctx.strokeStyle = this.adjustColor(e.color, 30);
+          ctx.lineWidth = 2;
+          const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
+          const bandY = p(0,0,h-20).y;
+          ctx.beginPath(); ctx.moveTo(coords.topL.x, bandY); ctx.lineTo(coords.topB.x, bandY); ctx.lineTo(coords.topR.x, bandY); ctx.stroke();
+          ctx.translate(-ax, -ay);
+      }
+  }
+
+  private renderGate(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number, visuals: ThemeVisuals) {
+      this.renderPrism(ctx, w, d, h, ax, ay, e.color, visuals);
+      
+      ctx.translate(ax, ay);
+      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
+      const topB = p(w/2, d/2, h);
+      const baseB = p(w/2, d/2, 0);
+      
+      // Status Light
       ctx.beginPath();
-      ctx.moveTo(start.x, start.y);
-      
-      const midX = (start.x + end.x) / 2;
-      const midY = (start.y + end.y) / 2;
-      const sag = 50; // Droop amount
-      
-      ctx.quadraticCurveTo(midX, midY + sag, end.x, end.y);
+      ctx.arc(topB.x, topB.y + 20, 6, 0, Math.PI * 2);
+      ctx.fillStyle = e.locked ? '#ef4444' : '#22c55e';
+      ctx.fill();
+      ctx.shadowColor = e.locked ? '#ef4444' : '#22c55e';
+      ctx.shadowBlur = 15;
       ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // Hazard Stripes
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(baseB.x - 15, baseB.y - 15); ctx.lineTo(baseB.x + 15, baseB.y + 15);
+      ctx.moveTo(baseB.x - 5, baseB.y - 15); ctx.lineTo(baseB.x + 25, baseB.y + 15);
+      ctx.stroke();
+      ctx.translate(-ax, -ay);
+  }
+
+  private renderMonolith(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number, visuals: ThemeVisuals) {
+      ctx.translate(ax, ay);
+      const halfW = w / 2; const halfD = d / 2;
+      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
+
+      const topT = p(-halfW, -halfD, h); const topR = p(halfW, -halfD, h); const topB = p(halfW, halfD, h); const topL = p(-halfW, halfD, h);
+      const baseB = p(halfW, halfD, 0); const baseR = p(halfW, -halfD, 0); const baseL = p(-halfW, halfD, 0);
+
+      const grad = ctx.createLinearGradient(0, topT.y, 0, baseB.y);
+      grad.addColorStop(0, '#3b82f6'); grad.addColorStop(1, '#1e1b4b');
+
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(baseR.x, baseR.y); ctx.lineTo(topR.x, topR.y); ctx.lineTo(topB.x, topB.y); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(baseL.x, baseL.y); ctx.lineTo(topL.x, topL.y); ctx.lineTo(topB.x, topB.y); ctx.fill();
+      
+      // Glowing Rune
+      ctx.shadowBlur = 30; ctx.shadowColor = '#06b6d4';
+      ctx.strokeStyle = '#cffafe'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y - 50); ctx.lineTo(topB.x, topB.y + 50); ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.translate(-ax, -ay);
+  }
+
+  private renderHoloTable(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number) {
+      this.renderPrism(ctx, 80, 80, 40, ax, ay, '#18181b', this.getThemeVisuals('HIGH_TECH'));
+      ctx.translate(ax, ay);
+      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
+      const center = p(0, 0, 40);
+      
+      // Floating Hologram
+      ctx.save();
+      ctx.translate(center.x, center.y - 20);
+      ctx.globalCompositeOperation = 'screen';
+      ctx.strokeStyle = e.color || '#06b6d4';
+      ctx.lineWidth = 1;
+      
+      ctx.beginPath();
+      ctx.moveTo(0, -15); ctx.lineTo(15, -5); ctx.lineTo(0, 5); ctx.lineTo(-15, -5); ctx.closePath();
+      ctx.stroke();
+      
+      ctx.fillStyle = e.color || '#06b6d4';
+      ctx.globalAlpha = 0.3;
+      ctx.beginPath();
+      ctx.moveTo(-20, 0); ctx.lineTo(0, 30); ctx.lineTo(20, 0);
+      ctx.fill();
+      
+      ctx.restore();
+      ctx.translate(-ax, -ay);
+  }
+
+  private renderVendingMachine(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number) {
+      this.renderPrism(ctx, 50, 50, 100, ax, ay, '#27272a', this.getThemeVisuals('INDUSTRIAL'));
+      ctx.translate(ax, ay);
+      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
+      const frontCenter = p(25, 25, 60); 
+      
+      ctx.save();
+      ctx.translate(frontCenter.x, frontCenter.y);
+      ctx.rotate(-0.5);
+      ctx.fillStyle = '#06b6d4'; ctx.shadowColor = '#06b6d4'; ctx.shadowBlur = 15;
+      ctx.fillRect(-10, -20, 20, 30);
+      ctx.restore();
+      ctx.translate(-ax, -ay);
+  }
+
+  private renderBench(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number) {
+      this.renderPrism(ctx, 80, 30, 20, ax, ay, '#3f3f46', this.getThemeVisuals('INDUSTRIAL'));
   }
 
   private calculateIsoBounds(width: number, length: number, height: number) {
-      const hw = width / 2;
-      const hl = length / 2;
+      const hw = width / 2; const hl = length / 2;
       const corners = [
           {x: -hw, y: -hl, z: 0}, {x: hw, y: -hl, z: 0}, {x: hw, y: hl, z: 0}, {x: -hw, y: hl, z: 0},
           {x: -hw, y: -hl, z: height}, {x: hw, y: -hl, z: height}, {x: hw, y: hl, z: height}, {x: -hw, y: hl, z: height}
@@ -143,165 +375,56 @@ export class StructureRendererService {
       return { minX, maxX, minY, maxY };
   }
 
-  // --- STRUCTURE RENDERERS ---
+  // --- DYNAMIC DRAWING (No Cache) ---
 
-  private renderStructureToBuffer(ctx: any, e: Entity, w: number, d: number, h: number, anchorX: number, anchorY: number) {
-      ctx.translate(anchorX, anchorY);
-      const halfW = w / 2; const halfD = d / 2;
-      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
-
-      const baseL = p(-halfW, halfD, 0); const baseR = p(halfW, -halfD, 0); const baseB = p(halfW, halfD, 0); 
-      const topL = p(-halfW, halfD, h); const topR = p(halfW, -halfD, h); const topB = p(halfW, halfD, h); const topT = p(-halfW, -halfD, h);
-
-      ctx.fillStyle = this.adjustColor(e.color, -30); 
-      ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(baseR.x, baseR.y); ctx.lineTo(topR.x, topR.y); ctx.lineTo(topB.x, topB.y); ctx.fill();
-      
-      ctx.fillStyle = this.adjustColor(e.color, -10); 
-      ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(baseL.x, baseL.y); ctx.lineTo(topL.x, topL.y); ctx.lineTo(topB.x, topB.y); ctx.fill();
-      
-      ctx.fillStyle = e.color; 
-      ctx.beginPath(); ctx.moveTo(topT.x, topT.y); ctx.lineTo(topR.x, topR.y); ctx.lineTo(topB.x, topB.y); ctx.lineTo(topL.x, topL.y); ctx.fill();
-      
-      ctx.strokeStyle = this.adjustColor(e.color, 40); ctx.lineWidth = 1; 
-      ctx.beginPath(); ctx.moveTo(topL.x, topL.y); ctx.lineTo(topB.x, topB.y); ctx.lineTo(topR.x, topR.y); ctx.stroke();
-
-      if (e.subType === 'PILLAR') {
-          ctx.fillStyle = this.adjustColor(e.color, 20);
-          ctx.beginPath(); ctx.arc(topB.x, topB.y, 4, 0, Math.PI*2); ctx.fill();
-      } else {
-          this.applyProceduralDecay(ctx, e, w, d, h, topL, topR, topB);
-      }
-  }
-
-  private renderGateToBuffer(ctx: any, e: Entity, w: number, d: number, h: number, anchorX: number, anchorY: number) {
-      this.renderStructureToBuffer(ctx, e, w, d, h, anchorX, anchorY);
-      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
-      const topB = p(w/2, d/2, h);
-      const baseB = p(w/2, d/2, 0);
-      
-      ctx.beginPath();
-      ctx.arc(topB.x, topB.y + 20, 5, 0, Math.PI * 2);
-      ctx.fillStyle = e.locked ? '#ef4444' : '#22c55e';
-      ctx.fill();
-      ctx.shadowColor = e.locked ? '#ef4444' : '#22c55e';
-      ctx.shadowBlur = 10;
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-
-      ctx.strokeStyle = '#facc15';
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.moveTo(baseB.x - 10, baseB.y - 10);
-      ctx.lineTo(baseB.x + 10, baseB.y + 10);
-      ctx.stroke();
-  }
-
-  private renderMonolithToBuffer(ctx: any, e: Entity, w: number, d: number, h: number, anchorX: number, anchorY: number) {
-      ctx.translate(anchorX, anchorY);
-      const halfW = w / 2; const halfD = d / 2;
-      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
-
-      const topT = p(-halfW, -halfD, h); const topR = p(halfW, -halfD, h); const topB = p(halfW, halfD, h); const topL = p(-halfW, halfD, h);
-      const baseB = p(halfW, halfD, 0); const baseR = p(halfW, -halfD, 0); const baseL = p(-halfW, halfD, 0);
-
-      const grad = ctx.createLinearGradient(0, topT.y, 0, baseB.y);
-      grad.addColorStop(0, '#3b82f6');
-      grad.addColorStop(1, '#1e1b4b');
-
-      ctx.fillStyle = grad;
-      ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(baseR.x, baseR.y); ctx.lineTo(topR.x, topR.y); ctx.lineTo(topB.x, topB.y); ctx.fill();
-      ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(baseL.x, baseL.y); ctx.lineTo(topL.x, topL.y); ctx.lineTo(topB.x, topB.y); ctx.fill();
-      
-      ctx.shadowBlur = 30; ctx.shadowColor = '#06b6d4';
-      ctx.fillStyle = '#cffafe';
-      ctx.beginPath(); ctx.moveTo(topT.x, topT.y); ctx.lineTo(topR.x, topR.y); ctx.lineTo(topB.x, topB.y); ctx.lineTo(topL.x, topL.y); ctx.fill();
-      ctx.shadowBlur = 0;
-
-      ctx.strokeStyle = 'rgba(6, 182, 212, 0.5)';
-      ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(topB.x, topB.y); ctx.stroke();
-  }
-
-  private renderHoloTableToBuffer(ctx: any, e: Entity, w: number, d: number, h: number, anchorX: number, anchorY: number) {
-      // Base Table
-      this.renderStructureToBuffer(ctx, { ...e, subType: 'GENERIC', height: 40, color: '#18181b' }, 80, 80, 40, anchorX, anchorY);
-      
-      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
-      const center = p(0, 0, 40);
-      
-      // Projection
-      const time = Date.now() * 0.002;
-      const float = Math.sin(time) * 5;
-      
+  drawFloorDecoration(ctx: CanvasRenderingContext2D, e: Entity) {
+      const pos = IsoUtils.toIso(e.x, e.y, e.z || 0);
       ctx.save();
-      ctx.translate(center.x, center.y + float - 30);
-      ctx.globalCompositeOperation = 'screen';
-      ctx.strokeStyle = e.color || '#06b6d4';
-      ctx.lineWidth = 1;
+      ctx.translate(pos.x, pos.y);
       
-      // Wireframe Map
-      ctx.beginPath();
-      ctx.moveTo(0, -20); ctx.lineTo(20, -10); ctx.lineTo(0, 0); ctx.lineTo(-20, -10);
-      ctx.closePath();
-      ctx.stroke();
-      
-      ctx.beginPath();
-      ctx.moveTo(0, 0); ctx.lineTo(0, 20); // Stem
-      ctx.stroke();
-      
-      // Scanlines
-      ctx.fillStyle = e.color || '#06b6d4';
-      ctx.globalAlpha = 0.2;
-      ctx.beginPath();
-      ctx.moveTo(-30, -30); ctx.lineTo(0, 0); ctx.lineTo(30, -30);
-      ctx.lineTo(0, -60);
-      ctx.fill();
-      
+      if (e.subType === 'RUG') {
+          const w = e.width || 400; const h = e.height || 400;
+          const p1 = IsoUtils.toIso(-w/2, -h/2, 0); const p2 = IsoUtils.toIso(w/2, -h/2, 0);
+          const p3 = IsoUtils.toIso(w/2, h/2, 0); const p4 = IsoUtils.toIso(-w/2, h/2, 0);
+          
+          ctx.fillStyle = e.color || '#333';
+          ctx.globalAlpha = 0.5;
+          ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.fill();
+          
+          ctx.lineWidth = 2; ctx.strokeStyle = this.adjustColor(e.color, 40); ctx.stroke();
+          
+          if (this.patterns.noise) {
+              ctx.globalCompositeOperation = 'overlay'; ctx.fillStyle = this.patterns.noise; ctx.fill();
+          }
+          ctx.globalAlpha = 1.0;
+      } else if (e.subType === 'FLOOR_CRACK') {
+          ctx.scale(1, 0.5); ctx.strokeStyle = '#18181b'; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(5, 5); ctx.lineTo(15, -5); ctx.lineTo(25, 0); ctx.stroke();
+      } else if (e.subType === 'GRAFFITI') {
+          ctx.scale(1, 0.5); ctx.font = 'bold 20px monospace'; ctx.fillStyle = e.color || '#ef4444';
+          ctx.globalAlpha = 0.8; ctx.fillText('⚠', 0, 0);
+      } else if (e.subType === 'TRASH') {
+          ctx.scale(1, 0.5); ctx.fillStyle = '#52525b';
+          ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI*2); ctx.fill();
+          ctx.fillStyle = '#3f3f46';
+          ctx.beginPath(); ctx.arc(5, 2, 6, 0, Math.PI*2); ctx.fill();
+      }
       ctx.restore();
   }
 
-  private renderVendingMachineToBuffer(ctx: any, e: Entity, w: number, d: number, h: number, anchorX: number, anchorY: number) {
-      // Box chassis
-      this.renderStructureToBuffer(ctx, { ...e, subType: 'GENERIC', height: 100, color: '#27272a' }, 50, 50, 100, anchorX, anchorY);
-      
-      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
-      const frontCenter = p(25, 25, 60); // Front face approx
-      
-      // Screen Glow
-      ctx.save();
-      ctx.translate(frontCenter.x, frontCenter.y);
-      ctx.rotate(-0.5); // Skew for iso look approx
-      
-      ctx.fillStyle = '#06b6d4';
-      ctx.shadowColor = '#06b6d4';
-      ctx.shadowBlur = 15;
-      ctx.fillRect(-10, -20, 20, 30);
-      
-      ctx.fillStyle = '#fff';
-      ctx.shadowBlur = 0;
-      ctx.font = '8px monospace';
-      ctx.fillText('OPEN', -10, -5);
-      
-      ctx.restore();
+  private drawCable(ctx: CanvasRenderingContext2D, e: Entity) {
+      if (!e.targetX || !e.targetY) return;
+      const start = IsoUtils.toIso(e.x, e.y, e.z);
+      const endZ = 120;
+      const end = IsoUtils.toIso(e.targetX, e.targetY, endZ);
+
+      ctx.strokeStyle = '#18181b'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(start.x, start.y);
+      const midX = (start.x + end.x) / 2; const midY = (start.y + end.y) / 2;
+      ctx.quadraticCurveTo(midX, midY + 50, end.x, end.y); ctx.stroke();
   }
 
-  private renderBenchToBuffer(ctx: any, e: Entity, w: number, d: number, h: number, anchorX: number, anchorY: number) {
-      // Base
-      this.renderStructureToBuffer(ctx, { ...e, subType: 'GENERIC', height: 20, color: '#3f3f46' }, 80, 30, 20, anchorX, anchorY);
-  }
-
-  private applyProceduralDecay(ctx: any, e: Entity, w: number, d: number, h: number, tl: any, tr: any, tb: any) {
-      const seed = e.id;
-      const noise = (n: number) => Math.sin(seed * n) * 0.5 + 0.5;
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)'; ctx.lineWidth = 1;
-      const lines = Math.floor(noise(1) * 5) + 2;
-      for (let i = 0; i < lines; i++) {
-          const yOff = noise(i + 2) * h;
-          ctx.beginPath(); ctx.moveTo(tl.x, tl.y + yOff); ctx.lineTo(tb.x, tb.y + yOff); ctx.lineTo(tr.x, tr.y + yOff); ctx.stroke();
-      }
-  }
-
-  private drawEnergyBarrier(ctx: CanvasRenderingContext2D, e: Entity) {
+  drawEnergyBarrier(ctx: CanvasRenderingContext2D, e: Entity) {
       const h = 80; const w = e.width || 100;
       const pos = IsoUtils.toIso(e.x, e.y, 0);
       ctx.save(); ctx.translate(pos.x, pos.y);

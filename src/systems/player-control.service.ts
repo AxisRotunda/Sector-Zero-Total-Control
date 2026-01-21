@@ -119,12 +119,14 @@ export class PlayerControlService {
              }
         }
 
+        // Chaining Logic: Allow input consumption during recovery or if not attacking
         const canInterrupt = player.state === 'ATTACK' && player.animPhase === 'recovery';
         
         if (player.state !== 'ATTACK' || canInterrupt) {
             const cmd = this.inputBuffer.peekCommand();
             if (cmd) {
-                if (player.state === 'ATTACK' && cmd.priority < 3) return;
+                // If attacking, only accept high priority or primary (for combos)
+                if (player.state === 'ATTACK' && cmd.priority < 1) return;
 
                 this.inputBuffer.consumeCommand();
                 
@@ -160,9 +162,13 @@ export class PlayerControlService {
     }
 
     private updatePlayerAnimation(player: Entity) {
+        // Faster animations for later combo steps
+        const comboSpeedMult = player.comboIndex === 2 ? 0.7 : (player.comboIndex === 1 ? 0.85 : 1.0);
+        
         const IDLE_FRAME_DURATION = 12; const IDLE_FRAMES = 4;
         const MOVE_FRAME_DURATION = 6; const MOVE_FRAMES = 6;
-        const ATTACK_FRAME_DURATION = 3; const ATTACK_STARTUP_FRAMES = 2; const ATTACK_ACTIVE_FRAMES = 3; const ATTACK_TOTAL_FRAMES = 9;
+        const ATTACK_FRAME_DURATION = Math.max(1, Math.floor(3 * comboSpeedMult)); 
+        const ATTACK_STARTUP_FRAMES = 2; const ATTACK_ACTIVE_FRAMES = 3; const ATTACK_TOTAL_FRAMES = 9;
         
         player.animFrameTimer++;
         switch (player.state) {
@@ -186,7 +192,13 @@ export class PlayerControlService {
                     } else player.animPhase = 'recovery';
                     
                     if (player.animFrame >= ATTACK_TOTAL_FRAMES) { 
-                        player.state = 'IDLE'; player.animFrame = 0; player.animPhase = undefined; 
+                        player.state = 'IDLE'; 
+                        player.animFrame = 0; 
+                        player.animPhase = undefined;
+                        // Don't reset comboIndex here immediately to allow slight grace, but usually handled by AbilityService logic
+                        // Actually, if we finish animation without chaining, combo drops.
+                        player.comboIndex = 0;
+                        this.playerService.abilities.currentCombo.set(0);
                     }
                 } 
                 break;
@@ -195,22 +207,43 @@ export class PlayerControlService {
 
     private spawnPlayerPrimaryHitbox(player: Entity) {
         const stats = this.playerService.playerStats();
-        const reach = BALANCE.ABILITIES.PRIMARY_REACH_BASE + (stats.damage * BALANCE.ABILITIES.PRIMARY_REACH_DMG_SCALE);
-        
+        let reach = BALANCE.ABILITIES.PRIMARY_REACH_BASE + (stats.damage * BALANCE.ABILITIES.PRIMARY_REACH_DMG_SCALE);
+        let dmgMult = 1.0;
+        let knockback = 5;
+        let color = '#f97316';
+        let stun = 0;
+
+        // Combo scaling
+        const combo = player.comboIndex || 0;
+        if (combo === 1) {
+            reach *= 1.2;
+            dmgMult = 1.2;
+            knockback = 10;
+            color = '#fb923c';
+        } else if (combo === 2) {
+            reach *= 1.5;
+            dmgMult = 2.0;
+            knockback = 25;
+            stun = 15;
+            color = '#ea580c';
+        }
+
         const hitbox = this.entityPool.acquire('HITBOX');
         hitbox.source = 'PLAYER'; 
         hitbox.x = player.x + Math.cos(player.angle) * 30; 
         hitbox.y = player.y + Math.sin(player.angle) * 30; 
         hitbox.z = 10;
-        hitbox.vx = Math.cos(player.angle) * 2; 
-        hitbox.vy = Math.sin(player.angle) * 2;
+        hitbox.vx = Math.cos(player.angle) * (2 + combo); 
+        hitbox.vy = Math.sin(player.angle) * (2 + combo);
         hitbox.angle = player.angle; 
         hitbox.radius = reach; 
-        hitbox.hp = stats.damage; 
-        hitbox.maxHp = stats.damage; 
-        hitbox.color = '#f97316'; 
+        hitbox.hp = stats.damage * dmgMult; 
+        hitbox.maxHp = hitbox.hp; 
+        hitbox.color = color; 
         hitbox.state = 'ATTACK'; 
         hitbox.timer = 8;
+        hitbox.knockbackForce = knockback;
+        hitbox.status.stun = stun;
         
         this.world.entities.push(hitbox);
         this.haptic.impactMedium(); 

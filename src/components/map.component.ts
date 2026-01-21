@@ -52,9 +52,9 @@ import { Entity } from '../models/game.models';
                  <div class="text-[9px] font-bold text-zinc-500 uppercase mb-1 tracking-widest border-b border-zinc-800 pb-1">Legend</div>
                  <div class="flex flex-col gap-1 text-[9px] font-mono">
                      <div class="flex items-center gap-2"><div class="w-2 h-2 rounded-full bg-[#06b6d4]"></div><span>Player</span></div>
+                     <div class="flex items-center gap-2"><div class="w-2 h-2 rounded-full bg-[#fbbf24] animate-pulse"></div><span>Objective</span></div>
                      <div class="flex items-center gap-2"><div class="w-2 h-2 rounded-full bg-[#ef4444]"></div><span>Hostile</span></div>
                      <div class="flex items-center gap-2"><div class="w-2 h-2 rounded-full bg-[#eab308]"></div><span>Trader</span></div>
-                     <div class="flex items-center gap-2"><div class="w-2 h-2 rounded-full bg-[#ef4444] border border-white"></div><span>Medic</span></div>
                      <div class="flex items-center gap-2"><div class="w-2 h-2 rounded-full bg-[#22c55e]"></div><span>Exit</span></div>
                  </div>
              </div>
@@ -135,11 +135,22 @@ export class MapComponent implements AfterViewInit, OnDestroy {
           const wy = this.viewY + (my - cy) / this.viewZoom;
           
           let found = null;
-          // Check markers
-          for (const m of this.mapService.markers()) {
-              if (Math.hypot(m.x - wx, m.y - wy) < 50) {
-                  found = m.label || "Marker";
+          
+          // Check Objective Markers first
+          for (const m of this.mapService.objectiveMarkers()) {
+              if (Math.hypot(m.x - wx, m.y - wy) < 60) {
+                  found = m.label;
                   break;
+              }
+          }
+
+          // Check User markers
+          if (!found) {
+              for (const m of this.mapService.markers()) {
+                  if (Math.hypot(m.x - wx, m.y - wy) < 50) {
+                      found = m.label || "Marker";
+                      break;
+                  }
               }
           }
           // Check entities
@@ -356,7 +367,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
               this.ctx.save();
               this.ctx.translate(e.x, e.y);
               this.ctx.scale(1.5/zoom, 1.5/zoom); 
-              this.ctx.font = `bold 14px monospace`; // Fixed size
+              this.ctx.font = `bold 14px monospace`; 
               this.ctx.fillText(e.exitType === 'DOWN' ? 'EXIT' : 'UP', 0, 0);
               this.ctx.restore();
           }
@@ -399,25 +410,16 @@ export class MapComponent implements AfterViewInit, OnDestroy {
           this.ctx.globalAlpha = 1.0;
       }
 
+      // Draw User Markers
       if (settings.showMarkers) {
           for (const m of this.mapService.markers()) {
-              this.ctx.fillStyle = m.color;
-              this.ctx.beginPath();
-              this.ctx.moveTo(m.x, m.y);
-              this.ctx.lineTo(m.x - 10/zoom, m.y - 25/zoom);
-              this.ctx.lineTo(m.x + 10/zoom, m.y - 25/zoom);
-              this.ctx.fill();
-              
-              if (m.label) {
-                  this.ctx.fillStyle = '#fff';
-                  this.ctx.save();
-                  this.ctx.translate(m.x, m.y - 30/zoom);
-                  this.ctx.scale(1/zoom, 1/zoom);
-                  this.ctx.font = `12px monospace`;
-                  this.ctx.fillText(m.label, 0, 0);
-                  this.ctx.restore();
-              }
+              this.drawMarker(m, zoom);
           }
+      }
+      
+      // Draw Objective Markers (Always visible, overrides settings)
+      for (const m of this.mapService.objectiveMarkers()) {
+          this.drawObjectiveMarker(m, zoom);
       }
 
       if (settings.showEnemyRadar) {
@@ -471,5 +473,62 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       if (this.playerCoords() !== coords) {
           this.playerCoords.set(coords);
       }
+  }
+
+  private drawMarker(m: any, zoom: number) {
+      if (!this.ctx) return;
+      this.ctx.fillStyle = m.color;
+      this.ctx.beginPath();
+      this.ctx.moveTo(m.x, m.y);
+      this.ctx.lineTo(m.x - 10/zoom, m.y - 25/zoom);
+      this.ctx.lineTo(m.x + 10/zoom, m.y - 25/zoom);
+      this.ctx.fill();
+      
+      if (m.label) {
+          this.ctx.fillStyle = '#fff';
+          this.ctx.save();
+          this.ctx.translate(m.x, m.y - 30/zoom);
+          this.ctx.scale(1/zoom, 1/zoom);
+          this.ctx.font = `12px monospace`;
+          this.ctx.fillText(m.label, 0, 0);
+          this.ctx.restore();
+      }
+  }
+
+  private drawObjectiveMarker(m: any, zoom: number) {
+      if (!this.ctx) return;
+      // Pulse effect
+      const t = Date.now() / 500;
+      const r = (15 + Math.sin(t) * 5) / zoom;
+      
+      this.ctx.save();
+      this.ctx.strokeStyle = m.color;
+      this.ctx.lineWidth = 3 / zoom;
+      this.ctx.beginPath();
+      this.ctx.arc(m.x, m.y, r, 0, Math.PI * 2);
+      this.ctx.stroke();
+      
+      this.ctx.fillStyle = m.color;
+      this.ctx.beginPath();
+      this.ctx.arc(m.x, m.y, 8 / zoom, 0, Math.PI * 2);
+      this.ctx.fill();
+      
+      // Draw Label Background
+      if (m.label) {
+          this.ctx.font = `bold 12px monospace`;
+          this.ctx.save();
+          this.ctx.translate(m.x, m.y - 30/zoom);
+          this.ctx.scale(1/zoom, 1/zoom);
+          
+          const textWidth = this.ctx.measureText(m.label).width;
+          this.ctx.fillStyle = 'rgba(0,0,0,0.7)';
+          this.ctx.fillRect(-textWidth/2 - 4, -10, textWidth + 8, 14);
+          
+          this.ctx.fillStyle = '#fff';
+          this.ctx.textAlign = 'center';
+          this.ctx.fillText(m.label, 0, 0);
+          this.ctx.restore();
+      }
+      this.ctx.restore();
   }
 }

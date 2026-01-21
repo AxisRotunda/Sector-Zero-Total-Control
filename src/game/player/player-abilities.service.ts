@@ -1,3 +1,4 @@
+
 import { Injectable, signal, inject } from '@angular/core';
 import * as BALANCE from '../../config/balance.config';
 import { PlayerStatsService } from './player-stats.service';
@@ -22,6 +23,10 @@ export class PlayerAbilitiesService {
   cooldowns = signal({ primary: 0, secondary: 0, dash: 0, utility: 0 });
   maxCooldowns = signal({ primary: BALANCE.COOLDOWNS.PRIMARY, secondary: BALANCE.COOLDOWNS.SECONDARY, dash: BALANCE.COOLDOWNS.DASH, utility: BALANCE.COOLDOWNS.UTILITY });
 
+  // Combo State
+  currentCombo = signal(0);
+  private readonly MAX_COMBO = 3;
+
   updateCooldowns() {
     this.cooldowns.update(c => ({
         primary: Math.max(0, c.primary - 1), secondary: Math.max(0, c.secondary - 1), dash: Math.max(0, c.dash - 1), utility: Math.max(0, c.utility - 1)
@@ -35,14 +40,38 @@ export class PlayerAbilitiesService {
     const cds = this.cooldowns();
 
     if (skill === 'PRIMARY') {
-        if (cds.primary > 0 || player.state === 'ATTACK') return;
+        const canCombo = player.state === 'ATTACK' && player.animPhase === 'recovery';
+        
+        if (cds.primary > 0 && !canCombo) return;
+        
+        let newComboIndex = 0;
+        if (canCombo) {
+            newComboIndex = (this.currentCombo() + 1) % this.MAX_COMBO;
+        }
+        this.currentCombo.set(newComboIndex);
+        player.comboIndex = newComboIndex;
+
         const baseCdr = Math.max(0, Math.min(BALANCE.COOLDOWNS.CDR_CAP, stats.cdr / 100));
-        const cooldown = Math.max(15, BALANCE.COOLDOWNS.PRIMARY * (1 - baseCdr)); 
-        this.maxCooldowns.update(c => ({...c, primary: cooldown})); this.cooldowns.update(c => ({...c, primary: cooldown}));
+        // Reduce cooldown for combo chain hits to make it fluid
+        const cdTime = canCombo ? 15 : BALANCE.COOLDOWNS.PRIMARY;
+        const cooldown = Math.max(10, cdTime * (1 - baseCdr)); 
+        
+        this.maxCooldowns.update(c => ({...c, primary: cooldown})); 
+        this.cooldowns.update(c => ({...c, primary: cooldown}));
+        
         const attackDir = targetAngle ?? player.angle;
-        player.angle = attackDir; player.state = 'ATTACK'; player.animFrame = 0; player.animFrameTimer = 0; player.animPhase = 'startup';
-        this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: { intensity: 2, decay: 0.9, x: Math.cos(attackDir), y: Math.sin(attackDir) } });
-        this.sound.play('SHOOT'); 
+        player.angle = attackDir; 
+        player.state = 'ATTACK'; 
+        player.animFrame = 0; 
+        player.animFrameTimer = 0; 
+        player.animPhase = 'startup';
+        
+        // Vary shake intensity by combo step
+        const shakeIntensity = 2 + newComboIndex;
+        this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: { intensity: shakeIntensity, decay: 0.9, x: Math.cos(attackDir), y: Math.sin(attackDir) } });
+        
+        // Pitch shift sound slightly for combos
+        this.sound.play('SHOOT'); // Todo: Sound pitch variance support
     }
     if (skill === 'SECONDARY') {
         const cost = 50;
@@ -59,6 +88,10 @@ export class PlayerAbilitiesService {
     if (skill === 'DASH') {
         if (cds.dash > 0) return;
         this.cooldowns.update(c => ({...c, dash: 40}));
+        // Reset combo on dash
+        this.currentCombo.set(0); 
+        player.comboIndex = 0;
+        
         const dashDir = targetAngle ?? player.angle;
         player.vx += Math.cos(dashDir) * 20; player.vy += Math.sin(dashDir) * 20;
         this.particleService.addParticles({ x: player.x, y: player.y, z: 0, color: '#71717a', count: 10, speed: 2, life: 0.5, size: 2, type: 'circle' });
@@ -118,5 +151,5 @@ export class PlayerAbilitiesService {
         this.sound.play('EXPLOSION');
     }
   }
-  reset() { this.cooldowns.set({ primary: 0, secondary: 0, dash: 0, utility: 0 }); }
+  reset() { this.cooldowns.set({ primary: 0, secondary: 0, dash: 0, utility: 0 }); this.currentCombo.set(0); }
 }

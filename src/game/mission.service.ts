@@ -1,15 +1,29 @@
-import { Injectable, signal, computed, inject } from '@angular/core';
+
+import { Injectable, signal, computed, inject, effect } from '@angular/core';
 import { NarrativeService } from './narrative.service';
 import { EventBusService } from '../core/events/event-bus.service';
 import { GameEvents } from '../core/events/game-events';
+import { MapService } from '../services/map.service';
+import { PlayerService } from './player/player.service';
 
 export type MissionType = 'KILL' | 'COLLECT' | 'INTERACT' | 'TALK' | 'REACH_EXIT';
 export type MissionCategory = 'MAIN' | 'SIDE' | 'RADIANT';
 export type MissionState = 'ACTIVE' | 'COMPLETE' | 'CLAIMED';
 
+export interface MissionObjective {
+    type: MissionType; 
+    targetId?: string; 
+    targetAmount: number; 
+    currentAmount: number; 
+    description: string;
+    // Spatial data for map markers
+    targetZoneId?: string;
+    targetLocation?: { x: number, y: number };
+}
+
 export interface Mission {
     id: string; title: string; description: string; category: MissionCategory;
-    objectives: { type: MissionType; targetId?: string; targetAmount: number; currentAmount: number; description: string; }[];
+    objectives: MissionObjective[];
     rewardXp: number; rewardCredits: number; factionRep?: { factionId: string, amount: number };
     state: MissionState; prereqMissionId?: string; unlocksFlag?: string;
 }
@@ -18,6 +32,8 @@ export interface Mission {
 export class MissionService {
   private narrative = inject(NarrativeService);
   private eventBus = inject(EventBusService);
+  private mapService = inject(MapService);
+  private player = inject(PlayerService);
 
   activeMissions = signal<Mission[]>([]);
   completedMissionIds = signal<Set<string>>(new Set());
@@ -37,7 +53,14 @@ export class MissionService {
       return `[${m.category}] ${m.title}: ${obj.description} (${obj.currentAmount}/${obj.targetAmount})`;
   });
 
-  constructor() { if (this.activeMissions().length === 0 && this.completedMissionIds().size === 0) this.startQuest('MQ_01_ARRIVAL'); }
+  constructor() { 
+      if (this.activeMissions().length === 0 && this.completedMissionIds().size === 0) this.startQuest('MQ_01_ARRIVAL'); 
+      
+      // Update markers whenever missions change or player moves floors
+      effect(() => {
+          this.updateMapMarkers();
+      });
+  }
 
   cycleTracked() {
       if (this.activeMissions().length > 1) {
@@ -45,9 +68,40 @@ export class MissionService {
       }
   }
 
+  private updateMapMarkers() {
+      const currentZone = this.player.currentSectorId();
+      
+      // Collect all active objectives in this zone
+      const markers: any[] = [];
+      
+      this.activeMissions().forEach(m => {
+          if (m.state !== 'ACTIVE') return;
+          m.objectives.forEach(obj => {
+              if (obj.currentAmount < obj.targetAmount && obj.targetZoneId === currentZone && obj.targetLocation) {
+                  markers.push({
+                      x: obj.targetLocation.x,
+                      y: obj.targetLocation.y,
+                      color: m.category === 'MAIN' ? '#fbbf24' : '#06b6d4',
+                      label: m.category === 'MAIN' ? '★ ' + obj.description : '● ' + obj.description
+                  });
+              }
+          });
+      });
+      
+      this.mapService.setObjectiveMarkers(markers);
+  }
+
   private questDb: Record<string, Omit<Mission, 'state'>> = {
-      'MQ_01_ARRIVAL': { id: 'MQ_01_ARRIVAL', title: 'The Arrival', description: 'Contact surface handler.', category: 'MAIN', objectives: [{ type: 'TALK', targetId: 'HANDLER', targetAmount: 1, currentAmount: 0, description: 'Report to Mission Handler' }], rewardXp: 100, rewardCredits: 50, unlocksFlag: 'ACT_I_STARTED' },
-      'MQ_02_DESCEND': { id: 'MQ_02_DESCEND', title: 'Into the Depths', description: 'The gate is locked. Prove your worth or find a clearance key.', category: 'MAIN', objectives: [{ type: 'INTERACT', targetId: 'GATE', targetAmount: 1, currentAmount: 0, description: 'Unlock Sector Gate' }], rewardXp: 200, rewardCredits: 100, prereqMissionId: 'MQ_01_ARRIVAL' }
+      'MQ_01_ARRIVAL': { 
+          id: 'MQ_01_ARRIVAL', title: 'The Arrival', description: 'Contact surface handler.', category: 'MAIN', 
+          objectives: [{ type: 'TALK', targetId: 'HANDLER', targetAmount: 1, currentAmount: 0, description: 'Report to Mission Handler', targetZoneId: 'HUB', targetLocation: {x: 0, y: -400} }], 
+          rewardXp: 100, rewardCredits: 50, unlocksFlag: 'ACT_I_STARTED' 
+      },
+      'MQ_02_DESCEND': { 
+          id: 'MQ_02_DESCEND', title: 'Into the Depths', description: 'The gate is locked. Prove your worth or find a clearance key.', category: 'MAIN', 
+          objectives: [{ type: 'INTERACT', targetId: 'GATE', targetAmount: 1, currentAmount: 0, description: 'Unlock Sector Gate', targetZoneId: 'HUB', targetLocation: {x: 0, y: 1380} }], 
+          rewardXp: 200, rewardCredits: 100, prereqMissionId: 'MQ_01_ARRIVAL' 
+      }
   };
 
   startQuest(id: string) {
@@ -66,7 +120,7 @@ export class MissionService {
           title: 'Sector Patrol',
           description: 'Clear hostiles in the area.',
           category: 'RADIANT',
-          objectives: [{ type: 'KILL', targetId: 'ENEMY', targetAmount: killAmount, currentAmount: 0, description: 'Neutralize Hostiles' }],
+          objectives: [{ type: 'KILL', targetId: 'ENEMY', targetAmount: killAmount, currentAmount: 0, description: 'Neutralize Hostiles' }], // Radiant typically doesn't have fixed coords
           rewardXp: 100 * (depth + 1),
           rewardCredits: 50 * (depth + 1),
           state: 'ACTIVE'

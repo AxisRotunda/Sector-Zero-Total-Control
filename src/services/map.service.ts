@@ -1,3 +1,4 @@
+
 import { Injectable, signal } from '@angular/core';
 import { SectorId } from '../models/game.models';
 
@@ -13,7 +14,7 @@ export interface MapSettings {
 }
 
 export interface MapMarker {
-    x: number; y: number; color: string; label?: string;
+    x: number; y: number; color: string; label?: string; type?: 'USER' | 'OBJECTIVE';
 }
 
 @Injectable({
@@ -30,7 +31,13 @@ export class MapService {
   private currentSectorId: SectorId = 'HUB';
   
   private readonly chunkSize = 600;
+  
+  // User placed markers
   markers = signal<MapMarker[]>([]);
+  
+  // System generated markers (Missions)
+  objectiveMarkers = signal<MapMarker[]>([]);
+
   isFullMapOpen = signal(false);
   isSettingsOpen = signal(false);
 
@@ -39,8 +46,9 @@ export class MapService {
       if (!this.visitedSectors.has(id)) {
           this.visitedSectors.set(id, new Set());
       }
-      // Reset markers for new sector or load them if we persisted them (we don't persist markers per sector yet)
+      // Reset markers for new sector
       this.markers.set([]); 
+      this.objectiveMarkers.set([]);
   }
 
   updateDiscovery(x: number, y: number) {
@@ -65,16 +73,21 @@ export class MapService {
   }
 
   addMarker(x: number, y: number, color: string = '#facc15', label?: string) {
-      this.markers.update(m => [...m, {x, y, color, label}]);
+      this.markers.update(m => [...m, {x, y, color, label, type: 'USER'}]);
   }
 
   removeMarkerAt(x: number, y: number, radius: number = 50) {
       this.markers.update(m => m.filter(marker => Math.hypot(marker.x - x, marker.y - y) > radius));
   }
+  
+  setObjectiveMarkers(markers: MapMarker[]) {
+      this.objectiveMarkers.set(markers.map(m => ({...m, type: 'OBJECTIVE'})));
+  }
 
   reset() {
       this.visitedSectors.clear();
       this.markers.set([]);
+      this.objectiveMarkers.set([]);
       this.isFullMapOpen.set(false);
       this.currentSectorId = 'HUB';
   }
