@@ -18,6 +18,7 @@ export class WorldGeneratorService {
     const colors = this.getThemeColors(theme);
     
     const zone: Zone = {
+        id: sectorId, // Set ID
         name: sectorId,
         theme: theme,
         groundColor: colors.ground,
@@ -37,7 +38,7 @@ export class WorldGeneratorService {
     
     // Always start with an UP exit back to previous sector
     const exitUp = this.entityPool.acquire('EXIT');
-    exitUp.exitType = 'UP'; exitUp.x = 0; exitUp.y = 0; entities.push(exitUp);
+    exitUp.exitType = 'UP'; exitUp.x = 0; exitUp.y = 0; exitUp.zoneId = sectorId; entities.push(exitUp);
 
     let cx = 0, cy = 0;
     for(let i=0; i<rooms; i++) {
@@ -47,17 +48,18 @@ export class WorldGeneratorService {
         
         if (dir === 0) ny -= dist; else if (dir === 1) nx += dist; else if (dir === 2) ny += dist; else nx -= dist;
 
-        this.buildCorridor(cx, cy, nx, ny, 150, entities, colors);
-        this.buildRoom(nx, ny, roomSize, roomSize, entities, colors, theme);
+        this.buildCorridor(cx, cy, nx, ny, 150, entities, colors, sectorId);
+        this.buildRoom(nx, ny, roomSize, roomSize, entities, colors, theme, sectorId);
         
         // Populate
         const mobType = this.getEnemyForTheme(theme);
-        this.createSpawner(nx, ny, mobType, 1 + Math.floor(difficulty), 500, entities);
+        this.createSpawner(nx, ny, mobType, 1 + Math.floor(difficulty), 500, entities, sectorId);
 
         cx = nx; cy = ny;
         if (i === rooms - 1) {
             const exitDown = this.entityPool.acquire('EXIT');
             exitDown.exitType = 'DOWN'; exitDown.x = cx; exitDown.y = cy; exitDown.color = '#22c55e';
+            exitDown.zoneId = sectorId;
             entities.push(exitDown);
         }
     }
@@ -88,16 +90,18 @@ export class WorldGeneratorService {
       }
   }
 
-  private buildRoom(x: number, y: number, w: number, h: number, entities: Entity[], colors: any, theme: ZoneTheme) {
+  private buildRoom(x: number, y: number, w: number, h: number, entities: Entity[], colors: any, theme: ZoneTheme, zoneId: string) {
       // Floor Decoration
       const rug = this.entityPool.acquire('DECORATION', 'RUG');
       rug.x = x; rug.y = y; rug.width = w; rug.height = h; rug.color = colors.ground;
+      rug.zoneId = zoneId;
       entities.push(rug);
 
       // Walls Corners
       const addWall = (wx: number, wy: number, ww: number, wh: number) => {
           const wall = this.entityPool.acquire('WALL');
           wall.x = wx; wall.y = wy; wall.width = ww; wall.height = 120; wall.depth = wh; wall.color = colors.wall;
+          wall.zoneId = zoneId;
           entities.push(wall);
       };
       
@@ -110,11 +114,12 @@ export class WorldGeneratorService {
       if (theme === 'ORGANIC') {
           const vent = this.entityPool.acquire('DECORATION', 'VENT');
           vent.x = x + 100; vent.y = y + 100;
+          vent.zoneId = zoneId;
           entities.push(vent);
       }
   }
 
-  private buildCorridor(x1: number, y1: number, x2: number, y2: number, width: number, entities: Entity[], colors: any) {
+  private buildCorridor(x1: number, y1: number, x2: number, y2: number, width: number, entities: Entity[], colors: any, zoneId: string) {
       const midX = (x1 + x2) / 2; const midY = (y1 + y2) / 2;
       const len = Math.hypot(x2-x1, y2-y1);
       
@@ -123,13 +128,15 @@ export class WorldGeneratorService {
       rug.width = Math.abs(x2-x1) + width; 
       rug.height = Math.abs(y2-y1) + width; 
       rug.color = colors.ground;
+      rug.zoneId = zoneId;
       entities.push(rug);
   }
 
-  private createSpawner(x: number, y: number, type: string, max: number, cooldown: number, entities: Entity[]) {
+  private createSpawner(x: number, y: number, type: string, max: number, cooldown: number, entities: Entity[], zoneId: string) {
       const spawner = this.entityPool.acquire('SPAWNER', 'SPAWN_NODE');
       spawner.x = x; spawner.y = y; spawner.spawnType = type; spawner.spawnMax = max; spawner.spawnCooldown = cooldown;
       spawner.timer = 0; spawner.spawnedIds = []; spawner.radius = 20; spawner.color = '#333'; 
+      spawner.zoneId = zoneId;
       entities.push(spawner);
   }
 }

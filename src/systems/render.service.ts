@@ -130,7 +130,8 @@ export class RenderService {
     const frustum = this.calculateFrustum(cam, w, h);
     
     // Query visible entities from SpatialHash (includes Walls, Dynamic Entities, and now Static Decorations)
-    const visibleEntitiesInRect = this.spatialHash.queryRect(frustum.minX, frustum.minY, frustum.maxX, frustum.maxY);
+    // FIX: Using zone.id instead of zone.name ensures we hit the correct bucket in the spatial hash
+    const visibleEntitiesInRect = this.spatialHash.queryRect(frustum.minX, frustum.minY, frustum.maxX, frustum.maxY, zone.id);
     
     // Filter out floor decorations (handled by FloorRenderer) to avoid double draw
     // HOLO_TABLE is drawn by FloorRenderer too, so filter it.

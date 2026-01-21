@@ -14,7 +14,7 @@ export class FloorRendererService {
   // Cache System
   private floorCanvas: HTMLCanvasElement | null = null;
   private floorCtx: CanvasRenderingContext2D | null = null;
-  private lastZoneName: string = '';
+  private lastZoneId: string = '';
   private lastViewX: number = -99999;
   private lastViewY: number = -99999;
   private lastZoom: number = 1;
@@ -34,7 +34,7 @@ export class FloorRendererService {
       const viewH = canvasHeight / cam.zoom;
       
       const needsRedraw = 
-          zone.name !== this.lastZoneName ||
+          zone.id !== this.lastZoneId ||
           cam.zoom !== this.lastZoom ||
           Math.abs(cam.x - this.lastViewX) > this.CACHE_PADDING / 2 ||
           Math.abs(cam.y - this.lastViewY) > this.CACHE_PADDING / 2;
@@ -55,7 +55,7 @@ export class FloorRendererService {
   private updateCache(cam: Camera, zone: Zone, mapBounds: {minX:number, maxX:number, minY:number, maxY:number}, viewW: number, viewH: number) {
       if (!this.floorCanvas || !this.floorCtx) return;
 
-      this.lastZoneName = zone.name;
+      this.lastZoneId = zone.id;
       this.lastViewX = cam.x;
       this.lastViewY = cam.y;
       this.lastZoom = cam.zoom;
@@ -93,11 +93,14 @@ export class FloorRendererService {
       // Calculate world bounds of the cache area (inverse iso projection approx)
       // Since it's a large rect, simple AABB centered on view is sufficient
       const range = Math.max(width, height) * 1.5; // Padding for safety
+      
+      // FIX: Use zone ID to query spatial hash for decorations
       const entities = this.spatialHash.queryRect(
           this.lastViewX - range, 
           this.lastViewY - range, 
           this.lastViewX + range, 
-          this.lastViewY + range
+          this.lastViewY + range,
+          zone.id
       );
 
       for (const d of entities) {

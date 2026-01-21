@@ -25,6 +25,7 @@ export class SectorLoaderService {
 
           // 1. Set Global Zone Params
           world.currentZone.set({
+              id: template.id, // Set ID
               name: template.name,
               theme: template.theme,
               groundColor: template.environment.colors.ground,

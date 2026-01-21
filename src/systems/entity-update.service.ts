@@ -31,10 +31,13 @@ export class EntityUpdateService {
   update(globalTime: number) {
     if (this.world.player.hp <= 0) return;
     
-    // Only clear dynamic entities. Static walls persist.
-    this.spatialHash.clearDynamic();
+    // Only clear dynamic entities for the current zone. Static walls persist.
+    // Use the zone ID to target the correct hash bucket.
+    const currentZoneId = this.world.currentZone().id;
+    this.spatialHash.clearDynamic(currentZoneId);
     
     // Insert dynamic entities
+    // Ensure player is inserted into the correct zone buckets
     this.spatialHash.insert(this.world.player, false);
     
     this.world.entities.forEach(e => { 

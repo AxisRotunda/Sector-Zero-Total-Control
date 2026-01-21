@@ -107,6 +107,7 @@ export interface FloatingText {
 export type ZoneTheme = 'INDUSTRIAL' | 'RESIDENTIAL' | 'HIGH_TECH' | 'ORGANIC' | 'VOID';
 
 export interface Zone {
+  id: string; // Added ID for spatial hash lookups
   name: string;
   theme: ZoneTheme;
   groundColor: string;

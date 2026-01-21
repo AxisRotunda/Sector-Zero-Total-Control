@@ -1,4 +1,5 @@
 
+
 import { Injectable, inject } from '@angular/core';
 import { ZoneLoadStrategy, ZoneLoadingContext } from '../models/zone-transition.types';
 import { WorldService } from '../world.service';
@@ -20,9 +21,8 @@ export class StaticZoneLoader implements ZoneLoadStrategy {
     if (this.worldState.hasSector(template.id) && !template.metadata.isInstanced) {
         const savedEntities = this.worldState.loadSector(template.id);
         
-        // Remove default dynamic entities that might have been added by template (avoid dupes)
-        // Keep walls as they are static and handled by sectorLoader
-        world.entities = world.entities.filter(e => e.type === 'WALL');
+        // Remove default dynamic entities from template, as they will be replaced by saved state
+        world.entities = world.entities.filter(e => e.type !== 'SPAWNER' && e.type !== 'DESTRUCTIBLE');
         world.entities.push(...savedEntities);
     } else {
         // First visit or instanced: Use default start (handled by sectorLoader logic mostly, but we ensure player pos)
