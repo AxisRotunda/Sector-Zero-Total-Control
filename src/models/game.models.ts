@@ -1,29 +1,23 @@
 
 import { Item } from "./item.models";
-import { DepthLayer } from "./render.models";
 
 export type SectorId = string;
 
 export interface Entity {
   id: number;
+  // Added zoneId for hierarchical system
   zoneId?: string; 
   type: 'PLAYER' | 'ENEMY' | 'HITBOX' | 'PICKUP' | 'WALL' | 'DESTRUCTIBLE' | 'EXIT' | 'NPC' | 'DECORATION' | 'SPAWNER' | 'SHRINE' | 'TERMINAL' | 'ARTIFACT';
-  subType?: 'GRUNT' | 'HEAVY' | 'STALKER' | 'BOSS' | 'SNIPER' | 'STEALTH' | 'SUPPORT' | 'CRATE' | 'BARREL' | 'HAZARD' | 'MEDIC' | 'TRADER' | 'HANDLER' | 'GUARD' | 'TURRET' | 'FLOOR_CRACK' | 'VENT' | 'BLOOD' | 'PIPE' | 'CONSOLE' | 'SERVER' | 'LIGHT' | 'RUG' | 'BARRIER' | 'HOLO_TABLE' | 'SPAWN_NODE' | 'SHRINE_DMG' | 'SHRINE_SPEED' | 'SHRINE_HEAL' | 'NEON' | 'FAN' | 'GRAFFITI' | 'CABLE' | 'TRASH' | 'SLUDGE' | 'CITIZEN' | 'BENCH' | 'STREET_LIGHT' | 'SIGN_POST' | 'VENDING_MACHINE' | 'PLANT_BOX' | 'MURAL' | 'ECHO' | 'MONOLITH' | 'GATE_SEGMENT' | 'PILLAR';
+  subType?: 'GRUNT' | 'HEAVY' | 'STALKER' | 'BOSS' | 'SNIPER' | 'STEALTH' | 'SUPPORT' | 'CRATE' | 'BARREL' | 'HAZARD' | 'MEDIC' | 'TRADER' | 'HANDLER' | 'GUARD' | 'TURRET' | 'FLOOR_CRACK' | 'VENT' | 'BLOOD' | 'PIPE' | 'CONSOLE' | 'SERVER' | 'LIGHT' | 'RUG' | 'BARRIER' | 'HOLO_TABLE' | 'SPAWN_NODE' | 'SHRINE_DMG' | 'SHRINE_SPEED' | 'SHRINE_HEAL' | 'NEON' | 'FAN' | 'GRAFFITI' | 'CABLE' | 'TRASH' | 'SLUDGE' | 'CITIZEN' | 'BENCH' | 'STREET_LIGHT' | 'SIGN_POST' | 'VENDING_MACHINE' | 'PLANT_BOX' | 'MURAL' | 'ECHO' | 'MONOLITH' | 'GATE_SEGMENT' | 'PILLAR' | 'GENERIC';
   source?: 'PLAYER' | 'ENEMY' | 'ENVIRONMENT' | 'PSIONIC' | 'DEFENSE';
   exitType?: 'UP' | 'DOWN'; 
-  transitionType?: 'GATE' | 'PORTAL' | 'WALK';
   targetSector?: string; 
-  
-  // Visuals
-  spriteId?: string;
-  depthLayer?: DepthLayer;
-
   x: number;
   y: number;
   z: number;
   width?: number; 
-  height?: number;
-  depth?: number;
+  height?: number; // Vertical Z-height
+  depth?: number;  // Horizontal Y-depth (thickness)
   vx: number;
   vy: number;
   angle: number;
@@ -96,6 +90,7 @@ export interface Entity {
   squadId?: number;
   aiRole?: 'ATTACKER' | 'SUPPORT' | 'TANK';
   
+  // Optimization: Used for zero-allocation spatial hashing
   lastQueryId?: number;
 }
 
@@ -112,7 +107,7 @@ export interface FloatingText {
 export type ZoneTheme = 'INDUSTRIAL' | 'RESIDENTIAL' | 'HIGH_TECH' | 'ORGANIC' | 'VOID';
 
 export interface Zone {
-  id: string;
+  id: string; // Added ID for spatial hash lookups
   name: string;
   theme: ZoneTheme;
   groundColor: string;

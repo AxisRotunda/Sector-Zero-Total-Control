@@ -1,4 +1,3 @@
-
 import { Injectable, inject } from '@angular/core';
 import { Entity } from '../models/game.models';
 import { CombatService } from './combat.service';
@@ -16,8 +15,7 @@ export class CollisionService {
   
   public checkHitboxCollisions(hitbox: Entity): void {
     if (hitbox.source === 'PLAYER' || hitbox.source === 'ENVIRONMENT' || hitbox.source === 'PSIONIC' || hitbox.source === 'DEFENSE') {
-        // FIX: Pass hitbox.zoneId
-        const potentialTargets = this.spatialHash.query(hitbox.x, hitbox.y, hitbox.radius, hitbox.zoneId);
+        const potentialTargets = this.spatialHash.query(hitbox.x, hitbox.y, hitbox.radius);
         potentialTargets.forEach(target => {
             if (target.state !== 'DEAD' && (isEnemy(target) || isDestructible(target))) {
                  const dist = Math.hypot(target.x - hitbox.x, target.y - hitbox.y);

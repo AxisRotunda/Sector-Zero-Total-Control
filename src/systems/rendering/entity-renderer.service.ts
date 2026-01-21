@@ -53,7 +53,6 @@ export class EntityRendererService {
 
   drawPickup(ctx: CanvasRenderingContext2D, e: Entity) {
     if (!e.itemData) return;
-    // Simple manual iso projection for pickup icon
     const pos = IsoUtils.toIso(e.x, e.y, e.z); 
     ctx.save(); ctx.translate(pos.x, pos.y);
     const scale = 1 + Math.sin(Date.now() * 0.005) * 0.1;
@@ -63,35 +62,9 @@ export class EntityRendererService {
   }
 
   drawExit(ctx: CanvasRenderingContext2D, e: Entity) {
-      if (e.transitionType === 'WALK' && !e.locked) return; // Invisible transition
-
       const pos = IsoUtils.toIso(e.x, e.y, e.z);
-      ctx.save(); 
-      ctx.translate(pos.x, pos.y); 
-      
-      if (e.transitionType === 'GATE') {
-          // Draw a tech barrier field instead of a circle
-          const w = 80; const h = 40;
-          ctx.fillStyle = e.color || '#ef4444';
-          ctx.globalAlpha = 0.3 + Math.sin(Date.now() * 0.005) * 0.1;
-          ctx.beginPath();
-          ctx.moveTo(-w/2, 0); ctx.lineTo(w/2, 0); ctx.lineTo(w/2, -h); ctx.lineTo(-w/2, -h);
-          ctx.fill();
-          
-          // Base line
-          ctx.globalAlpha = 1.0;
-          ctx.lineWidth = 2;
-          ctx.strokeStyle = e.color;
-          ctx.beginPath(); ctx.moveTo(-w/2, 0); ctx.lineTo(w/2, 0); ctx.stroke();
-      } else {
-          // Standard circle for UP/DOWN legacy exits
-          ctx.scale(1, 0.5);
-          ctx.fillStyle = e.color; 
-          ctx.beginPath(); 
-          ctx.arc(0, 0, e.radius, 0, Math.PI*2); 
-          ctx.fill();
-      }
-      
+      ctx.save(); ctx.translate(pos.x, pos.y); ctx.scale(1, 0.5);
+      ctx.fillStyle = e.color; ctx.beginPath(); ctx.arc(0, 0, e.radius, 0, Math.PI*2); ctx.fill();
       ctx.restore();
   }
   

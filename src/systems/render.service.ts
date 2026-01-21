@@ -73,12 +73,6 @@ export class RenderService {
       const unzoomedX = sx / cam.zoom;
       const unzoomedY = sy / cam.zoom;
       
-      // Inverse ISO:
-      // isoX = unzoomedX + camCenter.x
-      // isoY = unzoomedY + camCenter.y
-      // worldX = isoY + 0.5 * isoX
-      // worldY = isoY - 0.5 * isoX
-      
       const isoX = unzoomedX + this.camCenter.x;
       const isoY = unzoomedY + this.camCenter.y;
       
@@ -89,7 +83,7 @@ export class RenderService {
   }
 
   render(
-      entities: Entity[], // Kept for interface compatibility, but we prefer spatial hash for culling
+      entities: Entity[], 
       player: Entity, 
       particles: Particle[], 
       texts: FloatingText[], 
@@ -129,17 +123,13 @@ export class RenderService {
     // --- PASS 2: EFFICIENT CULLING VIA SPATIAL HASH ---
     const frustum = this.calculateFrustum(cam, w, h);
     
-    // Query visible entities from SpatialHash (includes Walls, Dynamic Entities, and now Static Decorations)
-    // FIX: Using zone.id instead of zone.name ensures we hit the correct bucket in the spatial hash
     const visibleEntitiesInRect = this.spatialHash.queryRect(frustum.minX, frustum.minY, frustum.maxX, frustum.maxY, zone.id);
     
-    // Filter out floor decorations (handled by FloorRenderer) to avoid double draw
-    // HOLO_TABLE is drawn by FloorRenderer too, so filter it.
+    // Only filter out strictly FLAT decorations. Cables and HoloTables are 3D.
     const renderableEntities = visibleEntitiesInRect.filter(e => 
-        !(e.type === 'DECORATION' && (e.subType === 'RUG' || e.subType === 'FLOOR_CRACK' || e.subType === 'GRAFFITI' || e.subType === 'HOLO_TABLE'))
+        !(e.type === 'DECORATION' && (e.subType === 'RUG' || e.subType === 'FLOOR_CRACK' || e.subType === 'GRAFFITI'))
     );
     
-    // Filter visible particles (simple bounds check)
     const visibleParticles = particles.filter(p => 
         p.x >= frustum.minX && p.x <= frustum.maxX &&
         p.y >= frustum.minY && p.y <= frustum.maxY
@@ -154,7 +144,7 @@ export class RenderService {
         if (e.type === 'PLAYER' || e.type === 'ENEMY' || e.type === 'NPC') {
             this.shadowRenderer.drawUnitShadow(this.ctx, e);
         } else if (e.type === 'WALL' || e.type === 'DECORATION') {
-            if (e.height && e.height > 50) {
+            if (e.height && e.height > 50 && e.subType !== 'CABLE') { // Cables don't cast simple shadows
                 this.shadowRenderer.drawStructureShadow(this.ctx, e);
             }
         }
@@ -191,7 +181,6 @@ export class RenderService {
     }
 
     // --- PASS 6: EFFECTS & UI OVERLAYS ---
-    // Note: Global effects might need entities for beam calculation (Sniper), so we pass visible list.
     this.effectRenderer.drawGlobalEffects(this.ctx, renderableEntities, player, zone, rainDrops);
     this.effectRenderer.drawFloatingTexts(this.ctx, texts, cam);
 
@@ -202,10 +191,6 @@ export class RenderService {
   }
 
   private calculateFrustum(cam: Camera, width: number, height: number) {
-      // Calculate world coordinates of the screen corners
-      // Since rotation is 45deg (ISO), the view rect in world space is a diamond.
-      // We calculate an AABB that covers this diamond.
-      
       const p1 = this.getScreenToWorld(0, 0, cam);
       const p2 = this.getScreenToWorld(width, 0, cam);
       const p3 = this.getScreenToWorld(0, height, cam);

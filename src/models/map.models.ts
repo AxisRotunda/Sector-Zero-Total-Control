@@ -7,9 +7,9 @@ export interface StaticWall {
     w: number;
     h: number;
     color?: string;
-    type?: string; // e.g., 'BARRIER', 'GATE_SEGMENT', 'PILLAR', 'MONOLITH'
+    type?: string; // e.g., 'BARRIER', 'GATE_SEGMENT'
     locked?: boolean;
-    height?: number; // Added for variable verticality
+    height?: number;
 }
 
 export interface StaticEntity {
@@ -26,7 +26,6 @@ export interface StaticExit {
     targetSector: string;
     direction: 'UP' | 'DOWN';
     locked?: boolean;
-    transitionType?: 'GATE' | 'PORTAL' | 'WALK';
 }
 
 export interface SectorDefinition {

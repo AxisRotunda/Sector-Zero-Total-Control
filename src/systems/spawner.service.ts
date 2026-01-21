@@ -1,4 +1,3 @@
-
 import { Injectable, inject } from '@angular/core';
 import { Entity } from '../models/game.models';
 import { WorldService } from '../game/world/world.service';
@@ -49,9 +48,6 @@ export class SpawnerService {
       const angle = Math.random() * Math.PI * 2; const dist = Math.random() * 50;
       enemy.x = spawner.x + Math.cos(angle) * dist; enemy.y = spawner.y + Math.sin(angle) * dist; enemy.homeX = spawner.x; enemy.homeY = spawner.y;
       enemy.aggroRadius = aggro; enemy.maxHp = stats.hp!; enemy.hp = stats.hp!; enemy.attackTimer = Math.random() * 100; enemy.resistances = resistances;
-      
-      // FIX: Inherit ZoneID from Spawner
-      enemy.zoneId = spawner.zoneId;
 
       if (total > 1) {
           enemy.squadId = squadId; this.squadAi.registerMember(enemy);

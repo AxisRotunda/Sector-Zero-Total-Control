@@ -6,8 +6,6 @@ export class MapUtils {
   
   /**
    * Merges collinear wall entities to reduce draw calls and entity count.
-   * Fixes z-fighting and "messy" rendering issues by creating single large blocks.
-   * Now supports both Horizontal and Vertical merging.
    */
   static mergeWalls(entities: Entity[]): Entity[] {
       const walls = entities.filter(e => e.type === 'WALL');
@@ -15,154 +13,149 @@ export class MapUtils {
       
       if (walls.length === 0) return entities;
 
-      // Helper to generate a unique key for grouping
-      const getKey = (w: Entity) => `${w.color}_${w.height}_${w.subType}_${w.depth}`;
-
-      // --- PASS 1: HORIZONTAL MERGE (Same Y) ---
-      let mergedH = this.mergePass(walls, 'y', 'x', 'width', getKey);
-
-      // --- PASS 2: VERTICAL MERGE (Same X) ---
-      // We must re-group because dimensions might have changed
-      // For vertical merge, we check if widths match (instead of depths) to ensure alignment
-      const getKeyV = (w: Entity) => `${w.color}_${w.height}_${w.subType}_${w.width}`;
-      let finalWalls = this.mergePass(mergedH, 'x', 'y', 'depth', getKeyV);
-
-      return [...others, ...finalWalls];
-  }
-
-  private static mergePass(
-      input: Entity[], 
-      axisStable: 'x' | 'y', 
-      axisMove: 'x' | 'y', 
-      dimProp: 'width' | 'depth',
-      keyFn: (e: Entity) => string
-  ): Entity[] {
+      // Group by distinct properties (color, height, type, depth)
       const groups = new Map<string, Entity[]>();
       
-      input.forEach(w => {
-          // Group by stable axis (e.g., Row Y) + Visual Properties
-          // We round the position to handle floating point drift
-          const posKey = Math.round((w as any)[axisStable]); 
-          const key = `${posKey}_${keyFn(w)}`;
+      walls.forEach(w => {
+          // Include depth in key to prevent merging walls of different thickness
+          const key = `${w.color}_${w.height}_${w.subType}_${w.depth}`;
           if (!groups.has(key)) groups.set(key, []);
           groups.get(key)!.push(w);
       });
 
-      const mergedList: Entity[] = [];
+      const mergedWalls: Entity[] = [];
 
       groups.forEach(group => {
-          // Sort by moving axis (e.g., Column X)
-          group.sort((a, b) => (a as any)[axisMove] - (b as any)[axisMove]);
+          // Sort by Y then X
+          group.sort((a, b) => {
+              if (Math.abs(a.y - b.y) > 1) return a.y - b.y;
+              return a.x - b.x;
+          });
 
           const processed = new Set<number>();
 
           for (let i = 0; i < group.length; i++) {
               if (processed.has(group[i].id)) continue;
               
-              let current = { ...group[i] };
-              processed.add(group[i].id);
+              let current = group[i];
+              // Clone to avoid mutating the original entity pool object prematurely
+              let merged = { ...current }; 
+              processed.add(current.id);
 
+              // Try horizontal merge
               for (let j = i + 1; j < group.length; j++) {
                   const next = group[j];
                   if (processed.has(next.id)) continue;
-
-                  // Check adjacency
-                  // Current End = Start + Dimension/2
-                  // Next Start = Start - Dimension/2
-                  const currentDim = (current as any)[dimProp] || 40;
-                  const nextDim = (next as any)[dimProp] || 40;
                   
-                  const currentEnd = (current as any)[axisMove] + currentDim / 2;
-                  const nextStart = (next as any)[axisMove] - nextDim / 2;
+                  // Check if they align horizontally
+                  if (Math.abs(next.y - current.y) < 1) { // Same Y row
+                      const currentRight = merged.x + (merged.width || 0) / 2;
+                      const nextLeft = next.x - (next.width || 0) / 2;
+                      
+                      // Check for adjacency (within small tolerance)
+                      if (Math.abs(nextLeft - currentRight) < 5) {
+                          // Merge!
+                          const newWidth = (merged.width || 0) + (next.width || 0);
+                          // Recalculate center X
+                          const leftEdge = (merged.x - (merged.width || 0)/2); 
+                          merged.width = newWidth;
+                          merged.x = leftEdge + newWidth / 2;
 
-                  if (Math.abs(nextStart - currentEnd) < 5) { // 5px tolerance
-                      // Merge
-                      const newTotalDim = currentDim + nextDim;
-                      
-                      // New center = LeftEdge + NewDim/2
-                      const leftEdge = (current as any)[axisMove] - currentDim / 2;
-                      (current as any)[axisMove] = leftEdge + newTotalDim / 2;
-                      (current as any)[dimProp] = newTotalDim;
-                      
-                      processed.add(next.id);
-                  } else {
-                      break; // Gap found
+                          processed.add(next.id);
+                      } else {
+                          // Gap found, stop merging this line
+                          break;
+                      }
                   }
               }
-              mergedList.push(current);
+              mergedWalls.push(merged);
           }
       });
 
-      return mergedList;
+      return [...others, ...mergedWalls];
   }
 
   /**
-   * Generates a clean, rectangular fortress layout.
-   * This aligns with isometric projection better than octagons/circles, preventing jagged edges.
+   * Generates a fortified perimeter wall with pillars.
    */
   static createFortress(radius: number, thickness: number, height: number, color: string): StaticWall[] {
     const walls: StaticWall[] = [];
-    const size = radius; // Half-width
+    const segments = 8;
     
-    // Coordinates
-    const left = -size;
-    const right = size;
-    const top = -size;
-    const bottom = size;
+    for (let i = 0; i < segments; i++) {
+        const angle = (i / segments) * Math.PI * 2;
+        const nextAngle = ((i + 1) / segments) * Math.PI * 2;
+        
+        // Pillar at vertex
+        const px = Math.cos(angle) * radius;
+        const py = Math.sin(angle) * radius;
+        walls.push({
+            x: px, y: py,
+            w: thickness * 1.5, h: thickness * 1.5,
+            height: height * 1.2,
+            color: color,
+            type: 'PILLAR'
+        });
+
+        // Skip Gate openings (North, South, East, West indices)
+        // 0=East, 2=South, 4=West, 6=North (approximate based on standard trig)
+        // Adjusted for visual orientation: 
+        // 0 (Right), 2 (Bottom), 4 (Left), 6 (Top)
+        if (i === 2 || i === 6) continue; // Leave gaps for Main Gates (Top/Bottom)
+
+        const x1 = Math.cos(angle) * radius;
+        const y1 = Math.sin(angle) * radius;
+        const x2 = Math.cos(nextAngle) * radius;
+        const y2 = Math.sin(nextAngle) * radius;
+        
+        // Fill the gap with blocks
+        const dist = Math.hypot(x2-x1, y2-y1);
+        const blockCount = Math.ceil(dist / thickness);
+        
+        for(let j=1; j<blockCount; j++) {
+            const t = j/blockCount;
+            walls.push({
+                x: x1 + (x2-x1)*t,
+                y: y1 + (y2-y1)*t,
+                w: thickness, 
+                h: thickness, 
+                height: height, 
+                color: color
+            });
+        }
+    }
     
-    // 1. North Wall (Full span)
-    walls.push({
-        x: 0, y: top,
-        w: (size * 2) + thickness, h: thickness,
-        height, color
-    });
-
-    // 2. West Wall (Between Top/Bottom)
-    walls.push({
-        x: left, y: 0,
-        w: thickness, h: (size * 2) - thickness, // Subtract corners to avoid Z-fight overlap if strict
-        height, color
-    });
-
-    // 3. East Wall
-    walls.push({
-        x: right, y: 0,
-        w: thickness, h: (size * 2) - thickness,
-        height, color
-    });
-
-    // 4. South Wall (With Gate Gap)
-    const gateGap = 400;
-    const segmentWidth = size - (gateGap / 2);
-    // South-Left
-    walls.push({
-        x: left + (segmentWidth / 2), y: bottom,
-        w: segmentWidth + thickness, h: thickness,
-        height, color
-    });
-    // South-Right
-    walls.push({
-        x: right - (segmentWidth / 2), y: bottom,
-        w: segmentWidth + thickness, h: thickness,
-        height, color
-    });
-
-    // 5. Pillars at corners for visual anchor
-    const pSize = thickness * 1.5;
-    const pH = height * 1.2;
-    walls.push({ x: left, y: top, w: pSize, h: pSize, height: pH, color, type: 'PILLAR' });
-    walls.push({ x: right, y: top, w: pSize, h: pSize, height: pH, color, type: 'PILLAR' });
-    walls.push({ x: left, y: bottom, w: pSize, h: pSize, height: pH, color, type: 'PILLAR' });
-    walls.push({ x: right, y: bottom, w: pSize, h: pSize, height: pH, color, type: 'PILLAR' });
-
-    // Gate Pillars
-    walls.push({ x: -gateGap/2 - 20, y: bottom, w: pSize, h: pSize, height: pH, color, type: 'PILLAR' });
-    walls.push({ x: gateGap/2 + 20, y: bottom, w: pSize, h: pSize, height: pH, color, type: 'PILLAR' });
-
     return walls;
   }
 
   static createOctagon(radius: number, thickness: number, height: number, color: string): StaticWall[] {
-      return this.createFortress(radius, thickness, height, color);
+      const walls: StaticWall[] = [];
+      const segments = 8;
+      for (let i = 0; i < segments; i++) {
+          const angle = (i / segments) * Math.PI * 2;
+          const nextAngle = ((i + 1) / segments) * Math.PI * 2;
+          
+          const x1 = Math.cos(angle) * radius;
+          const y1 = Math.sin(angle) * radius;
+          const x2 = Math.cos(nextAngle) * radius;
+          const y2 = Math.sin(nextAngle) * radius;
+          
+          const dist = Math.hypot(x2 - x1, y2 - y1);
+          // Use blocks to approximate wall
+          const blockCount = Math.ceil(dist / thickness);
+          
+          for(let j=0; j<blockCount; j++) {
+              const t = j / blockCount;
+              walls.push({
+                  x: x1 + (x2 - x1) * t,
+                  y: y1 + (y2 - y1) * t,
+                  w: thickness,
+                  h: thickness,
+                  height: height,
+                  color: color
+              });
+          }
+      }
+      return walls;
   }
 }

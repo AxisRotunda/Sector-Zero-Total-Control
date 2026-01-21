@@ -12,6 +12,7 @@ import { EventBusService } from './events/event-bus.service';
 import { GameEvents } from './events/game-events';
 import { IndexedDbService } from '../services/indexed-db.service';
 import { ZoneManagerService } from '../game/world/zone-manager.service';
+import { WorldStateService } from '../game/world/world-state.service';
 
 interface SaveFile {
     version: number;
@@ -33,6 +34,7 @@ export class PersistenceService {
   private narrative = inject(NarrativeService);
   private db = inject(IndexedDbService);
   private zoneManager = inject(ZoneManagerService);
+  private worldState = inject(WorldStateService);
 
   private saveKey = CONFIG.SAVE_KEY;
   private readonly CURRENT_VERSION = 1;
@@ -64,7 +66,8 @@ export class PersistenceService {
               skillTree: this.skillTree.getSaveData(),
               mission: this.mission.getSaveData(),
               map: this.mapService.getSaveData(),
-              narrative: this.narrative.getSaveData()
+              narrative: this.narrative.getSaveData(),
+              worldState: this.worldState.getSaveData()
           }
       };
       
@@ -114,15 +117,17 @@ export class PersistenceService {
           if (data.skillTree) this.skillTree.loadSaveData(data.skillTree);
           if (data.mission) this.mission.loadSaveData(data.mission);
           if (data.narrative) this.narrative.loadSaveData(data.narrative);
+          if (data.worldState) this.worldState.loadSaveData(data.worldState);
           
-          this.zoneManager.initWorld(this.player.currentSectorId());
+          // Init world after loading player state (which contains currentSectorId)
+          await this.zoneManager.initWorld(this.player.currentSectorId());
+          
           if (data.map) this.mapService.loadSaveData(data.map);
 
           this.eventBus.dispatch({ type: GameEvents.FLOATING_TEXT_SPAWN, payload: { onPlayer: true, yOffset: -80, text: "SYSTEM RESTORED", color: '#22c55e', size: 30 } });
           return true;
       } catch (e) {
           console.error("Save Corrupted", e);
-          // Optional: Don't auto-reset on read error to prevent data loss, just return false
           return false;
       }
   }
@@ -139,5 +144,6 @@ export class PersistenceService {
       this.mission.reset();
       this.mapService.reset();
       this.narrative.reset();
+      this.worldState.reset();
   }
 }

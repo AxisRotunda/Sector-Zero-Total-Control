@@ -32,7 +32,7 @@ export class WorldStateService {
             // Filter out transient entities
             if (e.type === 'HITBOX' || e.type === 'DECORATION' || (e.type === 'DESTRUCTIBLE' && e.hp <= 0)) return false;
             if (e.type === 'WALL') return false; // Walls loaded from template
-            // Don't save HUB NPCs (config based)
+            // Don't save HUB NPCs (config based) - In a robust system we'd check zone config flags
             if (id === 'HUB' && e.type === 'NPC') return false;
             // Only save entities belonging to THIS zone
             if (e.zoneId && e.zoneId !== id) return false;
@@ -64,12 +64,30 @@ export class WorldStateService {
       
       return state.entities.map(s => {
           const e = { ...s } as Entity;
+          e.id = -1; // ID will be reassigned by pool or loader
           e.vx = 0; e.vy = 0; e.angle = 0; e.radius = 20; 
-          e.maxHp = s.hp; 
+          e.maxHp = s.hp; // Assume saved HP is current max for state continuity logic, or logic elsewhere handles it
+          e.hp = s.hp;
           e.status = { stun: 0, slow: 0, poison: null, burn: null, weakness: null, bleed: null };
+          
+          // Re-apply basic defaults based on type if needed, 
+          // though usually Spawner/Loader handles hydration.
+          // Ideally, we should use EntityPool to re-hydrate fully.
+          
           return e;
       });
   }
 
   reset() { this.zones.clear(); }
+
+  getSaveData() {
+      // Serialize Map to array of entries
+      return Array.from(this.zones.entries());
+  }
+
+  loadSaveData(data: any) {
+      if (Array.isArray(data)) {
+          this.zones = new Map(data);
+      }
+  }
 }

@@ -32,8 +32,7 @@ export class InteractionService {
   update(player: Entity, globalTime: number) {
       let foundInteractable: Entity | null = null;
       // Query slightly larger than interaction radius to ensure detection
-      // FIX: Use player.zoneId to find interactables in current zone
-      const nearby = this.spatialHash.query(player.x, player.y, 150, player.zoneId);
+      const nearby = this.spatialHash.query(player.x, player.y, 150);
       
       for(const e of nearby) {
           // 1. Exits (Auto-trigger or Manual)
