@@ -1,7 +1,8 @@
+
 import { Component, inject, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { DialogueService } from '../services/dialogue.service';
-import { GlitchTextComponent } from './glitch-text.component.ts';
+import { GlitchTextComponent } from './glitch-text.component';
 import { DialogueNode, DialogueOption } from '../models/narrative.models';
 
 @Component({
