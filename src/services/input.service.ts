@@ -1,3 +1,4 @@
+
 import { Injectable, signal, OnDestroy } from '@angular/core';
 import { Subject, Observable, fromEvent } from 'rxjs';
 
@@ -41,8 +42,11 @@ export class InputService {
   // Legacy direct access properties
   inputVector = { x: 0, y: 0 };
   aimAngle: number | null = null;
-  usingKeyboard = false;
-  usingGamepad = false;
+  
+  // Converted to signals to prevent NG0100 errors and improve reactivity
+  usingKeyboard = signal(false);
+  usingGamepad = signal(false);
+  
   isAttackPressed = false; 
   
   bindings = signal<Record<Action, string>>({ ...DEFAULT_BINDINGS });
@@ -103,7 +107,7 @@ export class InputService {
       window.addEventListener("gamepaddisconnected", (e) => {
           if (this.gamepadIndex === e.gamepad.index) {
               this.gamepadIndex = null;
-              this.usingGamepad = false;
+              this.usingGamepad.set(false);
           }
       });
   }
@@ -134,8 +138,8 @@ export class InputService {
   // Called by JoystickComponent
   setJoystick(x: number, y: number) {
       this.inputVector = { x, y };
-      this.usingKeyboard = false;
-      this.usingGamepad = false;
+      this.usingKeyboard.set(false);
+      this.usingGamepad.set(false);
       this.emitState();
   }
 
@@ -173,8 +177,8 @@ export class InputService {
       this.activeActions.add(action);
       this.actionEvents.next(action);
       if (['MOVE_UP', 'MOVE_DOWN', 'MOVE_LEFT', 'MOVE_RIGHT'].includes(action)) {
-        this.usingKeyboard = true;
-        this.usingGamepad = false;
+        this.usingKeyboard.set(true);
+        this.usingGamepad.set(false);
         this.updateVector();
       }
       this.emitState();
@@ -201,7 +205,7 @@ export class InputService {
   }
 
   private handleMouseMove(e: MouseEvent) {
-    if (!this.canvasRef || this.usingGamepad) return;
+    if (!this.canvasRef || this.usingGamepad()) return;
     
     const rect = this.canvasRef.getBoundingClientRect();
     const canvasCenterX = rect.width / 2;
@@ -217,7 +221,7 @@ export class InputService {
   }
 
   private updateVector() {
-      if (this.usingGamepad) return;
+      if (this.usingGamepad()) return;
       
       let x = 0; let y = 0;
       if (this.isDown('MOVE_UP')) y -= 1;
@@ -244,15 +248,15 @@ export class InputService {
 
       if (Math.abs(lx) > this.DEADZONE || Math.abs(ly) > this.DEADZONE) {
           this.inputVector = { x: lx, y: ly };
-          this.usingGamepad = true;
-          this.usingKeyboard = false;
-      } else if (this.usingGamepad) {
+          this.usingGamepad.set(true);
+          this.usingKeyboard.set(false);
+      } else if (this.usingGamepad()) {
           this.inputVector = { x: 0, y: 0 };
       }
 
       if (Math.abs(rx) > this.DEADZONE || Math.abs(ry) > this.DEADZONE) {
           this.aimAngle = Math.atan2(ry, rx);
-          this.usingGamepad = true;
+          this.usingGamepad.set(true);
       }
 
       // --- BUTTONS ---

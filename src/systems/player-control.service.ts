@@ -153,7 +153,7 @@ export class PlayerControlService {
              if (isEnemy(closest)) this.tutorial.trigger('COMBAT');
              const targetAngle = Math.atan2((closest as Entity).y - player.y, (closest as Entity).x - player.x);
              const speed = Math.hypot(player.vx, player.vy);
-             if (speed < 0.5 && !this.input.usingKeyboard) {
+             if (speed < 0.5 && !this.input.usingKeyboard()) {
                  this.inputBuffer.addCommand('PRIMARY', targetAngle, 0);
              }
         }

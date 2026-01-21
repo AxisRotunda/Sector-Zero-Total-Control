@@ -9,6 +9,10 @@ export const HUB_ZONE: ZoneTemplate = {
   // Constrained bounds to create a settlement feel
   bounds: { minX: -1500, maxX: 1500, minY: -1500, maxY: 1600 },
   
+  // Hierarchy Metadata
+  regionType: 'hub',
+  childZoneIds: ['SECTOR_9_N'],
+
   geometry: {
     walls: [
       // Fortress Perimeter (Radius 1400)
@@ -60,8 +64,15 @@ export const HUB_ZONE: ZoneTemplate = {
   },
 
   exits: [
-    // South Exit -> Sector 9
-    { x: 0, y: 1500, targetZoneId: 'SECTOR_9', direction: 'DOWN', locked: true }
+    // South Exit -> Sector 9 North (Main Gate)
+    { 
+      x: 0, 
+      y: 1500, 
+      targetZoneId: 'SECTOR_9_N', 
+      transitionType: 'GATE', 
+      locked: true,
+      // direction: 'DOWN' (Implicit default in sector-loader, removed as per plan to favor transitionType logic)
+    }
   ],
 
   environment: {

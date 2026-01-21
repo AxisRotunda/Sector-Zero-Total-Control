@@ -1,6 +1,6 @@
 
 <div class="fixed inset-0 font-mono text-zinc-300 select-none overflow-hidden touch-none"
-     [class.cursor-none]="input.usingKeyboard && !ui.isInventoryOpen() && !ui.isSkillsOpen() && !ui.isShopOpen() && !ui.isAbilitiesOpen() && !ui.isCodexOpen() && !ui.isJournalOpen() && !game.isInMenu() && !mapService.isFullMapOpen() && !mapService.isSettingsOpen()"
+     [class.cursor-none]="input.usingKeyboard() && !ui.isInventoryOpen() && !ui.isSkillsOpen() && !ui.isShopOpen() && !ui.isAbilitiesOpen() && !ui.isCodexOpen() && !ui.isJournalOpen() && !game.isInMenu() && !mapService.isFullMapOpen() && !mapService.isSettingsOpen()"
      (touchstart)="handleGlobalTouch($event)">
   
   <canvas #gameCanvas class="absolute top-0 left-0 w-full h-full block bg-zinc-950"></canvas>
