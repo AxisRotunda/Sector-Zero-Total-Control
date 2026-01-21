@@ -3,31 +3,43 @@ import { Injectable, inject } from '@angular/core';
 import { Entity, Zone } from '../../models/game.models';
 import { IsoUtils } from '../../utils/iso-utils';
 import { SpriteCacheService } from './sprite-cache.service';
+import { SpriteRegistryService } from './sprite-registry.service';
 
 @Injectable({ providedIn: 'root' })
 export class StructureRendererService {
   private cache = inject(SpriteCacheService);
-
-  private adjustColor(hex: string, percent: number) {
-      if (!hex) return '#333333';
-      let R = parseInt(hex.substring(1,3),16); let G = parseInt(hex.substring(3,5),16); let B = parseInt(hex.substring(5,7),16);
-      R = Math.min(255, Math.max(10, R + percent)); G = Math.min(255, Math.max(10, G + percent)); B = Math.min(255, Math.max(15, B + percent));
-      const RR = ((R.toString(16).length==1)?"0"+R.toString(16):R.toString(16)); const GG = ((G.toString(16).length==1)?"0"+G.toString(16):G.toString(16)); const BB = ((B.toString(16).length==1)?"0"+B.toString(16):B.toString(16));
-      return "#"+RR+GG+BB;
-  }
+  private registry = inject(SpriteRegistryService);
 
   drawStructure(ctx: CanvasRenderingContext2D, e: Entity, zone: Zone) {
       if (e.subType === 'BARRIER') { this.drawEnergyBarrier(ctx, e); return; }
       
+      // 1. Try Sprite Registry (High Performance, High Fidelity)
+      if (e.spriteId) {
+          const sprite = this.registry.getSprite(e.spriteId);
+          if (sprite) {
+              const pos = IsoUtils.toIso(e.x, e.y, 0);
+              ctx.drawImage(sprite.canvas, 
+                  Math.floor(pos.x - sprite.anchorX), 
+                  Math.floor(pos.y - sprite.anchorY)
+              );
+              return;
+          }
+      }
+
+      // 2. Fallback to Legacy Procedural Generation (Slow, but flexible)
+      this.drawLegacyStructure(ctx, e);
+  }
+
+  // Legacy rendering logic maintained for dynamic structures not in registry
+  private drawLegacyStructure(ctx: CanvasRenderingContext2D, e: Entity) {
       const w = e.width || 40; 
       const d = e.depth || w;
       const h = e.height || 100;
       
-      // Cache Key: Includes specific types now to ensure unique sprites
-      const cacheKey = `STRUCT_${e.type}_${e.subType}_${w}_${d}_${h}_${e.color}_${e.locked}`;
+      const cacheKey = `LEGACY_STRUCT_${e.type}_${e.subType}_${w}_${d}_${h}_${e.color}_${e.locked}`;
       
       const isoBounds = this.calculateIsoBounds(w, d, h);
-      const padding = 60; // Increased padding for glows
+      const padding = 60;
       const canvasW = Math.ceil(isoBounds.maxX - isoBounds.minX + padding * 2);
       const canvasH = Math.ceil(isoBounds.maxY - isoBounds.minY + padding * 2);
       
@@ -37,14 +49,7 @@ export class StructureRendererService {
       const anchorY = -isoBounds.minY + padding;
 
       const sprite = this.cache.getOrRender(cacheKey, canvasW, canvasH, (bufferCtx) => {
-          // Delegate specific rendering based on subType
-          if (e.subType === 'MONOLITH') {
-              this.renderMonolithToBuffer(bufferCtx, e, w, d, h, anchorX, anchorY);
-          } else if (e.subType === 'GATE_SEGMENT') {
-              this.renderGateToBuffer(bufferCtx, e, w, d, h, anchorX, anchorY);
-          } else {
-              this.renderStructureToBuffer(bufferCtx, e, w, d, h, anchorX, anchorY);
-          }
+          this.renderStructureToBuffer(bufferCtx, e, w, d, h, anchorX, anchorY);
       });
 
       const pos = IsoUtils.toIso(e.x, e.y, 0);
@@ -63,46 +68,34 @@ export class StructureRendererService {
           const p3 = IsoUtils.toIso(w/2, h/2, 0);
           const p4 = IsoUtils.toIso(-w/2, h/2, 0);
           
-          ctx.fillStyle = e.color || '#333';
-          ctx.globalAlpha = 0.8; // Increased opacity for better visibility
+          ctx.fillStyle = e.color;
           ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.fill();
-          
-          // Border for Rugs to look like designated zones
-          ctx.lineWidth = 3; ctx.strokeStyle = this.adjustColor(e.color, 40); 
-          ctx.stroke();
-          
-          ctx.globalAlpha = 1.0;
-      } else if (e.subType === 'FLOOR_CRACK') {
-          ctx.scale(1, 0.5);
-          ctx.strokeStyle = '#18181b'; ctx.lineWidth = 2;
-          ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(5, 5); ctx.lineTo(15, -5); ctx.lineTo(25, 0); ctx.stroke();
       } else if (e.subType === 'GRAFFITI') {
+          ctx.font = 'bold 40px monospace';
+          ctx.fillStyle = e.color;
+          ctx.globalAlpha = 0.6;
           ctx.scale(1, 0.5);
-          ctx.font = 'bold 20px monospace'; ctx.fillStyle = e.color || '#ef4444';
-          ctx.fillText('⚠', 0, 0);
+          ctx.fillText("NO HOPE", 0, 0);
       } else if (e.subType === 'TRASH') {
-          ctx.scale(1, 0.5);
-          ctx.fillStyle = '#52525b';
-          ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI*2); ctx.fill();
+          ctx.fillStyle = '#27272a';
+          ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI*2); ctx.fill();
           ctx.fillStyle = '#3f3f46';
-          ctx.beginPath(); ctx.arc(5, 2, 6, 0, Math.PI*2); ctx.fill();
-      } else if (e.subType === 'CABLE') {
-          // Draw hanging cables between start and target
-          if (e.targetX !== undefined && e.targetY !== undefined) {
-              const start = { x: 0, y: -e.z }; // Relative to e.x,e.y
-              const targetWorldX = e.targetX - e.x;
-              const targetWorldY = e.targetY - e.y;
-              const targetIso = IsoUtils.toIso(targetWorldX, targetWorldY, e.z);
-              
-              ctx.strokeStyle = '#1e293b';
-              ctx.lineWidth = 3;
-              ctx.beginPath();
-              ctx.moveTo(0, -e.z); // Start height
-              // Bezier curve for slack
-              ctx.quadraticCurveTo(targetIso.x / 2, targetIso.y / 2 + 150, targetIso.x, targetIso.y - e.z);
-              ctx.stroke();
-          }
+          ctx.beginPath(); ctx.arc(5, 5, 8, 0, Math.PI*2); ctx.fill();
       }
+      ctx.restore();
+  }
+
+  private drawEnergyBarrier(ctx: CanvasRenderingContext2D, e: Entity) {
+      const pos = IsoUtils.toIso(e.x, e.y, e.z || 0);
+      const w = e.width || 80; const h = 100;
+      
+      ctx.save();
+      ctx.translate(pos.x, pos.y);
+      ctx.fillStyle = e.color;
+      ctx.globalAlpha = 0.4 + Math.sin(Date.now() * 0.01) * 0.2;
+      ctx.fillRect(-w/2, -h, w, h);
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
+      ctx.strokeRect(-w/2, -h, w, h);
       ctx.restore();
   }
 
@@ -122,127 +115,61 @@ export class StructureRendererService {
       return { minX, maxX, minY, maxY };
   }
 
-  // --- STANDARD WALL ---
-  private renderStructureToBuffer(ctx: any, e: Entity, w: number, d: number, h: number, anchorX: number, anchorY: number) {
+  private renderStructureToBuffer(ctx: any, e: Entity, width: number, length: number, height: number, anchorX: number, anchorY: number) {
       ctx.translate(anchorX, anchorY);
-      const halfW = w / 2; const halfD = d / 2;
-      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
+      
+      const hw = width / 2; 
+      const hl = length / 2;
+      const p = (x: number, y: number, z: number) => IsoUtils.toIso(x, y, z);
 
-      const baseL = p(-halfW, halfD, 0); const baseR = p(halfW, -halfD, 0); const baseB = p(halfW, halfD, 0); 
-      const topL = p(-halfW, halfD, h); const topR = p(halfW, -halfD, h); const topB = p(halfW, halfD, h); const topT = p(-halfW, -halfD, h);
+      const basePoints = [
+          p(-hw, hl, 0), p(hw, hl, 0), p(hw, -hl, 0), p(-hw, -hl, 0)
+      ];
+      const topPoints = [
+          p(-hw, hl, height), p(hw, hl, height), p(hw, -hl, height), p(-hw, -hl, height)
+      ];
 
-      // Sides (Shadowed)
-      ctx.fillStyle = this.adjustColor(e.color, -30); 
-      ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(baseR.x, baseR.y); ctx.lineTo(topR.x, topR.y); ctx.lineTo(topB.x, topB.y); ctx.fill();
+      // Draw sides (Simplified: only draw visible sides for standard Iso view)
+      // Visible sides: Top, Left (-x), Bottom (+y) - assuming camera angle
       
-      // Front (Base Color)
-      ctx.fillStyle = this.adjustColor(e.color, -10); 
-      ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(baseL.x, baseL.y); ctx.lineTo(topL.x, topL.y); ctx.lineTo(topB.x, topB.y); ctx.fill();
-      
-      // Top (Highlight)
-      ctx.fillStyle = e.color; 
-      ctx.beginPath(); ctx.moveTo(topT.x, topT.y); ctx.lineTo(topR.x, topR.y); ctx.lineTo(topB.x, topB.y); ctx.lineTo(topL.x, topL.y); ctx.fill();
-      
-      // Edge Highlight
-      ctx.strokeStyle = this.adjustColor(e.color, 40); ctx.lineWidth = 1; 
-      ctx.beginPath(); ctx.moveTo(topL.x, topL.y); ctx.lineTo(topB.x, topB.y); ctx.lineTo(topR.x, topR.y); ctx.stroke();
-
-      if (e.subType === 'PILLAR') {
-          ctx.fillStyle = this.adjustColor(e.color, 20);
-          ctx.beginPath(); ctx.arc(topB.x, topB.y, 6, 0, Math.PI*2); ctx.fill();
-      } else {
-          this.applyProceduralDecay(ctx, e, w, d, h, topL, topR, topB);
-      }
-  }
-
-  // --- GATE SEGMENT ---
-  private renderGateToBuffer(ctx: any, e: Entity, w: number, d: number, h: number, anchorX: number, anchorY: number) {
-      this.renderStructureToBuffer(ctx, e, w, d, h, anchorX, anchorY);
-      
-      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
-      const topB = p(w/2, d/2, h);
-      const baseB = p(w/2, d/2, 0);
-      
-      // Status Light
+      // Side 1 (Left Face)
+      ctx.fillStyle = this.adjustColor(e.color, -20);
       ctx.beginPath();
-      ctx.arc(topB.x, topB.y + 30, 8, 0, Math.PI * 2);
-      ctx.fillStyle = e.locked ? '#ef4444' : '#22c55e';
+      ctx.moveTo(basePoints[0].x, basePoints[0].y);
+      ctx.lineTo(basePoints[3].x, basePoints[3].y);
+      ctx.lineTo(topPoints[3].x, topPoints[3].y);
+      ctx.lineTo(topPoints[0].x, topPoints[0].y);
       ctx.fill();
-      ctx.shadowColor = e.locked ? '#ef4444' : '#22c55e';
-      ctx.shadowBlur = 15;
-      ctx.stroke();
-      ctx.shadowBlur = 0;
 
-      // Hazard Stripes
-      ctx.strokeStyle = '#facc15';
-      ctx.lineWidth = 6;
+      // Side 2 (Right/Bottom Face)
+      ctx.fillStyle = this.adjustColor(e.color, -40);
       ctx.beginPath();
-      ctx.moveTo(baseB.x - 20, baseB.y - 20);
-      ctx.lineTo(baseB.x + 20, baseB.y + 20);
+      ctx.moveTo(basePoints[0].x, basePoints[0].y);
+      ctx.lineTo(basePoints[1].x, basePoints[1].y);
+      ctx.lineTo(topPoints[1].x, topPoints[1].y);
+      ctx.lineTo(topPoints[0].x, topPoints[0].y);
+      ctx.fill();
+
+      // Top Face
+      ctx.fillStyle = e.color;
+      ctx.beginPath();
+      ctx.moveTo(topPoints[0].x, topPoints[0].y);
+      ctx.lineTo(topPoints[1].x, topPoints[1].y);
+      ctx.lineTo(topPoints[2].x, topPoints[2].y);
+      ctx.lineTo(topPoints[3].x, topPoints[3].y);
+      ctx.fill();
+      
+      // Highlight edges
+      ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+      ctx.lineWidth = 1;
       ctx.stroke();
   }
 
-  // --- MONOLITH (The Spire) ---
-  private renderMonolithToBuffer(ctx: any, e: Entity, w: number, d: number, h: number, anchorX: number, anchorY: number) {
-      ctx.translate(anchorX, anchorY);
-      const halfW = w / 2; const halfD = d / 2;
-      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
-
-      const topT = p(-halfW, -halfD, h); const topR = p(halfW, -halfD, h); const topB = p(halfW, halfD, h); const topL = p(-halfW, halfD, h);
-      const baseB = p(halfW, halfD, 0); const baseR = p(halfW, -halfD, 0); const baseL = p(-halfW, halfD, 0);
-
-      // Gradient Fill
-      const grad = ctx.createLinearGradient(0, topT.y, 0, baseB.y);
-      grad.addColorStop(0, '#0ea5e9'); // Sky Blue
-      grad.addColorStop(1, '#0f172a'); // Slate 900
-
-      ctx.fillStyle = grad;
-      // Draw faces
-      ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(baseR.x, baseR.y); ctx.lineTo(topR.x, topR.y); ctx.lineTo(topB.x, topB.y); ctx.fill();
-      ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(baseL.x, baseL.y); ctx.lineTo(topL.x, topL.y); ctx.lineTo(topB.x, topB.y); ctx.fill();
-      
-      // Glowing Top
-      ctx.shadowBlur = 40; ctx.shadowColor = '#06b6d4';
-      ctx.fillStyle = '#cffafe';
-      ctx.beginPath(); ctx.moveTo(topT.x, topT.y); ctx.lineTo(topR.x, topR.y); ctx.lineTo(topB.x, topB.y); ctx.lineTo(topL.x, topL.y); ctx.fill();
-      ctx.shadowBlur = 0;
-
-      // Data Lines / Circuitry Pattern
-      ctx.strokeStyle = 'rgba(6, 182, 212, 0.4)';
-      ctx.lineWidth = 2;
-      ctx.beginPath(); 
-      ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(topB.x, topB.y); // Center Line
-      
-      // Horizontal bands
-      for(let i=0.1; i<1; i+=0.1) {
-          const y = baseB.y + (topB.y - baseB.y) * i;
-          ctx.moveTo(baseL.x + (topL.x - baseL.x)*i, y);
-          ctx.lineTo(baseR.x + (topR.x - baseR.x)*i, y);
-      }
-      ctx.stroke();
-  }
-
-  private applyProceduralDecay(ctx: any, e: Entity, w: number, d: number, h: number, tl: any, tr: any, tb: any) {
-      const seed = e.id;
-      const noise = (n: number) => Math.sin(seed * n) * 0.5 + 0.5;
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)'; ctx.lineWidth = 1;
-      const lines = Math.floor(noise(1) * 5) + 2;
-      for (let i = 0; i < lines; i++) {
-          const yOff = noise(i + 2) * h;
-          ctx.beginPath(); ctx.moveTo(tl.x, tl.y + yOff); ctx.lineTo(tb.x, tb.y + yOff); ctx.lineTo(tr.x, tr.y + yOff); ctx.stroke();
-      }
-  }
-
-  private drawEnergyBarrier(ctx: CanvasRenderingContext2D, e: Entity) {
-      const h = 80; const w = e.width || 100;
-      const pos = IsoUtils.toIso(e.x, e.y, 0);
-      ctx.save(); ctx.translate(pos.x, pos.y);
-      const p1 = IsoUtils.toIso(-w/2, 0, 0); const p2 = IsoUtils.toIso(w/2, 0, 0); const p3 = IsoUtils.toIso(w/2, 0, h); const p4 = IsoUtils.toIso(-w/2, 0, h);
-      ctx.fillStyle = '#333'; ctx.fillRect(p1.x - 5, p1.y - 40, 10, 40); ctx.fillRect(p2.x - 5, p2.y - 40, 10, 40);
-      ctx.globalCompositeOperation = 'screen';
-      const grad = ctx.createLinearGradient(0, p1.y, 0, p3.y); grad.addColorStop(0, `${e.color}00`); grad.addColorStop(0.5, `${e.color}60`); grad.addColorStop(1, `${e.color}00`); 
-      ctx.fillStyle = grad;
-      ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.fill();
-      ctx.restore();
+  private adjustColor(hex: string, percent: number) {
+      if (!hex || !hex.startsWith('#')) return '#333333';
+      let R = parseInt(hex.substring(1,3),16); let G = parseInt(hex.substring(3,5),16); let B = parseInt(hex.substring(5,7),16);
+      R = Math.min(255, Math.max(0, R + percent)); G = Math.min(255, Math.max(0, G + percent)); B = Math.min(255, Math.max(0, B + percent));
+      const RR = ((R.toString(16).length==1)?"0"+R.toString(16):R.toString(16)); const GG = ((G.toString(16).length==1)?"0"+G.toString(16):G.toString(16)); const BB = ((B.toString(16).length==1)?"0"+B.toString(16):B.toString(16));
+      return "#"+RR+GG+BB;
   }
 }

@@ -1,80 +1,57 @@
+
 import { Injectable } from '@angular/core';
 import { Entity, Particle } from '../../models/game.models';
+import { DepthLayer } from '../../models/render.models';
 
 @Injectable({ providedIn: 'root' })
 export class EntitySorterService {
   
-  // Reuse bucket arrays to reduce allocation
-  private buckets = new Map<number, any[]>();
-  private readonly BUCKET_SIZE = 100;
-
   sortForRender(visibleEntities: Entity[], particles: Particle[], player: Entity): any[] {
-    // Merge all renderable objects
     const renderList = [...visibleEntities, ...particles];
     
-    // Ensure player is in the list (SpatialHash might have culled if player logic differs, 
-    // but player is usually inserted. We add check to avoid duplication if player is already in visibleEntities).
-    // Note: visibleEntities comes from SpatialHash which SHOULD contain player.
-    // However, to be safe against deduplication logic in RenderService vs SpatialHash, 
-    // we can rely on SpatialHash query returning player. 
-    // If player is dead/hidden, we don't render.
+    // Sort logic:
+    // 1. DepthLayer (Ground -> Structure -> Unit -> FX)
+    // 2. Isometric Depth (x + y)
     
-    // Since RenderService passes the result of spatialHash.queryRect, and EntityUpdateService inserts player into hash,
-    // player is already in visibleEntities if within bounds. 
-    // We do NOT manually push player here anymore to avoid duplication.
-
-    // Bucket Sort Optimization
-    this.buckets.clear();
-    
-    // 1. Distribute into buckets based on ISO depth approximation (x + y)
-    for (const e of renderList) {
-        // Handle both Entity and Particle types safely
-        const depthVal = e.x + e.y;
-        const bucketIndex = Math.floor(depthVal / this.BUCKET_SIZE);
+    return renderList.sort((a, b) => {
+        const layerA = this.getLayer(a);
+        const layerB = this.getLayer(b);
         
-        if (!this.buckets.has(bucketIndex)) {
-            this.buckets.set(bucketIndex, []);
+        if (layerA !== layerB) {
+            return layerA - layerB;
         }
-        this.buckets.get(bucketIndex)!.push(e);
-    }
-
-    // 2. Sort buckets by index
-    const sortedBucketIndices = Array.from(this.buckets.keys()).sort((a, b) => a - b);
-    
-    const sortedResult: any[] = [];
-
-    // 3. Sort within buckets and merge
-    for (const idx of sortedBucketIndices) {
-        const bucket = this.buckets.get(idx)!;
         
-        // Timsort (native) is efficient for small arrays
-        bucket.sort((a, b) => {
-            const isFloorA = this.isFloorLayer(a);
-            const isFloorB = this.isFloorLayer(b);
-            if (isFloorA && !isFloorB) return -1;
-            if (!isFloorA && isFloorB) return 1;
-            
-            const isCableA = (a as any).subType === 'CABLE';
-            const isCableB = (b as any).subType === 'CABLE';
-            if (isCableA && !isCableB) return -1;
-            if (!isCableA && isCableB) return 1;
-
-            return (a.x + a.y) - (b.x + b.y);
-        });
+        // Same layer, sort by Y-Depth
+        // Particle/Entity unified coordinate access
+        const ax = (a as any).x || 0;
+        const ay = (a as any).y || 0;
+        const bx = (b as any).x || 0;
+        const by = (b as any).y || 0;
         
-        for (const item of bucket) {
-            sortedResult.push(item);
-        }
-    }
-    
-    return sortedResult;
+        return (ax + ay) - (bx + by);
+    });
   }
   
-  private isFloorLayer(e: any): boolean {
-    if (e.life !== undefined) return false; // Particle
-    const ent = e as Entity;
-    return (ent.type === 'DECORATION' && 
-      ['RUG', 'FLOOR_CRACK', 'GRAFFITI'].includes(ent.subType!)) ||
-      (ent.type === 'HITBOX' && ent.subType === 'SLUDGE');
+  private getLayer(e: any): DepthLayer {
+      // 1. Explicit Layer
+      if ((e as Entity).depthLayer !== undefined) return (e as Entity).depthLayer!;
+      
+      // 2. Particles defaults
+      if ((e as Particle).life !== undefined) return DepthLayer.FX_LOW;
+
+      // 3. Fallback inference for Entity types
+      const ent = e as Entity;
+      switch (ent.type) {
+          case 'WALL': return DepthLayer.STRUCTURES;
+          case 'NPC': 
+          case 'ENEMY':
+          case 'PLAYER': return DepthLayer.UNITS;
+          case 'PICKUP': return DepthLayer.ITEMS;
+          case 'HITBOX': return DepthLayer.FX_HIGH;
+          case 'DECORATION': 
+              if (['RUG', 'FLOOR_CRACK', 'GRAFFITI', 'TRASH'].includes(ent.subType || '')) return DepthLayer.FLOOR_DECORATION;
+              return DepthLayer.STRUCTURES;
+          default: return DepthLayer.STRUCTURES;
+      }
   }
 }
