@@ -1,3 +1,4 @@
+
 import { Injectable, inject } from '@angular/core';
 import { Entity } from '../../models/game.models';
 import { Item } from '../../models/item.models';
@@ -9,39 +10,39 @@ interface StatusIcon { type: 'poison' | 'burn' | 'stun' | 'weakness' | 'slow' | 
 @Injectable({ providedIn: 'root' })
 export class UnitRendererService {
   private inventory = inject(InventoryService);
-  private trigCache = new Map<number, {cos: number, sin: number}>();
+  
+  // Reusable vectors to prevent GC thrashing in the render loop
+  private _iso = { x: 0, y: 0 };
+  private _isoLeg = { x: 0, y: 0 };
+  private _isoBody = { x: 0, y: 0 };
+  
+  // Trig cache vars (per entity)
+  private _cos = 0;
+  private _sin = 0;
 
   drawHumanoid(ctx: CanvasRenderingContext2D, e: Entity) {
       const isPlayer = e.type === 'PLAYER'; 
       const isGuard = e.subType === 'GUARD'; 
       const isNPC = e.type === 'NPC' && !isGuard; 
       const isCitizen = e.subType === 'CITIZEN'; 
-      const isHit = e.hitFlash > 0; 
+      const isHit = e.hitFlash > 0;
+      const isStunned = e.status.stun > 0;
       const primaryColor = isHit ? '#ffffff' : (isGuard ? '#3b82f6' : e.color);
       
-      const angleKey = Math.round(e.angle * 1000) / 1000;
-      let trig = this.trigCache.get(angleKey);
-      if (!trig) {
-        trig = { cos: Math.cos(e.angle), sin: Math.sin(e.angle) };
-        this.trigCache.set(angleKey, trig);
-        if (this.trigCache.size > 360) {
-            const firstKey = this.trigCache.keys().next().value;
-            if (firstKey !== undefined) this.trigCache.delete(firstKey);
-        }
-      }
-      const cos = trig.cos;
-      const sin = trig.sin;
+      // Compute Trig once per entity
+      this._cos = Math.cos(e.angle);
+      this._sin = Math.sin(e.angle);
 
+      // Animation State
       let rArmAngle = 0; let lArmAngle = 0; let legCycle = 0; let bodyTwist = 0; let bodyZ = 0; let headZ = 0; let rHandReach = 0;
       
-      // Animation Logic
       if (e.state === 'ATTACK' && isPlayer) {
           const phase = e.animPhase; const frame = e.animFrame;
           if (phase === 'startup') { const p = frame / 1; rArmAngle = p * (-Math.PI / 1.4); bodyTwist = p * -0.3; bodyZ = p * -2; } 
           else if (phase === 'active') { const p = (frame - 2) / 2; rArmAngle = (-Math.PI / 1.4) + p * (Math.PI / 1.4 + Math.PI / 3); bodyTwist = -0.3 + p * 0.7; rHandReach = p * 15; bodyZ = -2 + p * 2; } 
           else if (phase === 'recovery') { const p = (frame - 5) / 3; rArmAngle = (Math.PI / 3) - p * (Math.PI / 3 - Math.PI / 8); bodyTwist = 0.4 - p * 0.3; rHandReach = 15 - p * 10; bodyZ = 0; }
       } else if (e.state === 'ATTACK' && !isPlayer) {
-          const p = 1 - (e.timer / 10);
+          const p = 1 - ((e.timer || 0) / 10);
           if (p < 0.25) { rArmAngle = -Math.PI / 1.4; bodyTwist = -0.3; bodyZ = -2; } else if (p < 0.6) { rArmAngle = Math.PI / 3; bodyTwist = 0.4; rHandReach = 15; bodyZ = 0; } else { rArmAngle = Math.PI / 8; bodyTwist = 0.1; rHandReach = 5; bodyZ = 0; }
       } else if (['MOVE', 'CHARGE', 'RETREAT', 'PATROL'].includes(e.state)) {
           const cycle = Math.sin((e.animFrame + (e.animFrameTimer / 6)) / 6 * Math.PI * 2);
@@ -65,36 +66,83 @@ export class UnitRendererService {
           equippedArmor = e.equipment.armor || null;
       }
 
-      const worldToIso = (wx: number, wy: number, wz: number) => {
-         const tx = wx * Math.cos(bodyTwist) - wy * Math.sin(bodyTwist); const ty = wx * Math.sin(bodyTwist) + wy * Math.cos(bodyTwist);
-         const rx = tx * cos - ty * sin; const ry = tx * sin + ty * cos;
-         return IsoUtils.toIso(e.x + rx, e.y + ry, e.z + wz + bodyZ);
+      // Glitch Effect Setup
+      if (isStunned) {
+          ctx.save();
+          const offsetX = (Math.random() - 0.5) * 4;
+          const offsetY = (Math.random() - 0.5) * 4;
+          ctx.translate(offsetX, offsetY);
+          // Chromatic aberration simulation (draw Cyan ghost)
+          if (Math.random() > 0.5) {
+              ctx.globalCompositeOperation = 'screen';
+              ctx.fillStyle = '#0ff';
+              ctx.globalAlpha = 0.5;
+          }
+      }
+
+      // Helper to transform model space to ISO screen space without allocation
+      const transformToIso = (wx: number, wy: number, wz: number, target: {x:number, y:number}) => {
+         // Apply Body Twist rotation 2D
+         const cosT = Math.cos(bodyTwist); const sinT = Math.sin(bodyTwist);
+         const tx = wx * cosT - wy * sinT; 
+         const ty = wx * sinT + wy * cosT;
+         
+         // Apply Entity rotation
+         const rx = tx * this._cos - ty * this._sin; 
+         const ry = tx * this._sin + ty * this._cos;
+         
+         IsoUtils.toIso(e.x + rx, e.y + ry, e.z + wz + bodyZ, target);
+         return target;
       };
 
-      // --- BATCH 1: LEGS (Lower Layer) ---
-      // We avoid save/restore here and just set styles directly
+      // --- BATCH 1: LEGS ---
       const legLen = 18;
-      const legIso = (wx: number, wy: number, wz: number) => { const rx = wx * cos - wy * sin; const ry = wx * sin + wy * cos; return IsoUtils.toIso(e.x + rx, e.y + ry, e.z + wz); };
+      // Leg transform doesn't twist with body
+      const legTransform = (wx: number, wy: number, wz: number, target: {x:number, y:number}) => {
+          const rx = wx * this._cos - wy * this._sin; 
+          const ry = wx * this._sin + wy * this._cos; 
+          IsoUtils.toIso(e.x + rx, e.y + ry, e.z + wz, target);
+          return target;
+      };
 
       ctx.lineWidth = 6; ctx.lineCap = 'round'; 
       ctx.strokeStyle = isGuard || isNPC ? '#1e293b' : '#27272a';
       
-      const hips = legIso(0, 0, legLen); const lExt = Math.sin(legCycle) * 10;
-      const pFootL = legIso(5, lExt, 0); const pFootR = legIso(-5, -lExt, 0);
+      const hips = legTransform(0, 0, legLen, this._iso); 
+      const lExt = Math.sin(legCycle) * 10;
+      
+      // Reuse _isoLeg for left foot, then right foot
+      const pFootL = legTransform(5, lExt, 0, this._isoLeg);
       
       ctx.beginPath(); 
       ctx.moveTo(hips.x, hips.y); ctx.lineTo(pFootL.x, pFootL.y); 
+      ctx.stroke();
+
+      const pFootR = legTransform(-5, -lExt, 0, this._isoLeg);
+      ctx.beginPath();
       ctx.moveTo(hips.x, hips.y); ctx.lineTo(pFootR.x, pFootR.y); 
       ctx.stroke();
 
-      // --- BATCH 2: BODY (Middle Layer) ---
+      // --- BATCH 2: BODY ---
       const torsoH = 20; const shoulderZ = legLen + torsoH;
-      const pWaist = worldToIso(0, 0, legLen); const pNeck = worldToIso(0, 0, shoulderZ);
-      const pLShoulder = worldToIso(10, 0, shoulderZ - 2); const pRShoulder = worldToIso(-10, 0, shoulderZ - 2);
+      const pWaist = transformToIso(0, 0, legLen, this._isoBody); 
+      const pNeck = transformToIso(0, 0, shoulderZ, this._iso); // Reuse _iso for neck
+      
+      // Store shoulders for arms
+      const pLShoulder = { x: 0, y: 0 }; transformToIso(10, 0, shoulderZ - 2, pLShoulder);
+      const pRShoulder = { x: 0, y: 0 }; transformToIso(-10, 0, shoulderZ - 2, pRShoulder);
 
       if (equippedArmor && !isHit) {
           ctx.fillStyle = equippedArmor.color; ctx.strokeStyle = '#18181b'; ctx.lineWidth = 1;
-          ctx.beginPath(); ctx.moveTo(pNeck.x, pNeck.y); ctx.lineTo(pRShoulder.x, pRShoulder.y); ctx.lineTo(pWaist.x - 5, pWaist.y); ctx.lineTo(pWaist.x + 5, pWaist.y); ctx.lineTo(pLShoulder.x, pLShoulder.y); ctx.closePath(); ctx.fill(); ctx.stroke();
+          ctx.beginPath(); 
+          ctx.moveTo(pNeck.x, pNeck.y); 
+          ctx.lineTo(pRShoulder.x, pRShoulder.y); 
+          ctx.lineTo(pWaist.x - 5, pWaist.y); 
+          ctx.lineTo(pWaist.x + 5, pWaist.y); 
+          ctx.lineTo(pLShoulder.x, pLShoulder.y); 
+          ctx.closePath(); 
+          ctx.fill(); ctx.stroke();
+          
           // Shoulders
           ctx.beginPath(); ctx.arc(pLShoulder.x, pLShoulder.y, 6, 0, Math.PI*2); ctx.fill(); ctx.stroke();
           ctx.beginPath(); ctx.arc(pRShoulder.x, pRShoulder.y, 6, 0, Math.PI*2); ctx.fill(); ctx.stroke();
@@ -103,38 +151,53 @@ export class UnitRendererService {
           ctx.beginPath(); ctx.moveTo(pWaist.x, pWaist.y); ctx.lineTo(pNeck.x, pNeck.y); ctx.stroke(); 
       }
 
-      // --- BATCH 3: HEAD (Upper Layer) ---
-      const pHead = worldToIso(0, 0, shoulderZ + 8 + headZ);
+      // --- BATCH 3: HEAD ---
+      const pHead = transformToIso(0, 0, shoulderZ + 8 + headZ, this._iso);
       ctx.fillStyle = isHit ? '#fff' : (e.type === 'PLAYER' ? '#0ea5e9' : (isGuard ? '#93c5fd' : (isNPC ? '#e4e4e7' : '#b91c1c'))); 
       if (isCitizen) ctx.fillStyle = '#a1a1aa';
+      
+      // Head bob/glitch
+      if (isStunned && Math.random() > 0.7) {
+          ctx.fillStyle = Math.random() > 0.5 ? '#f0f' : '#0ff';
+      }
       ctx.beginPath(); ctx.arc(pHead.x, pHead.y - 4, 7, 0, Math.PI*2); ctx.fill();
       
       // --- BATCH 4: ARMS ---
       ctx.lineWidth = 5; ctx.strokeStyle = isHit ? '#fff' : (equippedArmor ? '#3f3f46' : primaryColor);
-      const pHandL = worldToIso(10 + Math.cos(lArmAngle)*10, 10 + Math.sin(lArmAngle)*10, shoulderZ - 12);
+      
+      // Left Arm
+      const pHandL = transformToIso(10 + Math.cos(lArmAngle)*10, 10 + Math.sin(lArmAngle)*10, shoulderZ - 12, this._iso);
       ctx.beginPath(); ctx.moveTo(pLShoulder.x, pLShoulder.y); ctx.lineTo(pHandL.x, pHandL.y); ctx.stroke();
       
+      // Right Arm
       const reach = 12 + rHandReach;
-      const pHandR_World = worldToIso(-8 + Math.sin(rArmAngle)*10, 5 + Math.cos(rArmAngle)*reach, shoulderZ - 10);
-      ctx.beginPath(); ctx.moveTo(pRShoulder.x, pRShoulder.y); ctx.lineTo(pHandR_World.x, pHandR_World.y); ctx.stroke();
+      const pHandR = transformToIso(-8 + Math.sin(rArmAngle)*10, 5 + Math.cos(rArmAngle)*reach, shoulderZ - 10, this._iso);
+      ctx.beginPath(); ctx.moveTo(pRShoulder.x, pRShoulder.y); ctx.lineTo(pHandR.x, pHandR.y); ctx.stroke();
 
-      if (!isNPC) { this.drawWeapon(ctx, pHandR_World, rArmAngle, equippedWeapon, e.angle + bodyTwist, isHit); }
+      if (!isNPC) { this.drawWeapon(ctx, pHandR, rArmAngle, equippedWeapon, e.angle + bodyTwist, isHit); }
+      
+      // Restore Glitch State
+      if (isStunned) {
+          ctx.restore();
+      }
+
       this.drawStatusIndicators(ctx, e, pHead.x, pHead.y - 25);
       
       // Health Bar
       if (e.type === 'ENEMY' && e.hp < e.maxHp) {
-          const barPos = IsoUtils.toIso(e.x, e.y, e.z + 60);
-          ctx.fillStyle = '#000'; ctx.fillRect(barPos.x - 15, barPos.y, 30, 4);
-          ctx.fillStyle = e.hp / e.maxHp > 0.5 ? '#22c55e' : '#ef4444'; ctx.fillRect(barPos.x - 14, barPos.y + 1, 28 * (e.hp/e.maxHp), 2);
-          if (e.armor > 0) { ctx.fillStyle = '#f59e0b'; ctx.fillRect(barPos.x - 15, barPos.y - 3, 30, 2); }
+          // Reuse _iso for bar position
+          IsoUtils.toIso(e.x, e.y, e.z + 60, this._iso);
+          ctx.fillStyle = '#000'; ctx.fillRect(this._iso.x - 15, this._iso.y, 30, 4);
+          ctx.fillStyle = e.hp / e.maxHp > 0.5 ? '#22c55e' : '#ef4444'; ctx.fillRect(this._iso.x - 14, this._iso.y + 1, 28 * (e.hp/e.maxHp), 2);
+          if (e.armor > 0) { ctx.fillStyle = '#f59e0b'; ctx.fillRect(this._iso.x - 15, this._iso.y - 3, 30, 2); }
       }
   }
 
   drawNPC(ctx: CanvasRenderingContext2D, e: Entity) {
       if (e.subType === 'TRADER' || e.subType === 'MEDIC') {
-          const tablePos = IsoUtils.toIso(e.x + 20, e.y + 20, 0);
-          // Only save/restore for the transform
-          ctx.save(); ctx.translate(tablePos.x, tablePos.y); 
+          // Reusing this._iso to avoid alloc
+          IsoUtils.toIso(e.x + 20, e.y + 20, 0, this._iso);
+          ctx.save(); ctx.translate(this._iso.x, this._iso.y); 
           ctx.fillStyle = '#27272a'; ctx.fillRect(-20, -20, 40, 30); 
           ctx.fillStyle = '#3f3f46'; ctx.beginPath(); ctx.moveTo(-20, -20); ctx.lineTo(0, -30); ctx.lineTo(20, -20); ctx.lineTo(0, -10); ctx.fill(); 
           ctx.restore();
@@ -144,8 +207,8 @@ export class UnitRendererService {
       
       if (e.subType === 'CITIZEN') return;
       
-      const pos = IsoUtils.toIso(e.x, e.y, 70);
-      ctx.save(); ctx.translate(pos.x, pos.y);
+      IsoUtils.toIso(e.x, e.y, 70, this._iso);
+      ctx.save(); ctx.translate(this._iso.x, this._iso.y);
       let icon = '?'; if (e.subType === 'MEDIC') icon = '✚'; if (e.subType === 'TRADER') icon = '$'; if (e.subType === 'HANDLER') icon = '!';
       const bounce = Math.sin(Date.now() * 0.005) * 5; ctx.translate(0, bounce - 20);
       ctx.fillStyle = e.color; ctx.font = 'bold 20px monospace'; ctx.textAlign = 'center'; ctx.shadowColor = e.color; ctx.shadowBlur = 10;
@@ -186,7 +249,6 @@ export class UnitRendererService {
       icons.forEach(icon => {
           const x = screenX + xOffset; const y = screenY; const scale = 0.9 + Math.sin(Date.now() * 0.005) * 0.1;
           
-          // Optimized single save/restore per icon
           ctx.save(); 
           ctx.translate(x, y); 
           ctx.scale(scale, scale);
