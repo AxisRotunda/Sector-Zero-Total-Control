@@ -87,6 +87,7 @@ export interface Entity {
       amulet?: Item;
       ring?: Item;
   };
+  shopInventory?: Item[]; // Persistent shop stock for traders
   squadId?: number;
   aiRole?: 'ATTACKER' | 'SUPPORT' | 'TANK';
   

@@ -1,12 +1,14 @@
 
 import { Injectable, inject, signal, computed } from '@angular/core';
 import { Item, ItemType } from '../models/item.models';
+import { Entity } from '../models/game.models';
 import { ItemGeneratorService } from './item-generator.service';
 import { InventoryService } from '../game/inventory.service';
 import { SoundService } from './sound.service';
 import { PlayerProgressionService } from '../game/player/player-progression.service';
 import { NarrativeService } from '../game/narrative.service';
 import { Faction } from '../models/narrative.models';
+import { WorldService } from '../game/world/world.service';
 
 @Injectable({ providedIn: 'root' })
 export class ShopService {
@@ -15,9 +17,11 @@ export class ShopService {
   private inventory = inject(InventoryService);
   private sound = inject(SoundService);
   private narrative = inject(NarrativeService);
+  private world = inject(WorldService);
 
   merchantStock = signal<Item[]>([]);
-  currentFaction = signal<Faction['id']>('REMNANT'); // Default
+  currentFaction = signal<Faction['id']>('REMNANT'); 
+  private currentMerchantEntity: Entity | null = null;
   
   // Market Volatility: A random factor applied per shop session (0.9 to 1.1)
   private volatility = signal(1.0);
@@ -32,16 +36,33 @@ export class ShopService {
       'RESONANT': ['PSI_BLADE', 'AMULET', 'RING', 'IMPLANT']
   };
 
-  openShop(factionId: Faction['id'], level: number, difficulty: number) {
-      this.currentFaction.set(factionId);
-      this.volatility.set(0.9 + Math.random() * 0.2); // Random flux +/- 10%
-      this.generateStock(level, difficulty);
+  openShop(merchant: Entity) {
+      // 1. Determine Faction (Default to REMNANT or randomize if not set on entity)
+      const faction = merchant.factionId || (Math.random() > 0.5 ? 'VANGUARD' : 'REMNANT');
+      this.currentFaction.set(faction);
+      
+      // 2. Set Volatility
+      this.volatility.set(0.9 + Math.random() * 0.2); 
+      this.currentMerchantEntity = merchant;
+
+      // 3. Load or Generate Stock
+      if (merchant.shopInventory && merchant.shopInventory.length > 0) {
+          this.merchantStock.set(merchant.shopInventory);
+      } else {
+          // Generate new stock
+          const level = this.progression.level();
+          const difficulty = this.world.currentZone().difficultyMult;
+          const newStock = this.generateStock(faction, level, difficulty);
+          
+          merchant.shopInventory = newStock;
+          this.merchantStock.set(newStock);
+      }
   }
 
-  private generateStock(level: number, zoneDifficulty: number) {
+  private generateStock(factionId: string, level: number, zoneDifficulty: number): Item[] {
     const stock: Item[] = [];
     const count = 8 + Math.floor(Math.random() * 4);
-    const pref = this.factionPreferences[this.currentFaction()] || [];
+    const pref = this.factionPreferences[factionId] || [];
 
     for (let i = 0; i < count; i++) {
         // 50% chance to force a preferred item type
@@ -58,7 +79,7 @@ export class ShopService {
         });
         stock.push(item);
     }
-    this.merchantStock.set(stock);
+    return stock;
   }
 
   getBuyPrice(item: Item): number {
@@ -69,14 +90,12 @@ export class ShopService {
       
       let price = Math.floor(base * this.BUY_MARKUP);
       
-      // Reputation Modifier
       const rep = this.narrative.getReputation(this.currentFaction());
       let modifier = 1.0;
       if (rep > 50) modifier = 0.8; 
       else if (rep > 20) modifier = 0.9; 
       else if (rep < -30) modifier = 1.3;
       
-      // Apply Volatility
       price = Math.floor(price * modifier * this.volatility());
       return price;
   }
@@ -84,7 +103,6 @@ export class ShopService {
   getSellPrice(item: Item): number {
       let base = 50 * item.level;
       if (item.rarity === 'UNCOMMON') base *= 1.5; if (item.rarity === 'RARE') base *= 3.0;
-      // Selling is less affected by volatility, mostly markdown
       return Math.floor(base * this.SELL_MARKDOWN);
   }
 
@@ -96,13 +114,19 @@ export class ShopService {
       return Math.floor(base);
   }
 
-  buyItem(item: Item) {
+  buyItem(item: Item): boolean {
       const price = this.getBuyPrice(item);
       if (this.progression.credits() >= price) {
           if (this.inventory.addItem(item)) {
               this.progression.gainCredits(-price);
               this.sound.play('UI'); 
+              this.narrative.modifyReputation(this.currentFaction(), 1); // Small Rep gain
+
+              // Remove from both signal and source entity
               this.merchantStock.update(stock => stock.filter(i => i.id !== item.id));
+              if (this.currentMerchantEntity) {
+                  this.currentMerchantEntity.shopInventory = this.merchantStock();
+              }
               return true;
           }
       }
@@ -113,6 +137,7 @@ export class ShopService {
       const price = this.getSellPrice(item);
       this.inventory.bag.update(b => { const newBag = [...b]; newBag.splice(index, 1); return newBag; });
       this.progression.gainCredits(price);
+      this.narrative.modifyReputation(this.currentFaction(), 1); // Small Rep gain
       this.sound.play('UI');
   }
 
@@ -120,6 +145,6 @@ export class ShopService {
       const scrap = this.getSalvageYield(item);
       this.inventory.bag.update(b => { const newBag = [...b]; newBag.splice(index, 1); return newBag; });
       this.progression.gainScrap(scrap);
-      this.sound.play('CRAFT'); // Or a heavy mechanical sound
+      this.sound.play('CRAFT');
   }
 }

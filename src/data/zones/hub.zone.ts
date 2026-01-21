@@ -36,17 +36,51 @@ export const HUB_ZONE: ZoneTemplate = {
 
   entities: {
     static: [
-      // NPCs
+      // --- KEY NPCS ---
       { type: 'NPC', subType: 'HANDLER', x: 0, y: -400, data: { dialogueId: 'start_1', color: '#3b82f6' } },
       { type: 'NPC', subType: 'CONSOLE', x: -100, y: -400, data: { dialogueId: 'start_1', color: '#06b6d4' } },
-      { type: 'NPC', subType: 'GUARD', x: 250, y: 1300, data: { dialogueId: 'gate_locked', color: '#3b82f6' } },
       
       // Med Bay
       { type: 'NPC', subType: 'MEDIC', x: 1100, y: 0, data: { dialogueId: 'medic_intro', color: '#ef4444' } },
-      { type: 'DECORATION', subType: 'RUG', x: 1100, y: 0, data: { width: 400, height: 500, color: '#e2e8f0' } },
       
       // Market
       { type: 'NPC', subType: 'TRADER', x: -1100, y: 0, data: { dialogueId: 'generic', color: '#eab308' } },
+
+      // --- PATROLLING GUARDS ---
+      // Gate Guard (Static)
+      { type: 'NPC', subType: 'GUARD', x: 250, y: 1300, data: { dialogueId: 'gate_locked', color: '#3b82f6' } },
+      
+      // Plaza Patrol (Triangle Route)
+      { 
+        type: 'NPC', subType: 'GUARD', x: 0, y: 0, 
+        data: { 
+          color: '#1d4ed8', 
+          dialogueId: 'generic_guard',
+          patrolPoints: [{x: -300, y: 200}, {x: 300, y: 200}, {x: 0, y: -200}] 
+        } 
+      },
+      // Spire Patrol (Linear)
+      { 
+        type: 'NPC', subType: 'GUARD', x: 0, y: -800, 
+        data: { 
+          color: '#1d4ed8', 
+          dialogueId: 'generic_guard',
+          patrolPoints: [{x: -400, y: -800}, {x: 400, y: -800}] 
+        } 
+      },
+
+      // --- AMBIENT CITIZENS (Market & Slums) ---
+      // Market Crowd
+      { type: 'NPC', subType: 'CITIZEN', x: -900, y: -100, data: { dialogueId: 'citizen_bark', color: '#71717a', homeX: -900, homeY: -100, wanderRadius: 150 } },
+      { type: 'NPC', subType: 'CITIZEN', x: -1000, y: 150, data: { dialogueId: 'citizen_bark', color: '#52525b', homeX: -1000, homeY: 150, wanderRadius: 100 } },
+      { type: 'NPC', subType: 'CITIZEN', x: -850, y: 50, data: { dialogueId: 'citizen_bark', color: '#a1a1aa', homeX: -850, homeY: 50, wanderRadius: 120 } },
+      
+      // Med Bay Queue
+      { type: 'NPC', subType: 'CITIZEN', x: 950, y: 50, data: { dialogueId: 'citizen_bark', color: '#71717a', homeX: 950, homeY: 50, wanderRadius: 50 } },
+      { type: 'NPC', subType: 'CITIZEN', x: 950, y: -50, data: { dialogueId: 'citizen_bark', color: '#52525b', homeX: 950, homeY: -50, wanderRadius: 50 } },
+
+      // --- DECORATIONS ---
+      { type: 'DECORATION', subType: 'RUG', x: 1100, y: 0, data: { width: 400, height: 500, color: '#e2e8f0' } },
       { type: 'DECORATION', subType: 'RUG', x: -1100, y: 0, data: { width: 400, height: 500, color: '#1c1917' } },
       { type: 'DECORATION', subType: 'VENDING_MACHINE', x: -1250, y: -100 },
       { type: 'DECORATION', subType: 'VENDING_MACHINE', x: -1250, y: 100 },
@@ -71,7 +105,6 @@ export const HUB_ZONE: ZoneTemplate = {
       targetZoneId: 'SECTOR_9_N', 
       transitionType: 'GATE', 
       locked: true,
-      // direction: 'DOWN' (Implicit default in sector-loader, removed as per plan to favor transitionType logic)
     }
   ],
 

@@ -113,6 +113,7 @@ export class SectorLoaderService {
           if (def.data.color) e.color = def.data.color;
           if (def.data.width) e.width = def.data.width;
           if (def.data.height) e.height = def.data.height;
+          
           if (def.data.targetX !== undefined) {
               e.targetX = def.data.targetX;
               e.targetY = def.data.targetY;
@@ -127,6 +128,11 @@ export class SectorLoaderService {
               e.color = '#333'; 
               e.radius = 20;
           }
+          // AI Properties
+          if (def.data.patrolPoints) e.patrolPoints = def.data.patrolPoints;
+          if (def.data.homeX !== undefined) e.homeX = def.data.homeX;
+          if (def.data.homeY !== undefined) e.homeY = def.data.homeY;
+          if (def.data.wanderRadius !== undefined) e.aggroRadius = def.data.wanderRadius; // Reuse aggro for wander bounds
       }
       
       if (e.type === 'NPC') {

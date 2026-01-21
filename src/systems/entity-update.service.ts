@@ -32,12 +32,10 @@ export class EntityUpdateService {
     if (this.world.player.hp <= 0) return;
     
     // Only clear dynamic entities for the current zone. Static walls persist.
-    // Use the zone ID to target the correct hash bucket.
     const currentZoneId = this.world.currentZone().id;
     this.spatialHash.clearDynamic(currentZoneId);
     
     // Insert dynamic entities
-    // Ensure player is inserted into the correct zone buckets
     this.spatialHash.insert(this.world.player, false);
     
     this.world.entities.forEach(e => { 
@@ -55,18 +53,25 @@ export class EntityUpdateService {
     this.world.entities.forEach(e => {
         if (e.state === 'DEAD') return; 
         
-        // Static walls don't need updates usually, skip them for performance
         if (e.type === 'WALL') return;
 
         if (e.hitStopFrames && e.hitStopFrames > 0) {
             e.hitStopFrames--; if (e.hitStopFrames <= 0) e.isHitStunned = false; return;
         }
         if (e.type === 'SPAWNER') { spawners.push(e); return; }
+        
         if (e.type === 'NPC') {
             if (e.subType === 'TURRET') this.npcService.updateTurret(e);
             else if (e.subType === 'GUARD') this.npcService.updateGuard(e);
-            else this.npcService.updateGenericNpc(e); // Ensure idle animation for traders/handlers
+            else if (e.subType === 'CITIZEN') this.npcService.updateCitizen(e);
+            else this.npcService.updateGenericNpc(e); 
+            
+            // Physics for moving NPCs
+            if (e.vx !== 0 || e.vy !== 0) {
+                this.physics.updateEntityPhysics(e);
+            }
         }
+        
         if (e.type === 'HITBOX' && e.subType === 'VENT') {
             this.npcService.updateSteamVent(e);
             if (e.state === 'ACTIVE') this.collision.checkHitboxCollisions(e);
@@ -75,16 +80,21 @@ export class EntityUpdateService {
         if (e.type === 'HITBOX' && e.subType === 'SLUDGE') {
             this.npcService.updateSludge(e, globalTime); this.collision.checkHitboxCollisions(e); return;
         }
+        
         this.statusEffect.processStatusEffects(e, globalTime);
+        
         if (e.hp <= 0 && e.type !== 'EXIT' && e.type !== 'NPC' && e.type !== 'SHRINE' && e.type !== 'HITBOX') {
             if (isEnemy(e)) this.combat.killEnemy(e);
             if (isDestructible(e)) this.combat.destroyObject(e);
             return;
         }
+        
         if (e.status.stun > 0) {
             e.status.stun--; e.vx *= 0.9; e.vy *= 0.9; this.physics.updateEntityPhysics(e); return;
         }
         if (e.hitFlash > 0) e.hitFlash--;
+        
+        // Physics update for non-NPCs handled above
         if (e.type !== 'HITBOX' && e.type !== 'PICKUP' && e.type !== 'EXIT' && e.type !== 'NPC' && e.type !== 'DECORATION' && e.type !== 'SHRINE') {
             this.physics.updateEntityPhysics(e);
         } else if (e.type === 'HITBOX') { e.x += e.vx; e.y += e.vy;

@@ -8,6 +8,10 @@ import { EventBusService } from '../core/events/event-bus.service';
 import { GameEvents } from '../core/events/game-events';
 import { HapticService } from './haptic.service';
 import { WorldService } from '../game/world/world.service';
+import { ShopService } from './shop.service';
+import { DialogueService } from './dialogue.service';
+import { UiPanelService } from './ui-panel.service';
+import { MissionService } from '../game/mission.service';
 
 @Injectable({
   providedIn: 'root'
@@ -19,6 +23,10 @@ export class InteractionService {
   private eventBus = inject(EventBusService);
   private haptic = inject(HapticService);
   private world = inject(WorldService);
+  private shopService = inject(ShopService);
+  private dialogueService = inject(DialogueService);
+  private ui = inject(UiPanelService);
+  private missionService = inject(MissionService);
 
   nearbyInteractable = signal<Entity | null>(null);
   activeInteractable = computed(() => { 
@@ -30,16 +38,29 @@ export class InteractionService {
   requestedFloorChange = signal<'UP' | 'DOWN' | string | null>(null);
 
   update(player: Entity, globalTime: number) {
-      let foundInteractable: Entity | null = null;
-      // Query slightly larger than interaction radius to ensure detection
-      const nearby = this.spatialHash.query(player.x, player.y, 150);
+      let bestTarget: Entity | null = null;
+      let bestScore = Infinity;
+
+      // Increased search radius to catch entities comfortably
+      const nearby = this.spatialHash.query(player.x, player.y, 250);
       
+      const px = player.x;
+      const py = player.y;
+      // Player direction vector
+      const pDirX = Math.cos(player.angle);
+      const pDirY = Math.sin(player.angle);
+
       for(const e of nearby) {
-          // 1. Exits (Auto-trigger or Manual)
+          // Calculate distance
+          const dx = e.x - px;
+          const dy = e.y - py;
+          const dist = Math.hypot(dx, dy);
+          const combinedRadius = player.radius + (e.radius || 20);
+          
+          // 1. Exits (Auto-trigger check, no interaction prompt usually unless manual)
+          // Exits behave differently; they auto-trigger.
           if (e.type === 'EXIT') {
-               const dist = Math.hypot(e.x - player.x, e.y - player.y);
-               // Trigger radius for exits
-               if (dist < 40) {
+               if (dist < combinedRadius + 20) {
                     if (!e.locked) {
                         if ((e as any).targetSector) {
                             this.requestedFloorChange.set((e as any).targetSector);
@@ -54,16 +75,36 @@ export class InteractionService {
                         });
                         this.haptic.error();
                     }
-                    // Exit takes priority, return immediately
                     return;
                }
           }
           
-          // 2. NPCs (Dialogue/Trade)
-          if (e.type === 'NPC') {
-               const dist = Math.hypot(e.x - player.x, e.y - player.y);
-               if (dist < (e.interactionRadius || 80)) {
-                   foundInteractable = e;
+          // 2. Selectable Targets (NPCs, Terminals)
+          if (e.type === 'NPC' || (e.type === 'TERMINAL' && !e.accessed)) {
+               const interactRange = (e.interactionRadius || 100) + combinedRadius + 50; // +50 buffer
+               
+               if (dist < interactRange) {
+                   // Calculate "Facing Score"
+                   // Normalize direction to target
+                   const tDirX = dx / dist;
+                   const tDirY = dy / dist;
+                   
+                   // Dot product: 1 = directly in front, -1 = behind
+                   const dot = (pDirX * tDirX) + (pDirY * tDirY);
+                   
+                   // Score: Lower is better. 
+                   // Distance is primary, but facing grants a significant "effective distance" reduction.
+                   // A target 150 units away in FRONT (dot=1) scores 150 - 100 = 50.
+                   // A target 80 units away BEHIND (dot=-1) scores 80 - (-100) = 180.
+                   // This biases selection towards what the player is looking at.
+                   const score = dist - (dot * 100);
+
+                   if (score < bestScore) {
+                       bestScore = score;
+                       bestTarget = e;
+                   }
+                   
+                   // Discovery check happens on proximity regardless of selection
                    if (e.subType && this.narrative.discoverEntity(e.subType)) {
                        this.eventBus.dispatch({ 
                            type: GameEvents.FLOATING_TEXT_SPAWN, 
@@ -72,20 +113,44 @@ export class InteractionService {
                    }
                }
           }
-          
-          // 3. Terminals (Lore/Mechanics)
-          if (e.type === 'TERMINAL' && !e.accessed) {
-               const dist = Math.hypot(e.x - player.x, e.y - player.y);
-               if (dist < 60) this.processTerminal(e);
-          }
       }
       
-      // Haptic bump when finding a new interactable
-      if (foundInteractable && this.nearbyInteractable()?.id !== foundInteractable.id) {
+      // Haptic bump when changing targets
+      if (bestTarget && this.nearbyInteractable()?.id !== bestTarget.id) {
           this.haptic.impactLight();
       }
       
-      this.nearbyInteractable.set(foundInteractable);
+      this.nearbyInteractable.set(bestTarget);
+  }
+
+  // Called by UI when user taps interact
+  interact(target: Entity) {
+      if (!target) return;
+      
+      this.haptic.impactLight(); // Feedback on action
+
+      if (target.subType === 'TRADER') {
+          this.shopService.openShop(target);
+          this.ui.openPanel('SHOP');
+      } else if (['HANDLER', 'CITIZEN', 'ECHO', 'GUARD', 'MEDIC'].includes(target.subType || '')) {
+          if (target.subType) this.missionService.onTalk(target.subType);
+          this.dialogueService.startDialogue(target.dialogueId || 'generic');
+      } else if (target.type === 'TERMINAL') {
+          this.processTerminal(target);
+      } else {
+          this.dialogueService.startDialogue(target.dialogueId || 'generic');
+      }
+  }
+
+  getInteractLabel(target: Entity): string {
+      switch(target.subType) {
+          case 'MEDIC': return 'MEDICAL ASSIST';
+          case 'TRADER': return 'MARKET ACCESS';
+          case 'HANDLER': return 'BRIEFING';
+          case 'CONSOLE': return 'TERMINAL';
+          case 'CITIZEN': return 'CONVERSE';
+          default: return 'INTERACT';
+      }
   }
 
   private processTerminal(e: Entity) {

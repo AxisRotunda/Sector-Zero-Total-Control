@@ -120,7 +120,7 @@ export class MissionService {
           title: 'Sector Patrol',
           description: 'Clear hostiles in the area.',
           category: 'RADIANT',
-          objectives: [{ type: 'KILL', targetId: 'ENEMY', targetAmount: killAmount, currentAmount: 0, description: 'Neutralize Hostiles' }], // Radiant typically doesn't have fixed coords
+          objectives: [{ type: 'KILL', targetId: 'ENEMY', targetAmount: killAmount, currentAmount: 0, description: 'Neutralize Hostiles' }], 
           rewardXp: 100 * (depth + 1),
           rewardCredits: 50 * (depth + 1),
           state: 'ACTIVE'
@@ -130,10 +130,11 @@ export class MissionService {
 
   onEnemyKill(type: string) { this.updateObjectives('KILL', type); this.updateObjectives('KILL', 'ENEMY'); }
   onCollect(itemId: string = '') { this.updateObjectives('COLLECT', itemId); }
+  
   onTalk(npcId: string) { 
-      this.updateObjectives('TALK', npcId); 
-      if (npcId === 'HANDLER' && this.isQuestActive('MQ_01_ARRIVAL')) { this.completeQuest('MQ_01_ARRIVAL'); this.startQuest('MQ_02_DESCEND'); }
+      this.updateObjectives('TALK', npcId);
   }
+  
   onInteract(targetId: string) { this.updateObjectives('INTERACT', targetId); }
 
   private updateObjectives(type: MissionType, targetId: string) {
@@ -145,16 +146,27 @@ export class MissionService {
                       return { ...obj, currentAmount: obj.currentAmount + 1 };
                   } return obj;
               });
+              // Note: We don't auto-complete quests here for all types. TALK objectives often complete via dialogue action.
+              // But for KILL/COLLECT, we could.
+              // For now, we rely on manual 'completeQuest' call for story beats, or simple auto-complete for radiant.
               const allComplete = updatedObjectives.every(o => o.currentAmount >= o.targetAmount);
-              if (allComplete) { this.completeQuest(m.id); return { ...m, objectives: updatedObjectives, state: 'COMPLETE' }; }
+              
+              // Auto-complete Radiant or Collect missions
+              if (allComplete && (m.category === 'RADIANT' || type === 'KILL')) { 
+                  // Use setTimeout to avoid update loop issues if called from render/update cycle
+                  setTimeout(() => this.completeQuest(m.id), 0);
+                  return { ...m, objectives: updatedObjectives, state: 'COMPLETE' }; 
+              }
+              
               return { ...m, objectives: updatedObjectives };
           });
       });
   }
 
-  private completeQuest(id: string) {
+  public completeQuest(id: string) {
       const mission = this.activeMissions().find(m => m.id === id);
-      if (!mission) return;
+      if (!mission) return; // Already completed or not active
+      
       this.eventBus.dispatch({ type: GameEvents.FLOATING_TEXT_SPAWN, payload: { onPlayer: true, yOffset: -80, text: "DIRECTIVE COMPLETE", color: '#22c55e', size: 30 } });
       this.claimReward(mission);
   }
@@ -164,6 +176,9 @@ export class MissionService {
       this.completedMissionIds.update(set => { const newSet = new Set(set); newSet.add(mission.id); return newSet; });
       if (mission.unlocksFlag) this.narrative.setFlag(mission.unlocksFlag, true);
       if (mission.factionRep) this.narrative.modifyReputation(mission.factionRep.factionId as any, mission.factionRep.amount);
+      
+      this.player.gainXp(mission.rewardXp);
+      this.player.gainCredits(mission.rewardCredits);
   }
 
   isQuestActive(id: string): boolean { return this.activeMissions().some(m => m.id === id); }

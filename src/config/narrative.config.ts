@@ -198,7 +198,15 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     'start_3': { 
         id: 'start_3', speaker: 'Handler', factionId: 'VANGUARD',
         text: "Aggression is a virtue. Secure the gate to Sector 9. Terminate resistance.", 
-        options: [{ text: "Moving out.", nextId: undefined }] 
+        options: [{ 
+            text: "Moving out.", 
+            nextId: undefined,
+            // Automatically complete the arrival mission and start the next
+            actions: [
+                { type: 'COMPLETE_MISSION', target: 'MQ_01_ARRIVAL' },
+                { type: 'START_MISSION', target: 'MQ_02_DESCEND' }
+            ]
+        }] 
     },
     'medic_intro': { 
         id: 'medic_intro', speaker: 'Doc', factionId: 'REMNANT', mood: 'NEUTRAL',
@@ -234,5 +242,13 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     },
     'generic': {
         id: 'generic', speaker: 'Unknown', text: "...", options: [{ text: "Leave", nextId: undefined }]
+    },
+    'citizen_bark': {
+        id: 'citizen_bark', speaker: 'Refugee', text: "We're just trying to survive... leave us be.", 
+        options: [{ text: "Move along.", nextId: undefined }]
+    },
+    'generic_guard': {
+        id: 'generic_guard', speaker: 'Vanguard Unit', factionId: 'VANGUARD', text: "Move along, Operative. Perimeter is secure.",
+        options: [{ text: "Acknowledged.", nextId: undefined }]
     }
 };

@@ -108,4 +108,46 @@ export class EffectRendererService {
       IsoUtils.toIso(e.x, e.y, e.z, this._pos);
       ctx.save(); ctx.translate(this._pos.x, this._pos.y); ctx.scale(1, 0.5); ctx.strokeStyle = '#0f0'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(0, 0, e.radius, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
   }
+
+  drawInteractionIndicator(ctx: CanvasRenderingContext2D, e: Entity) {
+      if (!e) return;
+      IsoUtils.toIso(e.x, e.y, 100, this._pos);
+      
+      const time = Date.now() * 0.005;
+      const hoverY = Math.sin(time) * 5;
+      
+      ctx.save();
+      ctx.translate(this._pos.x, this._pos.y + hoverY);
+      
+      // Draw Bracket
+      ctx.strokeStyle = '#22c55e';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = '#22c55e';
+      ctx.shadowBlur = 10;
+      
+      // Left Bracket
+      ctx.beginPath();
+      ctx.moveTo(-15, -20);
+      ctx.lineTo(-20, -20);
+      ctx.lineTo(-20, 20);
+      ctx.lineTo(-15, 20);
+      ctx.stroke();
+      
+      // Right Bracket
+      ctx.beginPath();
+      ctx.moveTo(15, -20);
+      ctx.lineTo(20, -20);
+      ctx.lineTo(20, 20);
+      ctx.lineTo(15, 20);
+      ctx.stroke();
+      
+      // Text "INTERACT"
+      ctx.font = 'bold 10px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#fff';
+      ctx.shadowBlur = 0;
+      ctx.fillText("INTERACT", 0, -30);
+      
+      ctx.restore();
+  }
 }

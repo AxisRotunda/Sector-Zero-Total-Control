@@ -40,28 +40,137 @@ export class NpcUpdateService {
   }
 
   updateGuard(g: Entity) {
+      this.checkPlayerAwareness(g);
+
       if (!g.patrolPoints || g.patrolPoints.length === 0) {
-          // Idle animation if static guard
-          g.animFrameTimer++; 
-          if (g.animFrameTimer > 12) { g.animFrame = (g.animFrame + 1) % 4; g.animFrameTimer = 0; }
+          this.animateIdle(g);
           return;
       }
+      
       if (g.patrolIndex === undefined) g.patrolIndex = 0;
       const target = g.patrolPoints[g.patrolIndex];
-      const dist = Math.hypot(target.x - g.x, target.y - g.y);
-      if (dist < 10) { g.patrolIndex = (g.patrolIndex + 1) % g.patrolPoints.length; g.state = 'IDLE'; return; }
+      
+      const dx = target.x - g.x;
+      const dy = target.y - g.y;
+      const dist = Math.hypot(dx, dy);
+      
+      if (dist < 10) { 
+          g.patrolIndex = (g.patrolIndex + 1) % g.patrolPoints.length; 
+          // Pause briefly at patrol point
+          g.timer = 60; 
+          g.state = 'IDLE';
+          return; 
+      }
+
+      if (g.timer && g.timer > 0) {
+          g.timer--;
+          this.animateIdle(g);
+          return;
+      }
+
       g.state = 'MOVE';
-      const angle = Math.atan2(target.y - g.y, target.x - g.x);
-      g.angle = angle; g.vx += Math.cos(angle) * 0.5; g.vy += Math.sin(angle) * 0.5;
-      g.animFrameTimer++; if (g.animFrameTimer > 6) { g.animFrame = (g.animFrame + 1) % 6; g.animFrameTimer = 0; }
+      const angle = Math.atan2(dy, dx);
+      // Smooth turn
+      const angleDiff = angle - g.angle;
+      g.angle += angleDiff * 0.1;
+      
+      g.vx += Math.cos(angle) * 0.5; 
+      g.vy += Math.sin(angle) * 0.5;
+      
+      this.animateMove(g);
   }
 
   updateGenericNpc(npc: Entity) {
-      // Basic idle breathing
+      this.checkPlayerAwareness(npc);
+      this.animateIdle(npc);
+  }
+
+  updateCitizen(c: Entity) {
+      this.checkPlayerAwareness(c);
+
+      // Wander Logic
+      if (c.timer && c.timer > 0) {
+          c.timer--;
+          // While waiting, just breathe
+          this.animateIdle(c);
+      } else {
+          // If no target, pick one within wanderRadius of home
+          if (c.targetX === undefined || c.targetY === undefined) {
+              const r = c.aggroRadius || 100; // Reuse aggroRadius as wander radius if not set explicit
+              const homeX = c.homeX || c.x;
+              const homeY = c.homeY || c.y;
+              
+              const angle = Math.random() * Math.PI * 2;
+              const dist = Math.random() * r;
+              
+              c.targetX = homeX + Math.cos(angle) * dist;
+              c.targetY = homeY + Math.sin(angle) * dist;
+              c.state = 'MOVE';
+          }
+
+          // Move to target
+          const dx = c.targetX - c.x;
+          const dy = c.targetY - c.y;
+          const dist = Math.hypot(dx, dy);
+
+          if (dist < 5) {
+              // Arrived
+              c.targetX = undefined;
+              c.targetY = undefined;
+              c.state = 'IDLE';
+              c.timer = 120 + Math.random() * 200; // Pause for 2-5 seconds
+          } else {
+              const angle = Math.atan2(dy, dx);
+              // Smooth rotation
+              let diff = angle - c.angle;
+              // Normalize angle
+              while (diff < -Math.PI) diff += Math.PI * 2;
+              while (diff > Math.PI) diff -= Math.PI * 2;
+              c.angle += diff * 0.1;
+
+              const speed = 0.3; // Slow walk
+              c.vx += Math.cos(angle) * speed;
+              c.vy += Math.sin(angle) * speed;
+              this.animateMove(c);
+          }
+      }
+  }
+
+  // --- Helpers ---
+
+  private checkPlayerAwareness(npc: Entity) {
+      const player = this.world.player;
+      const dx = player.x - npc.x;
+      const dy = player.y - npc.y;
+      const dist = Math.hypot(dx, dy);
+      
+      // Look at player if close but not *too* close (personal space)
+      if (dist < 150 && dist > 30) {
+          const targetAngle = Math.atan2(dy, dx);
+          let diff = targetAngle - npc.angle;
+          while (diff < -Math.PI) diff += Math.PI * 2;
+          while (diff > Math.PI) diff -= Math.PI * 2;
+          
+          // Only turn head/body if moving slowly or idle
+          if (Math.abs(npc.vx) < 0.1 && Math.abs(npc.vy) < 0.1) {
+              npc.angle += diff * 0.1;
+          }
+      }
+  }
+
+  private animateIdle(npc: Entity) {
       npc.animFrameTimer++;
       if (npc.animFrameTimer > 15) {
           npc.animFrame = (npc.animFrame + 1) % 4;
           npc.animFrameTimer = 0;
+      }
+  }
+
+  private animateMove(npc: Entity) {
+      npc.animFrameTimer++; 
+      if (npc.animFrameTimer > 8) { 
+          npc.animFrame = (npc.animFrame + 1) % 6; 
+          npc.animFrameTimer = 0; 
       }
   }
 

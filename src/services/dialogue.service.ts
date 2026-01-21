@@ -1,3 +1,4 @@
+
 import { Injectable, signal, inject, OnDestroy } from '@angular/core';
 import { NarrativeService } from '../game/narrative.service';
 import { PlayerService } from '../game/player/player.service';
@@ -148,6 +149,9 @@ export class DialogueService implements OnDestroy {
                   break;
               case 'START_MISSION':
                   this.mission.startQuest(act.target!);
+                  break;
+              case 'COMPLETE_MISSION':
+                  this.mission.completeQuest(act.target!);
                   break;
           }
       });

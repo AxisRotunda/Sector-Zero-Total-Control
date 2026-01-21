@@ -14,6 +14,7 @@ import { EntitySorterService } from './rendering/entity-sorter.service';
 import { RENDER_CONFIG } from './rendering/render.config';
 import { InputService } from '../services/input.service';
 import { SpatialHashService } from './spatial-hash.service';
+import { InteractionService } from '../services/interaction.service';
 
 @Injectable({
   providedIn: 'root'
@@ -27,6 +28,7 @@ export class RenderService {
   private sorter = inject(EntitySorterService);
   private inputService = inject(InputService);
   private spatialHash = inject(SpatialHashService);
+  private interaction = inject(InteractionService);
   
   private floorRenderer = inject(FloorRendererService);
   private structureRenderer = inject(StructureRendererService);
@@ -196,6 +198,12 @@ export class RenderService {
     // --- PASS 6: EFFECTS & UI OVERLAYS ---
     this.effectRenderer.drawGlobalEffects(this.ctx, renderableEntities, player, zone, rainDrops);
     this.effectRenderer.drawFloatingTexts(this.ctx, texts, cam);
+    
+    // Draw Interaction Indicator
+    const activeTarget = this.interaction.activeInteractable();
+    if (activeTarget) {
+        this.effectRenderer.drawInteractionIndicator(this.ctx, activeTarget);
+    }
 
     this.ctx.restore();
     

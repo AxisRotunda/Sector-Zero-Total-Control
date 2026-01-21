@@ -19,13 +19,15 @@ import { ShopService } from '../services/shop.service';
 import { FACTIONS } from '../config/narrative.config';
 import { GlitchTextComponent } from './glitch-text.component';
 import { Subscription } from 'rxjs';
+import { InteractionService } from '../services/interaction.service';
 
 @Component({
   selector: 'app-hud',
   standalone: true,
   imports: [CommonModule, MapComponent, TutorialOverlayComponent, GlitchTextComponent],
   template: `
-    <div class="absolute inset-0 z-10 flex flex-col pointer-events-none pt-safe pb-safe pl-safe pr-safe">
+    <!-- Z-Index 40 to ensure HUD sits ABOVE the Joystick (Z-10) and Action Buttons -->
+    <div class="absolute inset-0 z-40 flex flex-col pointer-events-none pt-safe pb-safe pl-safe pr-safe">
         
         <app-tutorial-overlay></app-tutorial-overlay>
 
@@ -104,7 +106,7 @@ import { Subscription } from 'rxjs';
                    <span class="text-[7px] text-zinc-600 group-hover:text-zinc-400">QUEST</span>
                 </button>
                 <button (mousedown)="mapService.toggleSettings()" class="w-12 h-10 bg-zinc-900 border border-zinc-700 hover:border-zinc-400 flex flex-col items-center justify-center transition-all group active:scale-95">
-                   <svg viewBox="0 0 24 24" class="w-5 h-5 fill-zinc-500 group-hover:fill-white"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L3.16 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.58 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6 3.6z"></path></svg>
+                   <svg viewBox="0 0 24 24" class="w-5 h-5 fill-zinc-500 group-hover:fill-white"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L3.16 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.58 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6 3.6 1.62 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6 1.62 3.6-3.6 3.6 1.62 3.6-3.6 3.6 3.6z"></path></svg>
                 </button>
              </div>
           </div>
@@ -143,13 +145,18 @@ import { Subscription } from 'rxjs';
         }
 
         <!-- INTERACT BUTTON -->
-        @if (playerControl.activeInteractable() && !dialogueService.activeDialogue(); as target) {
-            <div class="absolute bottom-40 left-0 right-0 flex justify-center pointer-events-auto animate-in fade-in slide-in-from-bottom-4">
-                 <button (mousedown)="interact(target)" 
-                         class="group relative overflow-hidden bg-zinc-900/90 border-2 transition-all active:scale-95 py-4 px-12 rounded-full backdrop-blur-md shadow-[0_0_30px_rgba(0,0,0,0.5)] flex items-center gap-4"
+        @if (interaction.activeInteractable() && !dialogueService.activeDialogue(); as target) {
+            <!-- Centered horizontally, lifted up to avoid joystick overlap zone -->
+            <div class="absolute bottom-48 left-0 right-0 flex justify-center pointer-events-auto z-50 animate-in fade-in slide-in-from-bottom-4">
+                 <button (click)="interact(target)" 
+                         (touchstart)="interact(target)"
+                         class="group relative overflow-hidden bg-zinc-900/95 border-2 transition-all active:scale-95 py-4 px-12 rounded-full backdrop-blur-md shadow-[0_0_30px_rgba(0,0,0,0.8)] flex items-center gap-4 cursor-pointer"
                          [class.border-blue-500]="target.subType !== 'MEDIC'"
                          [class.border-red-500]="target.subType === 'MEDIC'">
-                     <span class="text-3xl" [class.text-red-400]="target.subType === 'MEDIC'" [class.text-blue-400]="target.subType !== 'MEDIC'">
+                     
+                     <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
+
+                     <span class="text-3xl font-black" [class.text-red-400]="target.subType === 'MEDIC'" [class.text-blue-400]="target.subType !== 'MEDIC'">
                         @if(target.subType === 'MEDIC') { ✚ }
                         @else if(target.subType === 'TRADER') { ⟳ }
                         @else if(target.subType === 'HANDLER') { ! }
@@ -158,8 +165,10 @@ import { Subscription } from 'rxjs';
                         @else { ? }
                      </span>
                      <div class="flex flex-col items-start">
-                         <span class="font-bold tracking-widest text-white text-base uppercase">{{ getInteractLabel(target) }}</span>
-                         <span class="text-[9px] text-zinc-400 font-mono">TAP TO ENGAGE</span>
+                         <span class="font-bold tracking-widest text-white text-base uppercase">{{ interaction.getInteractLabel(target) }}</span>
+                         <span class="text-[9px] text-zinc-400 font-mono">
+                            {{ input.usingKeyboard() ? '[F] TO ENGAGE' : 'TAP TO ENGAGE' }}
+                         </span>
                      </div>
                  </button>
             </div>
@@ -179,6 +188,7 @@ export class HudComponent implements OnDestroy {
   input = inject(InputService);
   shopService = inject(ShopService);
   eventBus = inject(EventBusService);
+  interaction = inject(InteractionService);
   FACTIONS = FACTIONS;
   
   openInventory = output<void>();
@@ -203,28 +213,7 @@ export class HudComponent implements OnDestroy {
       if (this.sub) this.sub.unsubscribe();
   }
 
-  getInteractLabel(target: any): string {
-      switch(target.subType) {
-          case 'MEDIC': return 'MEDICAL ASSIST';
-          case 'TRADER': return 'MARKET ACCESS';
-          case 'HANDLER': return 'BRIEFING';
-          case 'CONSOLE': return 'TERMINAL';
-          case 'CITIZEN': return 'CONVERSE';
-          default: return 'INTERACT';
-      }
-  }
-
   interact(target: any) {
-      if (['HANDLER', 'CITIZEN', 'ECHO', 'GUARD', 'MEDIC'].includes(target.subType)) {
-          this.mission.onTalk(target.subType);
-          this.dialogueService.startDialogue(target.dialogueId || 'generic');
-      } else if (target.subType === 'TRADER') {
-          const faction = Math.random() > 0.5 ? 'VANGUARD' : 'REMNANT';
-          const difficulty = this.world.currentZone().difficultyMult;
-          this.shopService.openShop(faction, this.player.progression.level(), difficulty);
-          this.openShop.emit();
-      } else {
-          this.dialogueService.startDialogue(target.dialogueId || 'generic');
-      }
+      this.interaction.interact(target);
   }
 }

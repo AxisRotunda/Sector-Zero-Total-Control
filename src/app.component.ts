@@ -1,3 +1,4 @@
+
 import { Component, ElementRef, OnInit, ViewChild, inject, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { GameEngineService } from './game/game-engine.service';
@@ -7,25 +8,27 @@ import { RenderService } from './systems/render.service';
 import { PersistenceService } from './core/persistence.service';
 import { PlayerService } from './game/player/player.service';
 import { WorldService } from './game/world/world.service';
+import { ShopService } from './services/shop.service';
+import { MapService } from './services/map.service';
+import { PlayerControlService } from './systems/player-control.service';
+import { DialogueService } from './services/dialogue.service';
+import { HapticService } from './services/haptic.service';
+import { UiPanelService } from './services/ui-panel.service';
+import { InteractionService } from './services/interaction.service'; // Added
+import { Subscription } from 'rxjs';
+
 import { HudComponent } from './components/hud.component';
 import { InventoryComponent } from './components/inventory.component';
 import { SkillTreeComponent } from './components/skill-tree.component';
 import { JoystickComponent } from './components/joystick.component';
 import { ItemTooltipComponent } from './components/item-tooltip.component';
 import { ShopComponent } from './components/shop.component';
-import { ShopService } from './services/shop.service';
 import { MapComponent } from './components/map.component';
-import { MapService } from './services/map.service';
 import { SettingsComponent } from './components/settings.component';
 import { AbilitiesPanelComponent } from './components/abilities-panel.component';
 import { DialogueOverlayComponent } from './components/dialogue-overlay.component';
 import { CodexComponent } from './components/codex.component';
 import { MissionJournalComponent } from './components/mission-journal.component';
-import { PlayerControlService } from './systems/player-control.service';
-import { DialogueService } from './services/dialogue.service';
-import { Subscription } from 'rxjs';
-import { HapticService } from './services/haptic.service';
-import { UiPanelService } from './services/ui-panel.service';
 
 @Component({
   selector: 'app-root',
@@ -50,6 +53,7 @@ export class AppComponent implements OnInit, OnDestroy {
   mapService = inject(MapService);
   playerControl = inject(PlayerControlService);
   dialogueService = inject(DialogueService);
+  interactionService = inject(InteractionService); // Inject interaction service
   haptic = inject(HapticService);
   ui = inject(UiPanelService);
 
@@ -90,10 +94,13 @@ export class AppComponent implements OnInit, OnDestroy {
                else this.mapService.toggleSettings();
                break;
           case 'INTERACT':
-               const target = this.playerControl.nearbyInteractable();
+               // Delegate to InteractionService to ensure consistent behavior (like opening shops)
+               const target = this.interactionService.activeInteractable();
                if (target) {
-                   this.haptic.impactLight();
-                   this.dialogueService.startDialogue(target.dialogueId || 'generic');
+                   this.interactionService.interact(target);
+               } else if (this.dialogueService.activeDialogue()) {
+                   // If dialogue is open, interact can advance/skip
+                   this.dialogueService.skipTypewriter();
                }
                break;
       }
