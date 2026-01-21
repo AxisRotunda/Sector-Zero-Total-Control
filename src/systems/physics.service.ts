@@ -32,20 +32,18 @@ export class PhysicsService {
     }
 
     // 1.5 Separation / Steering Behaviors
-    // Prevent stacking for moving entities (Player and Enemies)
     if ((e.type === 'ENEMY' || e.type === 'PLAYER') && e.state !== 'DEAD') {
         const neighbors = this.spatialHash.query(e.x, e.y, e.radius * 1.5);
         for (const n of neighbors) {
             if (n.id === e.id || n.state === 'DEAD' || n.type === 'WALL' || n.type === 'DECORATION' || n.type === 'PICKUP') continue;
             
-            // Allow some overlap for smaller hitboxes vs bigger ones, but generally push apart
             const minDist = e.radius + n.radius;
             const distSq = (e.x - n.x)**2 + (e.y - n.y)**2;
             
             if (distSq < minDist * minDist && distSq > 0.01) {
                 const dist = Math.sqrt(distSq);
-                const pushStrength = (minDist - dist) / dist; // Normalized penetration
-                const force = 0.2; // Soft separation force
+                const pushStrength = (minDist - dist) / dist; 
+                const force = 0.2; 
                 
                 const px = (e.x - n.x) * pushStrength * force;
                 const py = (e.y - n.y) * pushStrength * force;
@@ -65,8 +63,7 @@ export class PhysicsService {
     const isMoving = Math.abs(e.vx) > 0.1 || Math.abs(e.vy) > 0.1;
     if (!isMoving) return false;
 
-    // 3. Sub-stepping for Collision Stability
-    // If movement is larger than half entity radius, split it up
+    // 3. Sub-stepping for Collision Stability & Wall Sliding
     const r = e.radius || 20;
     const speed = Math.hypot(e.vx, e.vy);
     const steps = Math.ceil(speed / (r * 0.5));
@@ -75,21 +72,20 @@ export class PhysicsService {
     const stepVy = e.vy / steps;
 
     for (let i = 0; i < steps; i++) {
-        const prevX = e.x;
-        const prevY = e.y;
-
         // Try X Movement
+        const prevX = e.x;
         e.x += stepVx;
         if (this.checkCollision(e)) {
             e.x = prevX;
-            e.vx = 0; // Stop velocity on hard hit
+            e.vx = 0; // Hit wall on X, stop X
         }
 
         // Try Y Movement
+        const prevY = e.y;
         e.y += stepVy;
         if (this.checkCollision(e)) {
             e.y = prevY;
-            e.vy = 0;
+            e.vy = 0; // Hit wall on Y, stop Y
         }
 
         // Map Bounds Check
@@ -110,7 +106,6 @@ export class PhysicsService {
 
   private checkCollision(e: Entity): boolean {
       const radius = e.radius || 20;
-      // Query nearby with slight padding to ensure we catch everything
       const zoneId = this.world.currentZone().id;
       const nearby = this.spatialHash.query(e.x, e.y, radius + 20, zoneId); 
 
@@ -118,15 +113,16 @@ export class PhysicsService {
           if (obs.id === e.id) continue;
           
           if (obs.type === 'WALL' || (isDestructible(obs) && obs.state !== 'DEAD')) {
-              // Permeable Wall Check (e.g. Unlocked Gate)
               if (obs.type === 'WALL' && obs.locked === false) continue;
 
-              if (obs.width && obs.height) {
+              const colW = obs.width;
+              const colH = obs.depth || obs.height; 
+
+              if (colW && colH) {
                   // AABB vs Circle
-                  const halfW = obs.width / 2;
-                  const halfH = obs.height / 2;
+                  const halfW = colW / 2;
+                  const halfH = colH / 2;
                   
-                  // Find closest point on rect to circle center
                   const closestX = Math.max(obs.x - halfW, Math.min(e.x, obs.x + halfW));
                   const closestY = Math.max(obs.y - halfH, Math.min(e.y, obs.y + halfH));
                   
@@ -134,8 +130,7 @@ export class PhysicsService {
                   const dy = e.y - closestY;
                   const distSq = dx * dx + dy * dy;
                   
-                  // Check overlap
-                  // Use a small buffer (0.1) to prevent jitter when exactly touching
+                  // Epsilon buffer
                   if (distSq < (radius * radius) - 0.1) {
                       return true;
                   }

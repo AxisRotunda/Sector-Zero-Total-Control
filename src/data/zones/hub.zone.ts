@@ -1,110 +1,105 @@
 
 import { ZoneTemplate } from "../../models/zone.models";
-import { MapUtils } from "../../utils/map-utils";
 
 export const HUB_ZONE: ZoneTemplate = {
   id: 'HUB',
   name: 'Liminal Citadel',
   theme: 'INDUSTRIAL',
-  // Expanded bounds for better camera framing
   bounds: { minX: -1600, maxX: 1600, minY: -1600, maxY: 1800 },
   
-  // Hierarchy Metadata
   regionType: 'hub',
   childZoneIds: ['SECTOR_9_N'],
 
   geometry: {
     walls: [
-      // --- PERIMETER WALLS (Octagon-ish) ---
-      // North Wall (Behind Spire)
-      { x: 0, y: -1400, w: 1000, h: 60, height: 300, color: '#27272a' },
+      // --- ARCHITECTURE STRATEGY: THE CROSS ---
+      // A safe, enclosed central plaza with four cardinal extensions.
+      // Thickness of perimeter walls: 200px (Prevents tunneling)
       
-      // North-East Angle
-      { x: 1000, y: -1000, w: 60, h: 800, height: 300, color: '#27272a' }, // Vertical-ish
-      // East Wall
-      { x: 1400, y: 0, w: 60, h: 1400, height: 300, color: '#27272a' },
-      // South-East Angle
-      { x: 1000, y: 1000, w: 60, h: 800, height: 300, color: '#27272a' },
-
-      // North-West Angle
-      { x: -1000, y: -1000, w: 60, h: 800, height: 300, color: '#27272a' },
-      // West Wall
-      { x: -1400, y: 0, w: 60, h: 1400, height: 300, color: '#27272a' },
-      // South-West Angle
-      { x: -1000, y: 1000, w: 60, h: 800, height: 300, color: '#27272a' },
-
-      // --- SOUTH GATE COMPLEX ---
-      // The Gatehouse Walls (Thicker, taller)
-      { x: -400, y: 1400, w: 800, h: 100, height: 350, color: '#18181b' }, // Left Flank
-      { x: 400, y: 1400, w: 800, h: 100, height: 350, color: '#18181b' },  // Right Flank
+      // --- NORTH WALLS ---
+      // Top Edge
+      { x: 0, y: -1000, w: 1400, h: 200, height: 400, color: '#27272a' },
       
-      // The Physical Gate (Sliding Door) - Positioned in the gap
-      // ID is implicit by position for now, but logical locking is handled by SectorLoader
-      { x: 0, y: 1400, w: 300, h: 40, height: 300, color: '#3f3f46', type: 'GATE_SEGMENT', locked: true },
+      // --- EAST WALLS ---
+      // Top-Right Corner Block
+      { x: 800, y: -900, w: 200, h: 400, height: 400, color: '#27272a' },
+      // East Side Wall
+      { x: 800, y: 0, w: 200, h: 1400, height: 300, color: '#27272a' },
+      // Bottom-Right Corner Block
+      { x: 800, y: 900, w: 200, h: 400, height: 400, color: '#27272a' },
+
+      // --- WEST WALLS ---
+      // Top-Left Corner Block
+      { x: -800, y: -900, w: 200, h: 400, height: 400, color: '#27272a' },
+      // West Side Wall
+      { x: -800, y: 0, w: 200, h: 1400, height: 300, color: '#27272a' },
+      // Bottom-Left Corner Block
+      { x: -800, y: 900, w: 200, h: 400, height: 400, color: '#27272a' },
+
+      // --- SOUTH WALLS & GATE ---
+      // The Gate area is a bottleneck. 
+      // Main Plaza extends to Y=800.
+      // Gate is at Y=1200.
+      
+      // Left Flank (Solid Block)
+      { x: -500, y: 1200, w: 800, h: 200, height: 350, color: '#18181b' },
+      
+      // Right Flank (Solid Block)
+      { x: 500, y: 1200, w: 800, h: 200, height: 350, color: '#18181b' },
+
+      // Gate Mechanism (The Moving Part) - Center Gap (-100 to 100)
+      { x: 0, y: 1200, w: 200, h: 60, height: 300, color: '#3f3f46', type: 'GATE_SEGMENT', locked: true },
+
+      // Gate Pillars (Visual Anchors)
+      { x: -120, y: 1200, w: 60, h: 220, height: 380, color: '#52525b', type: 'PILLAR' },
+      { x: 120, y: 1200, w: 60, h: 220, height: 380, color: '#52525b', type: 'PILLAR' },
 
       // --- INTERNAL STRUCTURES ---
-      // The Spire (North Center)
-      { x: 0, y: -600, w: 200, h: 200, height: 600, color: '#06b6d4', type: 'MONOLITH' },
+      // The Spire (Center North)
+      { x: 0, y: -500, w: 200, h: 200, height: 600, color: '#06b6d4', type: 'MONOLITH' },
       
-      // Medical District Enclosure (East)
-      { x: 900, y: 0, w: 20, h: 600, height: 120, color: '#52525b' },
-      { x: 1200, y: -300, w: 600, h: 20, height: 120, color: '#52525b' },
+      // Medical Bay (East Alcove) - Thin partitions
+      { x: 600, y: -200, w: 20, h: 300, height: 120, color: '#52525b' },
       
-      // Market District Pillars (West)
-      { x: -900, y: -200, w: 40, h: 40, height: 150, color: '#52525b', type: 'PILLAR' },
-      { x: -900, y: 200, w: 40, h: 40, height: 150, color: '#52525b', type: 'PILLAR' },
+      // Shop Kiosk (West Alcove) - Pillars
+      { x: -600, y: 0, w: 60, h: 60, height: 150, color: '#52525b', type: 'PILLAR' },
     ]
   },
 
   entities: {
     static: [
-      // --- KEY NPCS ---
-      { type: 'NPC', subType: 'HANDLER', x: 0, y: -400, data: { dialogueId: 'start_1', color: '#3b82f6' } },
-      { type: 'NPC', subType: 'CONSOLE', x: -100, y: -400, data: { dialogueId: 'start_1', color: '#06b6d4' } },
+      // Key NPCs
+      { type: 'NPC', subType: 'HANDLER', x: 0, y: -300, data: { dialogueId: 'start_1', color: '#3b82f6' } },
+      { type: 'NPC', subType: 'CONSOLE', x: -100, y: -300, data: { dialogueId: 'start_1', color: '#06b6d4' } },
       
       // Med Bay
-      { type: 'NPC', subType: 'MEDIC', x: 1100, y: 0, data: { dialogueId: 'medic_intro', color: '#ef4444' } },
-      
+      { type: 'NPC', subType: 'MEDIC', x: 650, y: -200, data: { dialogueId: 'medic_intro', color: '#ef4444' } },
+      { type: 'DECORATION', subType: 'HOLO_TABLE', x: 650, y: -250, data: { color: '#ef4444' } },
+
       // Market
-      { type: 'NPC', subType: 'TRADER', x: -1100, y: 0, data: { dialogueId: 'generic', color: '#eab308' } },
+      { type: 'NPC', subType: 'TRADER', x: -650, y: 0, data: { dialogueId: 'generic', color: '#eab308' } },
+      { type: 'DECORATION', subType: 'VENDING_MACHINE', x: -650, y: -80, data: {} },
 
-      // --- PATROLLING GUARDS ---
-      // Gate Guard (Standing visible in front of the gate structure)
-      { type: 'NPC', subType: 'GUARD', x: -180, y: 1320, data: { dialogueId: 'gate_locked', color: '#3b82f6' } },
+      // Gate Guard
+      { type: 'NPC', subType: 'GUARD', x: -200, y: 1100, data: { dialogueId: 'gate_locked', color: '#3b82f6' } },
       
-      // Plaza Patrol
-      { 
-        type: 'NPC', subType: 'GUARD', x: 0, y: 0, 
-        data: { 
-          color: '#1d4ed8', 
-          dialogueId: 'generic_guard',
-          patrolPoints: [{x: -300, y: 200}, {x: 300, y: 200}, {x: 0, y: -200}] 
-        } 
-      },
-
-      // --- DECORATIONS ---
-      { type: 'DECORATION', subType: 'RUG', x: 1100, y: 0, data: { width: 400, height: 500, color: '#e2e8f0' } },
-      { type: 'DECORATION', subType: 'RUG', x: -1100, y: 0, data: { width: 400, height: 500, color: '#1c1917' } },
+      // Flavor
+      { type: 'DECORATION', subType: 'RUG', x: 0, y: 0, data: { width: 800, height: 800, color: '#18181b' } },
+      { type: 'DECORATION', subType: 'RUG', x: 0, y: 1000, data: { width: 300, height: 600, color: '#18181b' } }, // Path to gate
       
-      // Road to Gate
-      { type: 'DECORATION', subType: 'RUG', x: 0, y: 1000, data: { width: 300, height: 800, color: '#18181b' } },
-
-      // Gate Details
-      { type: 'DECORATION', subType: 'HOLO_TABLE', x: 200, y: 1320, data: { color: '#ef4444' } }, // Checkpoint scanner
-
-      // Spire Cables
-      { type: 'DECORATION', subType: 'CABLE', x: 0, y: -600, data: { targetX: 1100, targetY: -200, z: 400 } },
-      { type: 'DECORATION', subType: 'CABLE', x: 0, y: -600, data: { targetX: -1100, targetY: -200, z: 350 } },
+      // Cables
+      { type: 'DECORATION', subType: 'CABLE', x: 0, y: -500, data: { targetX: 650, targetY: -200, z: 400 } },
+      { type: 'DECORATION', subType: 'CABLE', x: 0, y: -500, data: { targetX: -650, targetY: 0, z: 400 } },
     ],
     dynamic: []
   },
 
   exits: [
-    // South Exit -> Sector 9 North (Main Gate)
-    // Placed slightly 'inside' the gate geometry logic so player walks *through* the open gate to trigger
+    // South Exit -> Sector 9 North
+    // Positioned past the gate logic
     { 
       x: 0, 
-      y: 1420, 
+      y: 1250, 
       targetZoneId: 'SECTOR_9_N', 
       transitionType: 'GATE', 
       locked: true,
@@ -124,6 +119,6 @@ export const HUB_ZONE: ZoneTemplate = {
   metadata: {
     difficulty: 1.0,
     isInstanced: false,
-    playerStart: { x: 0, y: 800 }
+    playerStart: { x: 0, y: 600 }
   }
 };

@@ -13,12 +13,13 @@ export class MapUtils {
       
       if (walls.length === 0) return entities;
 
-      // Group by distinct properties (color, height, type, depth)
+      // Group by distinct properties (color, height, type, depth, locked status)
       const groups = new Map<string, Entity[]>();
       
       walls.forEach(w => {
-          // Include depth in key to prevent merging walls of different thickness
-          const key = `${w.color}_${w.height}_${w.subType}_${w.depth}`;
+          // Include subType and locked status in key to prevent merging distinct functional walls
+          // e.g. A locked GATE_SEGMENT should never merge with a standard WALL
+          const key = `${w.color}_${w.height}_${w.subType || 'GENERIC'}_${w.depth}_${w.locked}`;
           if (!groups.has(key)) groups.set(key, []);
           groups.get(key)!.push(w);
       });

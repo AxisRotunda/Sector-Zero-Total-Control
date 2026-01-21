@@ -118,7 +118,9 @@ export class StructureRendererService {
       if (e.subType === 'CABLE') { this.drawCable(ctx, e); return; }
       
       const w = e.width || 40; 
-      const d = e.depth || w;
+      // Use explicit depth if available, otherwise fallback to width (old logic)
+      // This ensures 2D maps with 'h' properties render correctly in 3D depth
+      const d = e.depth || e.width || 40; 
       const h = e.height || 100;
       const theme = zone ? zone.theme : 'INDUSTRIAL';
       
@@ -203,7 +205,6 @@ export class StructureRendererService {
       // PROCEDURAL EROSION (Carve out chunks from edges)
       if (visuals.erosionLevel > 0) {
           ctx.globalCompositeOperation = 'destination-out';
-          const seed = w + h + d; // Pseudo-seed
           const cuts = Math.floor(h * visuals.erosionLevel * 0.2);
           
           for(let i=0; i<cuts; i++) {
@@ -268,51 +269,7 @@ export class StructureRendererService {
       
       const isOpen = !e.locked;
       const slide = isOpen ? w * 0.4 : 0; // Slide distance
-      
-      // Left Door Panel
-      ctx.save();
-      // Slide left in model space (depends on orientation, assuming width along X for simplicity)
-      // Actually simpler: Just offset anchor point in ISO space to simulate slide
       const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
-      const slideVec = p(-slide, 0, 0); 
-      
-      ctx.translate(slideVec.x, slideVec.y);
-      this.renderPrism(ctx, w/2, d, h, ax, ay, e.color, visuals);
-      ctx.restore();
-
-      // Right Door Panel
-      ctx.save();
-      const slideVecR = p(slide, 0, 0);
-      ctx.translate(slideVecR.x, slideVecR.y);
-      // We need to render the other half, but renderPrism centers on 0,0. 
-      // We can hack it by rendering a thinner prism at offset position relative to anchor
-      // Actually, simplest is to render two distinct prisms at offset local coords
-      const rightCenter = p(w/4, 0, 0); // Offset right
-      // Since renderPrism resets transform, we have to handle the offset carefully.
-      // Re-implementing renderPrism call with offset anchor
-      // Wait, renderPrism assumes center is (0,0) relative to anchor.
-      // Let's manually invoke renderPrism twice with adjusted anchor points? 
-      // No, renderPrism takes absolute anchor.
-      
-      // Actually, `renderGate` replaces the main body.
-      // Let's render the right panel here.
-      // NOTE: Because renderPrism centers on (0,0) relative to current context translation (inside renderPrism it does translate(ax,ay)),
-      // we need to be careful. The easiest way is to modify renderPrism or just call it with hacked logic.
-      
-      // Instead, let's just use the translate on the context *before* passing to renderPrism?
-      // renderPrism does `ctx.translate(anchorX, anchorY)`.
-      // So if we offset context before calling, it works.
-      
-      // Let's redraw properly:
-      // We want two halves meeting at 0.
-      // Left Half: Center at -w/4. Width w/2.
-      // Right Half: Center at w/4. Width w/2.
-      // If open, Left center moves to -w/4 - slide. Right center moves to w/4 + slide.
-      
-      // Re-clearing? No, we are in a sprite cache buffer.
-      // But we already drew the Left Panel above assuming it was centered. That was wrong.
-      // Let's clear and redo.
-      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
       
       // Recalculate centers
       const leftCenterX = -w/4 - (isOpen ? w * 0.35 : 0);
