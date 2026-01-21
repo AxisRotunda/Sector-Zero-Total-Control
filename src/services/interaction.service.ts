@@ -12,6 +12,7 @@ import { ShopService } from './shop.service';
 import { DialogueService } from './dialogue.service';
 import { UiPanelService } from './ui-panel.service';
 import { MissionService } from '../game/mission.service';
+import { IsoUtils } from '../utils/iso-utils';
 
 @Injectable({
   providedIn: 'root'
@@ -41,8 +42,9 @@ export class InteractionService {
       let bestTarget: Entity | null = null;
       let bestScore = Infinity;
 
-      // Increased search radius to catch entities comfortably
-      const nearby = this.spatialHash.query(player.x, player.y, 250);
+      // CRITICAL FIX: Must pass currentZone().id to query the correct spatial bucket
+      const zoneId = this.world.currentZone().id;
+      const nearby = this.spatialHash.query(player.x, player.y, 250, zoneId);
       
       const px = player.x;
       const py = player.y;
@@ -113,6 +115,69 @@ export class InteractionService {
       }
       
       this.nearbyInteractable.set(bestTarget);
+  }
+
+  // New: Direct World Interaction via Tap
+  tryInteractAt(screenX: number, screenY: number, screenWidth: number, screenHeight: number) {
+      const cam = this.world.camera;
+      
+      // 1. Inverse Camera Transform (Screen -> World)
+      // Center offset
+      const sx = screenX - screenWidth / 2;
+      const sy = screenY - screenHeight / 2;
+      
+      // Unzoom
+      const unzoomedX = sx / cam.zoom;
+      const unzoomedY = sy / cam.zoom;
+      
+      // Cam Center in Iso
+      const camIso = IsoUtils.toIso(cam.x, cam.y, 0);
+      
+      // Target in Iso
+      const targetIsoX = unzoomedX + camIso.x;
+      const targetIsoY = unzoomedY + camIso.y;
+      
+      // Inverse Iso (Iso -> Cartesian)
+      // x = (2y + x) / 2  -- derived from iso formulas
+      // y = (2y - x) / 2
+      // wait, standard iso: x_iso = x - y, y_iso = (x + y)/2
+      // x_iso = x - y
+      // 2*y_iso = x + y
+      // x = y_iso + 0.5 * x_iso
+      // y = y_iso - 0.5 * x_iso
+      
+      const worldX = targetIsoY + 0.5 * targetIsoX;
+      const worldY = targetIsoY - 0.5 * targetIsoX;
+      
+      // 2. Query at World Coords
+      const zoneId = this.world.currentZone().id;
+      // Search a small radius around the tap
+      const targets = this.spatialHash.query(worldX, worldY, 100, zoneId);
+      
+      // 3. Filter for interactables
+      const validTarget = targets.find(e => 
+          (e.type === 'NPC' || (e.type === 'TERMINAL' && !e.accessed)) && 
+          e.state !== 'DEAD'
+      );
+      
+      if (validTarget) {
+          // Check distance to player to ensure no telepathic interaction
+          const p = this.world.player;
+          const dist = Math.hypot(validTarget.x - p.x, validTarget.y - p.y);
+          if (dist < 400) { // Generous tap range
+              this.interact(validTarget);
+              // Visual feedback for tap
+              this.eventBus.dispatch({ 
+                  type: GameEvents.FLOATING_TEXT_SPAWN, 
+                  payload: { x: validTarget.x, y: validTarget.y - 50, text: "▼", color: '#fff', size: 20 } 
+              });
+          } else {
+              this.eventBus.dispatch({ 
+                  type: GameEvents.FLOATING_TEXT_SPAWN, 
+                  payload: { onPlayer: true, yOffset: -50, text: "TOO FAR", color: '#ef4444', size: 14 } 
+              });
+          }
+      }
   }
 
   interact(target: Entity) {

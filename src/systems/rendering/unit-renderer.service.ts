@@ -4,12 +4,14 @@ import { Entity } from '../../models/game.models';
 import { Item } from '../../models/item.models';
 import { InventoryService } from '../../game/inventory.service';
 import { IsoUtils } from '../../utils/iso-utils';
+import { InteractionService } from '../../services/interaction.service';
 
 interface StatusIcon { type: 'poison' | 'burn' | 'stun' | 'weakness' | 'slow' | 'bleed'; timer: number; maxTimer: number; icon: string; color: string; }
 
 @Injectable({ providedIn: 'root' })
 export class UnitRendererService {
   private inventory = inject(InventoryService);
+  private interaction = inject(InteractionService);
   
   // Reusable vectors to prevent GC thrashing in the render loop
   private _iso = { x: 0, y: 0 };
@@ -94,6 +96,29 @@ export class UnitRendererService {
          IsoUtils.toIso(e.x + rx, e.y + ry, e.z + wz + bodyZ, target);
          return target;
       };
+
+      // --- VISUAL INTERACTION INDICATOR ---
+      // If this unit is the active interactable target, draw a ring at feet
+      // This provides feedback in the World space, not just UI
+      const activeTarget = this.interaction.activeInteractable();
+      if (activeTarget && activeTarget.id === e.id) {
+          IsoUtils.toIso(e.x, e.y, 0, this._iso);
+          ctx.save();
+          ctx.translate(this._iso.x, this._iso.y);
+          ctx.scale(1, 0.5); // Flatten for Iso perspective
+          
+          const pulse = (Math.sin(Date.now() * 0.01) + 1) * 0.5; // 0 to 1
+          const radius = e.radius + 10 + pulse * 5;
+          
+          ctx.strokeStyle = '#22c55e';
+          ctx.lineWidth = 2;
+          ctx.globalAlpha = 0.6 + pulse * 0.4;
+          ctx.beginPath();
+          ctx.arc(0, 0, radius, 0, Math.PI * 2);
+          ctx.stroke();
+          
+          ctx.restore();
+      }
 
       // --- BATCH 1: LEGS ---
       const legLen = 18;
@@ -210,9 +235,18 @@ export class UnitRendererService {
       IsoUtils.toIso(e.x, e.y, 70, this._iso);
       ctx.save(); ctx.translate(this._iso.x, this._iso.y);
       let icon = '?'; if (e.subType === 'MEDIC') icon = '✚'; if (e.subType === 'TRADER') icon = '$'; if (e.subType === 'HANDLER') icon = '!';
-      const bounce = Math.sin(Date.now() * 0.005) * 5; ctx.translate(0, bounce - 20);
-      ctx.fillStyle = e.color; ctx.font = 'bold 20px monospace'; ctx.textAlign = 'center'; ctx.shadowColor = e.color; ctx.shadowBlur = 10;
-      ctx.fillText(icon, 0, 0); ctx.shadowBlur = 0; 
+      
+      // Make prompts bounce more noticeably to draw attention
+      const bounce = Math.sin(Date.now() * 0.008) * 8; 
+      ctx.translate(0, bounce - 25);
+      
+      ctx.fillStyle = e.color; 
+      ctx.font = 'bold 24px monospace'; 
+      ctx.textAlign = 'center'; 
+      ctx.shadowColor = e.color; 
+      ctx.shadowBlur = 15;
+      ctx.fillText(icon, 0, 0); 
+      ctx.shadowBlur = 0; 
       ctx.restore();
   }
 

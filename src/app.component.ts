@@ -14,7 +14,7 @@ import { PlayerControlService } from './systems/player-control.service';
 import { DialogueService } from './services/dialogue.service';
 import { HapticService } from './services/haptic.service';
 import { UiPanelService } from './services/ui-panel.service';
-import { InteractionService } from './services/interaction.service'; // Added
+import { InteractionService } from './services/interaction.service'; 
 import { Subscription } from 'rxjs';
 
 import { HudComponent } from './components/hud.component';
@@ -53,7 +53,7 @@ export class AppComponent implements OnInit, OnDestroy {
   mapService = inject(MapService);
   playerControl = inject(PlayerControlService);
   dialogueService = inject(DialogueService);
-  interactionService = inject(InteractionService); // Inject interaction service
+  interactionService = inject(InteractionService);
   haptic = inject(HapticService);
   ui = inject(UiPanelService);
 
@@ -69,7 +69,6 @@ export class AppComponent implements OnInit, OnDestroy {
   }
   
   ngOnDestroy() {
-    // Only stop the game loop, keep redundant services alive for potential restart
     this.game.destroy();
     this.renderer.destroy();
     if (this.sub) this.sub.unsubscribe();
@@ -94,12 +93,10 @@ export class AppComponent implements OnInit, OnDestroy {
                else this.mapService.toggleSettings();
                break;
           case 'INTERACT':
-               // Delegate to InteractionService to ensure consistent behavior (like opening shops)
                const target = this.interactionService.activeInteractable();
                if (target) {
                    this.interactionService.interact(target);
                } else if (this.dialogueService.activeDialogue()) {
-                   // If dialogue is open, interact can advance/skip
                    this.dialogueService.skipTypewriter();
                }
                break;
@@ -156,16 +153,27 @@ export class AppComponent implements OnInit, OnDestroy {
         return;
     }
     
-    if (event.changedTouches[0].clientX > window.innerWidth / 2) {
+    const touch = event.changedTouches[0];
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+
+    // Right side tap logic
+    if (touch.clientX > width / 2) {
         const currentTime = Date.now();
+        // Double tap -> Dash
         if (currentTime - this.lastTapTime < this.DOUBLE_TAP_THRESHOLD) {
             event.preventDefault();
             this.haptic.impactMedium();
             this.player.abilities.useSkill('DASH', this.input.aimAngle ?? undefined);
             this.lastTapTime = 0; 
         } else {
+            // Single tap -> Try World Interact
+            this.interactionService.tryInteractAt(touch.clientX, touch.clientY, width, height);
             this.lastTapTime = currentTime;
         }
+    } else {
+        // Left side tap -> Also try interact if not dragging joystick
+        this.interactionService.tryInteractAt(touch.clientX, touch.clientY, width, height);
     }
   }
 
