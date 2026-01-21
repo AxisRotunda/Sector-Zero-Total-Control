@@ -140,7 +140,8 @@ export class PlayerControlService {
 
     private handleAutoAttack(player: Entity) {
          let closest: Entity | null = null; let minD = BALANCE.COMBAT.AUTO_ATTACK_RANGE;
-         const nearbyTargets = this.spatialHash.query(player.x, player.y, BALANCE.COMBAT.AUTO_ATTACK_RANGE);
+         // FIX: Pass player.zoneId to auto-attack query
+         const nearbyTargets = this.spatialHash.query(player.x, player.y, BALANCE.COMBAT.AUTO_ATTACK_RANGE, player.zoneId);
          
          nearbyTargets.forEach(e => {
             if ((isEnemy(e) || isDestructible(e)) && e.state !== 'DEAD') {
@@ -211,6 +212,8 @@ export class PlayerControlService {
         hitbox.color = '#f97316'; 
         hitbox.state = 'ATTACK'; 
         hitbox.timer = 8;
+        // FIX: Ensure hitbox has player's zoneId
+        hitbox.zoneId = player.zoneId;
         
         this.world.entities.push(hitbox);
         this.haptic.impactMedium(); 

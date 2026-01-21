@@ -34,7 +34,7 @@ export class PhysicsService {
     // 1.5 Separation / Steering Behaviors
     // Prevent stacking for moving entities (Player and Enemies)
     if ((e.type === 'ENEMY' || e.type === 'PLAYER') && e.state !== 'DEAD') {
-        const neighbors = this.spatialHash.query(e.x, e.y, e.radius * 1.5);
+        const neighbors = this.spatialHash.query(e.x, e.y, e.radius * 1.5, e.zoneId);
         for (const n of neighbors) {
             if (n.id === e.id || n.state === 'DEAD' || n.type === 'WALL' || n.type === 'DECORATION' || n.type === 'PICKUP') continue;
             
@@ -111,7 +111,8 @@ export class PhysicsService {
   private checkCollision(e: Entity): boolean {
       const radius = e.radius || 20;
       // Query nearby with slight padding to ensure we catch everything
-      const nearby = this.spatialHash.query(e.x, e.y, radius + 20); 
+      // FIX: Use zoneId to query the correct spatial hash bucket
+      const nearby = this.spatialHash.query(e.x, e.y, radius + 20, e.zoneId); 
 
       for (const obs of nearby) {
           if (obs.id === e.id) continue;

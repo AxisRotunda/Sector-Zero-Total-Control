@@ -1,3 +1,4 @@
+
 import { Injectable, inject } from '@angular/core';
 import { Entity } from '../models/game.models';
 import { WorldService } from '../game/world/world.service';
@@ -62,7 +63,8 @@ export class AiService {
   }
 
   private updateSeekCover(enemy: Entity, player: Entity, dist: number, angle: number) {
-      const walls = this.spatialHash.query(enemy.x, enemy.y, BALANCE.ENEMY_AI.COVER_SEEK_DISTANCE);
+      // FIX: Pass enemy.zoneId
+      const walls = this.spatialHash.query(enemy.x, enemy.y, BALANCE.ENEMY_AI.COVER_SEEK_DISTANCE, enemy.zoneId);
       let bestCover: Entity | null = null; let bestDist = Infinity;
       for (const w of walls) {
           if (w.type === 'WALL') {
@@ -144,6 +146,8 @@ export class AiService {
             projectile.source = 'ENEMY'; projectile.x = enemy.x; projectile.y = enemy.y; projectile.z = 10;
             projectile.vx = Math.cos(angle) * 15; projectile.vy = Math.sin(angle) * 15;
             projectile.angle = angle; projectile.radius = 8; projectile.hp = damage; projectile.color = '#a855f7'; projectile.state = 'ATTACK'; projectile.timer = 60;
+            // FIX: Assign ZoneID to projectile
+            projectile.zoneId = enemy.zoneId;
             this.world.entities.push(projectile);
        }
     } else { enemy.vx += Math.cos(angle) * 0.3; enemy.vy += Math.sin(angle) * 0.3; }

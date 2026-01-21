@@ -1,3 +1,4 @@
+
 import { Injectable, signal, inject } from '@angular/core';
 import * as BALANCE from '../../config/balance.config';
 import { PlayerStatsService } from './player-stats.service';
@@ -52,6 +53,7 @@ export class PlayerAbilitiesService {
         
         const hitbox = this.entityPool.acquire('HITBOX');
         hitbox.source = 'PSIONIC'; hitbox.x = player.x; hitbox.y = player.y; hitbox.radius = 120 + stats.psyche * 3; hitbox.hp = 15 + stats.psyche * 2; hitbox.color = '#a855f7'; hitbox.state = 'ATTACK'; hitbox.timer = 10; hitbox.knockbackForce = 20; hitbox.psionicEffect = 'wave';
+        hitbox.zoneId = player.zoneId; // FIX
         this.world.entities.push(hitbox);
         this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: BALANCE.SHAKE.EXPLOSION });
         this.sound.play('EXPLOSION');
@@ -81,6 +83,7 @@ export class PlayerAbilitiesService {
         hitbox.status.stun = 30; 
         hitbox.knockbackForce = -15; // VACUUM PULL
         hitbox.psionicEffect = 'wave';
+        hitbox.zoneId = player.zoneId; // FIX
         this.world.entities.push(hitbox);
         this.sound.play('CHARGE');
     }
@@ -104,6 +107,7 @@ export class PlayerAbilitiesService {
         hitbox.color = '#fbbf24';
         hitbox.status.stun = 45;
         hitbox.knockbackForce = 15;
+        hitbox.zoneId = player.zoneId; // FIX
         this.world.entities.push(hitbox);
         this.sound.play('IMPACT');
     }
@@ -113,6 +117,7 @@ export class PlayerAbilitiesService {
         this.world.player.status.stun = 120;
         const explosion = this.entityPool.acquire('HITBOX');
         explosion.source = 'PSIONIC'; explosion.x = player.x; explosion.y = player.y; explosion.radius = 350; explosion.hp = 100 + this.stats.playerStats().psyche * 5; explosion.knockbackForce = 50; explosion.timer = 15; explosion.color = '#f0abfc'; explosion.psionicEffect = 'wave';
+        explosion.zoneId = player.zoneId; // FIX
         this.world.entities.push(explosion);
         this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: { intensity: 30, decay: 0.7 } });
         this.sound.play('EXPLOSION');
