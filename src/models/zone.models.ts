@@ -1,0 +1,87 @@
+
+import { ZoneTheme } from "./game.models";
+
+export interface ZoneBounds {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
+export interface ZoneGeometry {
+  walls: Array<{
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    height?: number;
+    color?: string;
+    type?: string;
+    locked?: boolean;
+    depth?: number;
+  }>;
+  // Floors can be added later, currently handled via ZoneTheme/Procedural
+}
+
+export interface ZoneEntityDef {
+  type: 'NPC' | 'ENEMY' | 'DECORATION' | 'SPAWNER' | 'DESTRUCTIBLE' | 'TERMINAL';
+  subType?: string;
+  x: number;
+  y: number;
+  data?: any; // Extra props like dialogueId, loot, spawn info
+}
+
+export interface ZoneExit {
+  x: number;
+  y: number;
+  targetZoneId: string;
+  direction: 'UP' | 'DOWN';
+  locked?: boolean;
+}
+
+export interface ZoneTemplate {
+  id: string;
+  name: string;
+  theme: ZoneTheme;
+  bounds: ZoneBounds;
+  
+  geometry: ZoneGeometry;
+  
+  entities: {
+    static: ZoneEntityDef[]; // NPCs, Decorations (Hash-only)
+    dynamic: ZoneEntityDef[]; // Spawners, Enemies (Update loop)
+  };
+
+  exits: ZoneExit[];
+
+  environment: {
+    weather: 'NONE' | 'RAIN' | 'ASH';
+    lighting?: string;
+    floorPattern: 'PLAIN' | 'GRID' | 'HAZARD' | 'ORGANIC' | 'HUB';
+    colors: {
+      ground: string;
+      wall: string;
+      detail: string;
+    };
+  };
+
+  metadata: {
+    difficulty: number;
+    isInstanced: boolean;
+    playerStart: { x: number, y: number };
+  };
+}
+
+export interface WorldZoneConfig {
+  id: string;
+  displayName: string;
+  template: ZoneTemplate;
+  adjacentZones: string[];
+  persistence: 'persistent' | 'transient' | 'instanced';
+  maxInstances?: number;
+}
+
+export interface WorldGraph {
+  zones: Record<string, WorldZoneConfig>;
+  rootZoneId: string;
+}

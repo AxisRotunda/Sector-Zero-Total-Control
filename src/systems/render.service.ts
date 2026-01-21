@@ -1,0 +1,246 @@
+
+import { Injectable, inject, signal } from '@angular/core';
+import { Entity, Zone, FloatingText, Camera, Particle } from '../models/game.models';
+import { WorldService } from '../game/world/world.service';
+import { FloorRendererService } from './rendering/floor-renderer.service';
+import { StructureRendererService } from './rendering/structure-renderer.service';
+import { UnitRendererService } from './rendering/unit-renderer.service';
+import { ShadowRendererService } from './rendering/shadow-renderer.service';
+import { EffectRendererService } from './rendering/effect-renderer.service';
+import { EntityRendererService } from './rendering/entity-renderer.service'; 
+import { IsoUtils } from '../utils/iso-utils';
+import { PlayerService } from '../game/player/player.service';
+import { EntitySorterService } from './rendering/entity-sorter.service';
+import { RENDER_CONFIG } from './rendering/render.config';
+import { InputService } from '../services/input.service';
+import { SpatialHashService } from './spatial-hash.service';
+
+@Injectable({
+  providedIn: 'root'
+})
+export class RenderService {
+  private ctx: CanvasRenderingContext2D | null = null;
+  private canvas: HTMLCanvasElement | null = null;
+  private resizeListener: (() => void) | null = null;
+  
+  private world = inject(WorldService);
+  private sorter = inject(EntitySorterService);
+  private inputService = inject(InputService);
+  private spatialHash = inject(SpatialHashService);
+  
+  private floorRenderer = inject(FloorRendererService);
+  private structureRenderer = inject(StructureRendererService);
+  private unitRenderer = inject(UnitRendererService);
+  private shadowRenderer = inject(ShadowRendererService);
+  private effectRenderer = inject(EffectRendererService);
+  private entityRenderer = inject(EntityRendererService);
+  
+  private player = inject(PlayerService);
+  
+  debugMode = signal(false);
+
+  private camCenter = { x: 0, y: 0 };
+
+  init(canvas: HTMLCanvasElement) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d', { alpha: false });
+    this.inputService.setCanvas(canvas);
+    this.resize();
+    this.resizeListener = () => this.resize();
+    window.addEventListener('resize', this.resizeListener);
+  }
+
+  destroy() {
+    if (this.resizeListener) {
+      window.removeEventListener('resize', this.resizeListener);
+      this.resizeListener = null;
+    }
+  }
+
+  resize() {
+    if (this.canvas) {
+      this.canvas.width = Math.max(window.innerWidth, 320);
+      this.canvas.height = Math.max(window.innerHeight, 320);
+    }
+  }
+
+  getScreenToWorld(screenX: number, screenY: number, cam: Camera) {
+      if (!this.canvas) return { x: 0, y: 0 };
+      IsoUtils.toIso(cam.x, cam.y, 0, this.camCenter);
+      
+      const sx = screenX - this.canvas.width / 2;
+      const sy = screenY - this.canvas.height / 2;
+      const unzoomedX = sx / cam.zoom;
+      const unzoomedY = sy / cam.zoom;
+      
+      // Inverse ISO:
+      // isoX = unzoomedX + camCenter.x
+      // isoY = unzoomedY + camCenter.y
+      // worldX = isoY + 0.5 * isoX
+      // worldY = isoY - 0.5 * isoX
+      
+      const isoX = unzoomedX + this.camCenter.x;
+      const isoY = unzoomedY + this.camCenter.y;
+      
+      const worldX = isoY + 0.5 * isoX;
+      const worldY = isoY - 0.5 * isoX;
+      
+      return { x: worldX, y: worldY };
+  }
+
+  render(
+      entities: Entity[], // Kept for interface compatibility, but we prefer spatial hash for culling
+      player: Entity, 
+      particles: Particle[], 
+      texts: FloatingText[], 
+      cam: Camera, 
+      zone: Zone,
+      rainDrops: any[],
+      shake: {intensity: number, x: number, y: number}
+  ) {
+    if (!this.ctx || !this.canvas) return;
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    
+    // Clear
+    this.ctx.fillStyle = '#000000';
+    this.ctx.fillRect(0, 0, w, h);
+
+    this.ctx.save();
+    
+    // Apply Camera Shake & Centering
+    IsoUtils.toIso(cam.x, cam.y, 0, this.camCenter);
+    this.ctx.translate(w/2, h/2);
+    
+    if (shake.intensity > 0.1) {
+        let sx = (Math.random()-0.5) * shake.intensity;
+        let sy = (Math.random()-0.5) * shake.intensity;
+        sx += shake.x * shake.intensity * 0.5;
+        sy += shake.y * shake.intensity * 0.5;
+        this.ctx.translate(sx, sy);
+    }
+
+    this.ctx.scale(cam.zoom, cam.zoom);
+    this.ctx.translate(-this.camCenter.x, -this.camCenter.y);
+
+    // --- PASS 1: BACKGROUND (Floor Cache) ---
+    this.floorRenderer.drawFloor(this.ctx, cam, zone, this.world.mapBounds, w, h);
+
+    // --- PASS 2: EFFICIENT CULLING VIA SPATIAL HASH ---
+    const frustum = this.calculateFrustum(cam, w, h);
+    
+    // Query visible entities from SpatialHash (includes Walls, Dynamic Entities, and now Static Decorations)
+    const visibleEntitiesInRect = this.spatialHash.queryRect(frustum.minX, frustum.minY, frustum.maxX, frustum.maxY);
+    
+    // Filter out floor decorations (handled by FloorRenderer) to avoid double draw
+    // HOLO_TABLE is drawn by FloorRenderer too, so filter it.
+    const renderableEntities = visibleEntitiesInRect.filter(e => 
+        !(e.type === 'DECORATION' && (e.subType === 'RUG' || e.subType === 'FLOOR_CRACK' || e.subType === 'GRAFFITI' || e.subType === 'HOLO_TABLE'))
+    );
+    
+    // Filter visible particles (simple bounds check)
+    const visibleParticles = particles.filter(p => 
+        p.x >= frustum.minX && p.x <= frustum.maxX &&
+        p.y >= frustum.minY && p.y <= frustum.maxY
+    );
+
+    // --- PASS 3: SORTING ---
+    const sortedRenderList = this.sorter.sortForRender(renderableEntities, visibleParticles, player);
+    
+    // --- PASS 4: SHADOWS ---
+    for (const e of sortedRenderList) {
+        if (!e.type) continue; // Skip particles
+        if (e.type === 'PLAYER' || e.type === 'ENEMY' || e.type === 'NPC') {
+            this.shadowRenderer.drawUnitShadow(this.ctx, e);
+        } else if (e.type === 'WALL' || e.type === 'DECORATION') {
+            if (e.height && e.height > 50) {
+                this.shadowRenderer.drawStructureShadow(this.ctx, e);
+            }
+        }
+    }
+
+    // --- PASS 5: ENTITIES & PARTICLES ---
+    const len = sortedRenderList.length;
+    for (let i = 0; i < len; i++) {
+        const obj = sortedRenderList[i];
+
+        if (obj.type === 'PLAYER') {
+          this.effectRenderer.drawPsionicWave(this.ctx, obj); 
+          this.unitRenderer.drawHumanoid(this.ctx, obj);
+        }
+        else if (obj.type === 'ENEMY') this.unitRenderer.drawHumanoid(this.ctx, obj);
+        else if (obj.type === 'NPC') this.unitRenderer.drawNPC(this.ctx, obj);
+        else if (obj.type === 'WALL') this.structureRenderer.drawStructure(this.ctx, obj, zone);
+        else if (obj.type === 'DECORATION') this.entityRenderer.drawDecoration(this.ctx, obj);
+        else if (obj.type === 'EXIT') this.entityRenderer.drawExit(this.ctx, obj);
+        else if (obj.type === 'SHRINE') this.entityRenderer.drawShrine(this.ctx, obj);
+        else if (obj.type === 'DESTRUCTIBLE') this.entityRenderer.drawDestructible(this.ctx, obj);
+        else if (obj.type === 'PICKUP') this.entityRenderer.drawPickup(this.ctx, obj);
+        else if (obj.type === 'HITBOX') {
+            if (obj.psionicEffect === 'wave') this.effectRenderer.drawPsionicWave(this.ctx, obj);
+            else if (obj.subType === 'VENT' && obj.state === 'ACTIVE') this.effectRenderer.drawSteamColumn(this.ctx, obj);
+            else if (obj.subType === 'SLUDGE') this.effectRenderer.drawSludge(this.ctx, obj);
+            else this.effectRenderer.drawHitboxIso(this.ctx, obj);
+        }
+        else if (obj.life !== undefined) this.effectRenderer.drawParticleIso(this.ctx, obj);
+
+        if (this.debugMode() && obj.radius) {
+            this.effectRenderer.drawDebugHitbox(this.ctx, obj);
+        }
+    }
+
+    // --- PASS 6: EFFECTS & UI OVERLAYS ---
+    // Note: Global effects might need entities for beam calculation (Sniper), so we pass visible list.
+    this.effectRenderer.drawGlobalEffects(this.ctx, renderableEntities, player, zone, rainDrops);
+    this.effectRenderer.drawFloatingTexts(this.ctx, texts, cam);
+
+    this.ctx.restore();
+    
+    // --- PASS 7: POST-PROCESSING ---
+    this.applyPostEffects(w, h);
+  }
+
+  private calculateFrustum(cam: Camera, width: number, height: number) {
+      // Calculate world coordinates of the screen corners
+      // Since rotation is 45deg (ISO), the view rect in world space is a diamond.
+      // We calculate an AABB that covers this diamond.
+      
+      const p1 = this.getScreenToWorld(0, 0, cam);
+      const p2 = this.getScreenToWorld(width, 0, cam);
+      const p3 = this.getScreenToWorld(0, height, cam);
+      const p4 = this.getScreenToWorld(width, height, cam);
+      const margin = RENDER_CONFIG.FRUSTUM_MARGIN;
+      
+      return {
+        minX: Math.min(p1.x, p2.x, p3.x, p4.x) - margin,
+        maxX: Math.max(p1.x, p2.x, p3.x, p4.x) + margin,
+        minY: Math.min(p1.y, p2.y, p3.y, p4.y) - margin,
+        maxY: Math.max(p1.y, p2.y, p3.y, p4.y) + margin
+      };
+  }
+
+  private applyPostEffects(w: number, h: number) {
+      if (!this.ctx) return;
+      
+      const grad = this.ctx.createRadialGradient(w/2, h/2, h/2, w/2, h/2, h);
+      grad.addColorStop(0, 'transparent');
+      grad.addColorStop(1, 'rgba(0,0,0,0.85)');
+      this.ctx.fillStyle = grad;
+      this.ctx.globalCompositeOperation = 'source-over';
+      this.ctx.fillRect(0, 0, w, h);
+
+      const integrity = this.player.stats.playerHp() / this.player.stats.playerStats().hpMax;
+      const energy = this.player.stats.psionicEnergy() / this.player.stats.maxPsionicEnergy();
+      const glitchChance = (integrity < 0.3 ? 0.3 : 0) + (energy > 0.9 ? 0.2 : 0);
+      
+      if (Math.random() < glitchChance) {
+          const offset = Math.random() * 4 * (1.5 - integrity);
+          this.ctx.save();
+          this.ctx.globalCompositeOperation = 'screen';
+          this.ctx.fillStyle = 'rgba(255, 0, 0, 0.1)';
+          this.ctx.translate(offset, 0);
+          this.ctx.fillRect(0, 0, w, h);
+          this.ctx.restore();
+      }
+  }
+}

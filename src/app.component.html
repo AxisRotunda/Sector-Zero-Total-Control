@@ -1,0 +1,175 @@
+
+<div class="fixed inset-0 font-mono text-zinc-300 select-none overflow-hidden touch-none"
+     [class.cursor-none]="input.usingKeyboard && !ui.isInventoryOpen() && !ui.isSkillsOpen() && !ui.isShopOpen() && !ui.isAbilitiesOpen() && !ui.isCodexOpen() && !ui.isJournalOpen() && !game.isInMenu() && !mapService.isFullMapOpen() && !mapService.isSettingsOpen()"
+     (touchstart)="handleGlobalTouch($event)">
+  
+  <canvas #gameCanvas class="absolute top-0 left-0 w-full h-full block bg-zinc-950"></canvas>
+
+  <div class="absolute inset-0 pointer-events-none crt-line opacity-20"></div>
+
+  @if (game.isInMenu()) {
+      <div class="absolute inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-500">
+          <div class="flex flex-col items-center gap-8 p-12 bg-zinc-900/90 border-2 border-zinc-700 shadow-2xl relative max-w-md w-full">
+               <div class="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-orange-500"></div>
+               <div class="absolute -top-1 -right-1 w-4 h-4 border-r-2 border-t-2 border-orange-500"></div>
+               <div class="absolute -bottom-1 -left-1 w-4 h-4 border-b-2 border-l-2 border-orange-500"></div>
+               <div class="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-orange-500"></div>
+
+               <div class="text-center">
+                   <h1 class="text-4xl md:text-6xl font-black text-white tracking-tighter mb-2 drop-shadow-[0_0_10px_rgba(255,255,255,0.5)]">SECTOR ZERO</h1>
+                   <h2 class="text-lg text-orange-500 font-bold tracking-[0.5em] uppercase">Total Control</h2>
+               </div>
+
+               <div class="flex flex-col gap-4 w-full">
+                   @if (persistence.hasSaveData()) {
+                       <button (click)="loadGame()" class="w-full py-4 bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 hover:border-orange-500 text-white font-bold tracking-widest transition-all group relative overflow-hidden">
+                           <div class="absolute inset-0 bg-orange-500/10 translate-y-full group-hover:translate-y-0 transition-transform"></div>
+                           RESUME UPLINK
+                       </button>
+                   }
+                   <button (click)="newGame()" class="w-full py-4 bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 hover:border-cyan-500 text-zinc-300 hover:text-white font-bold tracking-widest transition-all">
+                       INITIALIZE NEW SESSION
+                   </button>
+                   @if (persistence.hasSaveData()) {
+                       <button (click)="resetGame()" class="mt-4 text-[10px] text-red-900 hover:text-red-500 tracking-widest uppercase">
+                           [WIPE MEMORY BANKS]
+                       </button>
+                   }
+               </div>
+               <div class="text-[10px] text-zinc-600 font-mono mt-4">SYSTEM VERSION 3.0 // NEURAL LINK STABLE</div>
+          </div>
+      </div>
+  }
+
+  @if (player.stats.isDead()) {
+    <div class="absolute inset-0 z-[200] flex flex-col items-center justify-center bg-black animate-in fade-in">
+        <div class="text-red-500 font-mono text-center text-2xl tracking-widest space-y-2 animate-[pulse_2s_ease-in-out_infinite]">
+            <p>SIGNAL LOST</p>
+            <p>BIO-INTEGRITY CRITICAL</p>
+            <p>VACANCY DETECTED</p>
+        </div>
+        <div class="absolute bottom-10 text-zinc-700 text-xs font-mono animate-pulse">
+            ...REBOOTING NEURAL LINK...
+        </div>
+    </div>
+  }
+
+  @if (!game.isInMenu() && !player.stats.isDead()) {
+      <app-hud (openInventory)="ui.openPanel('INVENTORY')" 
+               (openSkills)="ui.openPanel('SKILLS')" 
+               (openAbilities)="ui.openPanel('ABILITIES')" 
+               (openCodex)="ui.openPanel('CODEX')"
+               (openJournal)="ui.openPanel('JOURNAL')"
+               (openShop)="ui.openPanel('SHOP')"></app-hud>
+
+      @if (!ui.isSkillsOpen() && !ui.isShopOpen() && !ui.isAbilitiesOpen() && !ui.isCodexOpen() && !ui.isJournalOpen() && !mapService.isFullMapOpen() && !mapService.isSettingsOpen()) {
+          
+          <!-- DYNAMIC JOYSTICK ZONE (LEFT HALF) -->
+          <div class="absolute top-20 bottom-0 left-0 w-1/2 z-10">
+               <app-joystick (move)="onJoystickMove($event)"></app-joystick>
+          </div>
+
+          <!-- ACTION CLUSTER (RIGHT HALF) -->
+          <div class="absolute top-20 bottom-0 right-0 w-1/2 z-10 pointer-events-none pb-safe pr-safe">
+             
+             <!-- ERGONOMIC BUTTON ARC -->
+             <div class="absolute bottom-6 right-6 pointer-events-auto flex flex-col items-end gap-6 pr-2 pb-2">
+               
+               <!-- OVERLOAD BUTTON (Floating Top) -->
+               @if (player.stats.psionicEnergy() >= player.stats.maxPsionicEnergy()) {
+                  <div class="absolute -right-4 bottom-40 animate-in fade-in zoom-in">
+                      <button (click)="useSkill('OVERLOAD', $event)" 
+                              class="w-16 h-16 bg-purple-900/90 border-2 border-purple-400 rounded-full shadow-[0_0_20px_rgba(168,85,247,0.7)] animate-pulse flex items-center justify-center text-white font-bold text-[10px] tracking-widest active:scale-90 transition-transform">
+                          OVERLOAD
+                      </button>
+                  </div>
+               }
+
+               <!-- UTILITY / TOGGLES ROW -->
+               <div class="flex items-center gap-4 mr-2 mb-2">
+                  <!-- AUTO COMBAT TOGGLE -->
+                  <button (click)="toggleAutoCombat()" class="w-10 h-10 rounded-full border flex items-center justify-center transition-all bg-zinc-900/80 backdrop-blur"
+                          [class]="player.autoCombatEnabled() ? 'border-green-500 shadow-[0_0_10px_rgba(34,197,94,0.3)] text-green-500' : 'border-zinc-700 text-zinc-600'">
+                      <svg viewBox="0 0 24 24" class="w-5 h-5 fill-current"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"></path></svg>
+                  </button>
+
+                   <!-- SHIELD BASH (NEW SKILL - Q) -->
+                   <button (touchstart)="useSkill('SHIELD_BASH', $event)" (mousedown)="useSkill('SHIELD_BASH', $event)"
+                           class="w-14 h-14 bg-zinc-900/90 border border-orange-900 active:scale-90 transition-transform rounded-full shadow-lg relative overflow-hidden group">
+                        <span class="text-[9px] font-bold text-orange-400 group-hover:text-orange-200">BASH</span>
+                        @if (player.abilities.cooldowns().utility > 0) {
+                           <div class="absolute inset-0 bg-black/60 flex items-center justify-center backdrop-blur-[1px]">
+                              <span class="text-white text-xs font-mono font-bold">{{ (player.abilities.cooldowns().utility / 60).toFixed(0) }}</span>
+                           </div>
+                        }
+                   </button>
+               </div>
+
+               <!-- MAIN ACTION ROW -->
+               <div class="flex items-end gap-6">
+                   <!-- DASH SKILL (SHIFT) -->
+                   <button (touchstart)="useSkill('DASH', $event)" (mousedown)="useSkill('DASH', $event)"
+                           class="w-14 h-14 bg-zinc-900/90 border border-zinc-600 active:scale-90 transition-transform rounded-full shadow-lg relative overflow-hidden group mb-6">
+                        <span class="text-[9px] font-bold text-zinc-400 group-hover:text-zinc-200">DASH</span>
+                        @if (player.abilities.cooldowns().dash > 0) {
+                           <div class="absolute inset-0 bg-black/60 flex items-center justify-center backdrop-blur-[1px]">
+                              <span class="text-white text-xs font-mono font-bold">{{ (player.abilities.cooldowns().dash / 60).toFixed(0) }}</span>
+                           </div>
+                        }
+                   </button>
+
+                   <!-- SECONDARY SKILL (E) -->
+                   <button (touchstart)="useSkill('SECONDARY', $event)" (mousedown)="useSkill('SECONDARY', $event)"
+                           class="w-16 h-16 bg-zinc-900/90 border border-cyan-900 active:scale-90 transition-transform rounded-full shadow-lg relative overflow-hidden group mb-4">
+                        <span class="text-[9px] font-bold text-cyan-400 group-hover:text-cyan-200">BLAST</span>
+                        @if (player.abilities.cooldowns().secondary > 0) {
+                           <div class="absolute inset-0 bg-black/60 flex items-center justify-center backdrop-blur-[1px]">
+                              <span class="text-white text-xs font-mono font-bold">{{ (player.abilities.cooldowns().secondary / 60).toFixed(0) }}</span>
+                           </div>
+                        }
+                   </button>
+
+                   <!-- PRIMARY ATTACK (SPACE/TAP) -->
+                   <button (touchstart)="startAttack($event)" (touchend)="stopAttack($event)" (mousedown)="startAttack($event)" (mouseup)="stopAttack($event)" (mouseleave)="stopAttack($event)"
+                           class="w-24 h-24 bg-zinc-900/80 border-4 border-orange-600 active:scale-90 transition-transform rounded-full shadow-[0_0_30px_rgba(234,88,12,0.2)] flex items-center justify-center relative overflow-hidden group">
+                        
+                        <div class="absolute inset-0 bg-orange-500/10 group-active:bg-orange-500/30 transition-colors"></div>
+                        
+                        <!-- Crosshair Icon -->
+                        <div class="w-full h-full absolute flex items-center justify-center opacity-50 group-active:opacity-100 transition-opacity">
+                            <div class="w-12 h-1 bg-orange-500 absolute"></div>
+                            <div class="h-12 w-1 bg-orange-500 absolute"></div>
+                        </div>
+
+                        @if (player.abilities.cooldowns().primary > 0) {
+                            <div class="absolute bottom-0 left-0 w-full bg-orange-500/50 h-full origin-bottom transition-transform"
+                                 [style.transform]="'scaleY(' + (player.abilities.cooldowns().primary / player.abilities.maxCooldowns().primary) + ')'">
+                            </div>
+                        }
+                   </button>
+               </div>
+             </div>
+          </div>
+      }
+  }
+  
+  @if (mapService.isFullMapOpen()) {
+      <div class="absolute inset-0 z-40 bg-black/80 flex items-center justify-center p-4 md:p-12 animate-in fade-in">
+          <app-map mode="FULL"></app-map>
+      </div>
+  }
+  
+  @if (mapService.isSettingsOpen()) {
+      <app-settings></app-settings>
+  }
+
+  @if (ui.isInventoryOpen()) { <app-inventory (close)="ui.closeAll()" class="app-inventory-container"></app-inventory> }
+  @if (ui.isSkillsOpen()) { <app-skill-tree (close)="ui.closeAll()"></app-skill-tree> }
+  @if (ui.isAbilitiesOpen()) { <app-abilities-panel (close)="ui.closeAll()"></app-abilities-panel> }
+  @if (ui.isShopOpen()) { <app-shop (close)="ui.closeAll()"></app-shop> }
+  @if (ui.isCodexOpen()) { <app-codex (close)="ui.closeAll()"></app-codex> }
+  @if (ui.isJournalOpen()) { <app-mission-journal (close)="ui.closeAll()"></app-mission-journal> }
+
+  <app-item-tooltip></app-item-tooltip>
+  <app-dialogue-overlay></app-dialogue-overlay>
+</div>
