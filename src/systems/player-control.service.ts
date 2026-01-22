@@ -86,7 +86,10 @@ export class PlayerControlService {
         // Delegate Interaction Logic
         this.interaction.update(player, globalTime);
         
-        this.handleCombatInputs(player, globalTime);
+        // Only allow combat inputs if NOT in a safe zone
+        if (!this.world.currentZone().isSafeZone) {
+            this.handleCombatInputs(player, globalTime);
+        }
     }
 
     private handleCombatInputs(player: Entity, globalTime: number) {

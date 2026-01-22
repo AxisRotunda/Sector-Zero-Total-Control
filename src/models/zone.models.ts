@@ -29,6 +29,7 @@ export interface ZoneEntityDef {
   x: number;
   y: number;
   z?: number;
+  conditionFlag?: string; // Only spawn if this Narrative Flag is TRUE
   data?: any; // Extra props like dialogueId, loot, spawn info
 }
 
@@ -53,8 +54,8 @@ export interface ZoneTemplate {
   theme: ZoneTheme;
   bounds: ZoneBounds;
   
-  // NEW: Training zone flag
   isTrainingZone?: boolean;
+  isSafeZone?: boolean; // Safe harbor mode
 
   // Hierarchy Metadata
   regionType?: 'hub' | 'segment' | 'dungeon' | 'poi';
@@ -64,7 +65,6 @@ export interface ZoneTemplate {
 
   geometry: ZoneGeometry;
   
-  // Phase 2: Render Layer Metadata
   renderLayers?: {
     floor?: RenderLayerConfig;
     walls?: RenderLayerConfig;

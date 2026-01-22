@@ -30,7 +30,8 @@ export class SectorLoaderService {
               difficultyMult: template.metadata.difficulty,
               weather: template.environment.weather,
               floorPattern: template.environment.floorPattern,
-              ambientColor: template.environment.ambientColor
+              ambientColor: template.environment.ambientColor,
+              isSafeZone: template.isSafeZone // New Safe Zone flag
           });
           world.mapBounds = template.bounds;
 
@@ -98,6 +99,12 @@ export class SectorLoaderService {
   }
 
   private spawnEntity(world: WorldService, def: ZoneEntityDef, zoneId: string) {
+      // Progressive Unlocking: Check Narrative Condition
+      if (def.conditionFlag) {
+          const isMet = this.narrative.getFlag(def.conditionFlag);
+          if (!isMet) return; // Skip spawning
+      }
+
       const e = this.entityPool.acquire(def.type as any, def.subType as any);
       e.x = def.x; e.y = def.y; e.zoneId = zoneId;
       
@@ -110,7 +117,7 @@ export class SectorLoaderService {
           const config = DECORATIONS[def.subType];
           e.width = config.width;
           e.height = config.height;
-          e.depth = config.depth; // Entity interface uses depth? Actually entity interface has depth.
+          e.depth = config.depth; 
           e.color = config.baseColor;
       }
 

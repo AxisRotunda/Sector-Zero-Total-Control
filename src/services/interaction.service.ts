@@ -81,7 +81,7 @@ export class InteractionService {
           }
           
           // 2. Selectable Targets (NPCs, Terminals, Generic Interactables)
-          const isInteractiveType = e.type === 'NPC' || e.type === 'TERMINAL' || e.type === 'INTERACTABLE';
+          const isInteractiveType = e.type === 'NPC' || e.type === 'TERMINAL' || e.type === 'INTERACTABLE' || e.subType === 'STASH';
           const isActive = !e.accessed; // Terminals become inactive after access
 
           if (isInteractiveType && isActive) {
@@ -145,7 +145,7 @@ export class InteractionService {
       
       // 3. Filter for interactables
       const validTarget = targets.find(e => 
-          (e.type === 'NPC' || e.type === 'INTERACTABLE' || (e.type === 'TERMINAL' && !e.accessed)) && 
+          (e.type === 'NPC' || e.type === 'INTERACTABLE' || (e.type === 'TERMINAL' && !e.accessed) || e.subType === 'STASH') && 
           e.state !== 'DEAD'
       );
       
@@ -173,7 +173,6 @@ export class InteractionService {
       this.haptic.impactLight();
 
       if (target.subType === 'ZONE_TRANSITION') {
-          // Handle direct entity-based transitions (Doors, Portals)
           const dest = target.data?.targetZone;
           if (dest) {
               this.requestedFloorChange.set(dest);
@@ -182,19 +181,20 @@ export class InteractionService {
       } else if (target.subType === 'TRADER') {
           this.shopService.openShop(target);
           this.ui.openPanel('SHOP');
+      } else if (target.subType === 'STASH') {
+          this.ui.openPanel('INVENTORY');
+          this.sound.play('UI');
       } else if (['HANDLER', 'CITIZEN', 'ECHO', 'GUARD', 'MEDIC'].includes(target.subType || '')) {
           if (target.subType) this.missionService.onTalk(target.subType);
           this.dialogueService.startDialogue(target.dialogueId || 'generic');
       } else if (target.type === 'TERMINAL') {
           this.processTerminal(target);
       } else {
-          // Fallback for generic interactables with dialogue
           this.dialogueService.startDialogue(target.dialogueId || 'generic');
       }
   }
 
   getInteractLabel(target: Entity): string {
-      // Allow data-driven override from prefab/entity def
       if (target.data?.promptText) {
           return target.data.promptText.toUpperCase();
       }
@@ -206,6 +206,7 @@ export class InteractionService {
           case 'CONSOLE': return 'TERMINAL';
           case 'CITIZEN': return 'CONVERSE';
           case 'ZONE_TRANSITION': return 'ENTER';
+          case 'STASH': return 'ACCESS STORAGE';
           default: return 'INTERACT';
       }
   }
