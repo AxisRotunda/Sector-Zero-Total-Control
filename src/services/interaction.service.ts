@@ -39,6 +39,10 @@ export class InteractionService {
   // Refactored to support complex transition requests
   requestedFloorChange = signal<{ id: string; spawn?: {x: number, y: number} } | null>(null);
 
+  // Cooldown tracking for zone transitions
+  private lastTransitionTime = 0;
+  private readonly TRANSITION_COOLDOWN = 1000; // 1 second buffer
+
   update(player: Entity, globalTime: number) {
       let bestTarget: Entity | null = null;
       let bestScore = Infinity;
@@ -53,6 +57,8 @@ export class InteractionService {
       const pDirX = Math.cos(player.angle);
       const pDirY = Math.sin(player.angle);
 
+      const now = Date.now();
+
       for(const e of nearby) {
           // Calculate distance
           const dx = e.x - px;
@@ -64,12 +70,18 @@ export class InteractionService {
           if (e.type === 'EXIT') {
                if (dist < combinedRadius + 20) {
                     if (!e.locked) {
+                        // Check cooldown to prevent bounce
+                        if (now - this.lastTransitionTime < this.TRANSITION_COOLDOWN) {
+                            return;
+                        }
+
                         // FIX: Read from targetZoneId (Zone system standard) instead of legacy targetSector
                         const targetId = (e as any).targetZoneId || e.exitType || 'DOWN';
                         this.requestedFloorChange.set({ 
                             id: targetId,
                             spawn: e.spawnOverride 
                         });
+                        this.lastTransitionTime = now;
                     }
                     else if (globalTime % 60 === 0) {
                         this.eventBus.dispatch({ 
@@ -179,6 +191,7 @@ export class InteractionService {
           const dest = (target as any).targetZoneId || target.data?.targetZone;
           if (dest) {
               this.requestedFloorChange.set({ id: dest, spawn: target.spawnOverride });
+              this.lastTransitionTime = Date.now();
               this.sound.play('UI');
           }
       } else if (target.subType === 'TRADER') {

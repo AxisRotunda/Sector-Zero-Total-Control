@@ -115,7 +115,7 @@ export const HUB_ZONE: ZoneTemplate = {
       targetZoneId: 'SECTOR_9_N', 
       transitionType: 'GATE', 
       locked: true,
-      spawnOverride: { x: 0, y: -750 }
+      spawnOverride: { x: 0, y: -650 } // Offset 150px from return portal (-800)
     }
   ],
 

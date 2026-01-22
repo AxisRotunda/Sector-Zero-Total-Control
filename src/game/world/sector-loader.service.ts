@@ -174,7 +174,14 @@ export class SectorLoaderService {
       exit.x = def.x; exit.y = def.y;
       exit.exitType = def.direction || 'DOWN'; 
       exit.targetX = 0;
-      exit.color = def.transitionType === 'GATE' ? '#ef4444' : '#f97316';
+      
+      // Visuals: Logic to distinguish Return (HUB) portals from Forward (Danger) gates
+      if (def.targetZoneId === 'HUB') {
+          exit.color = '#06b6d4'; // Cyan for Return
+      } else {
+          exit.color = def.transitionType === 'GATE' ? '#ef4444' : '#f97316';
+      }
+
       exit.radius = 40; 
       exit.zoneId = zoneId;
       (exit as any).targetSector = def.targetZoneId;
