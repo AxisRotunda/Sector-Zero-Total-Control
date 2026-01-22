@@ -1,6 +1,7 @@
 
 import { Injectable, signal, OnDestroy } from '@angular/core';
-import { Subject, Observable, fromEvent } from 'rxjs';
+import { Subject, Observable, fromEvent, merge } from 'rxjs';
+import { map, filter, throttleTime } from 'rxjs/operators';
 
 export type Action = 
   | 'MOVE_UP' | 'MOVE_DOWN' | 'MOVE_LEFT' | 'MOVE_RIGHT'
@@ -39,11 +40,9 @@ export interface InputState {
   providedIn: 'root'
 })
 export class InputService {
-  // Legacy direct access properties
   inputVector = { x: 0, y: 0 };
   aimAngle: number | null = null;
   
-  // Converted to signals to prevent NG0100 errors and improve reactivity
   usingKeyboard = signal(false);
   usingGamepad = signal(false);
   
@@ -51,13 +50,16 @@ export class InputService {
   
   bindings = signal<Record<Action, string>>({ ...DEFAULT_BINDINGS });
   
-  // Reactive Streams
   actionEvents = new Subject<Action>();
-  private inputState$ = new Subject<InputState>();
+  zoomEvents = new Subject<number>(); // Delta value
 
+  private inputState$ = new Subject<InputState>();
   private activeKeys = new Set<string>();
   private activeActions = new Set<Action>();
   private canvasRef: HTMLCanvasElement | null = null;
+
+  // Touch Zoom State
+  private initialPinchDist: number | null = null;
 
   // Gamepad State
   private gamepadIndex: number | null = null;
@@ -75,12 +77,20 @@ export class InputService {
 
   setCanvas(canvas: HTMLCanvasElement) {
     this.canvasRef = canvas;
+    this.initTouchZoom(canvas);
   }
 
   private initListeners() {
     fromEvent<KeyboardEvent>(window, 'keydown').subscribe(e => this.handleKeyDown(e));
     fromEvent<KeyboardEvent>(window, 'keyup').subscribe(e => this.handleKeyUp(e));
     fromEvent<MouseEvent>(window, 'mousemove').subscribe(e => this.handleMouseMove(e));
+    
+    // Mouse Wheel Zoom
+    fromEvent<WheelEvent>(window, 'wheel', { passive: false }).subscribe(e => {
+        if (e.ctrlKey || !this.canvasRef) return; // Allow browser zoom if ctrl is held
+        // e.preventDefault(); // Optional: prevent page scroll
+        this.zoomEvents.next(e.deltaY);
+    });
     
     fromEvent<MouseEvent>(window, 'mousedown').subscribe(e => {
         if (e.button === 0) {
@@ -95,6 +105,32 @@ export class InputService {
         this.activeActions.delete('ATTACK');
         this.emitState();
     });
+  }
+
+  private initTouchZoom(canvas: HTMLCanvasElement) {
+      canvas.addEventListener('touchmove', (e) => {
+          if (e.touches.length === 2) {
+              e.preventDefault(); // Prevent page scroll
+              const dist = Math.hypot(
+                  e.touches[0].clientX - e.touches[1].clientX,
+                  e.touches[0].clientY - e.touches[1].clientY
+              );
+
+              if (this.initialPinchDist === null) {
+                  this.initialPinchDist = dist;
+              } else {
+                  const delta = this.initialPinchDist - dist;
+                  this.zoomEvents.next(delta * 5); // Multiplier to match wheel sensitivity roughly
+                  this.initialPinchDist = dist;
+              }
+          }
+      }, { passive: false });
+
+      canvas.addEventListener('touchend', (e) => {
+          if (e.touches.length < 2) {
+              this.initialPinchDist = null;
+          }
+      });
   }
 
   private initGamepad() {
@@ -135,7 +171,6 @@ export class InputService {
     localStorage.removeItem('sector_zero_bindings');
   }
 
-  // Called by JoystickComponent
   setJoystick(x: number, y: number) {
       this.inputVector = { x, y };
       this.usingKeyboard.set(false);
