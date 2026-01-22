@@ -7,16 +7,23 @@ import { Entity, Camera } from '../../models/game.models';
 })
 export class ChunkManagerService {
   // Config
-  private readonly CHUNK_SIZE = 1000; // Large chunks for static geometry
-  private readonly LOAD_MARGIN = 1; // Chunks around visibility to load
+  private readonly CHUNK_SIZE = 1000; // Size of chunk in world units
+  private readonly LOAD_MARGIN = 1; // Number of neighbor chunks to include
 
   // State
+  // Key: "chunkX,chunkY" -> Array of Entities
   private chunks = new Map<string, Entity[]>();
-  private activeChunks = new Set<string>();
+  
+  // Cache the last visible set to avoid re-aggregating every frame if camera hasn't moved much
+  private lastVisibleEntities: Entity[] = [];
+  private lastCheckX = -99999;
+  private lastCheckY = -99999;
+  private readonly CACHE_DIST_SQ = 100 * 100; // Only re-query if camera moved > 100 units
 
   reset() {
     this.chunks.clear();
-    this.activeChunks.clear();
+    this.lastVisibleEntities = [];
+    this.lastCheckX = -99999;
   }
 
   /**
@@ -38,20 +45,31 @@ export class ChunkManagerService {
    * This is the "Culling" phase.
    */
   getVisibleStaticEntities(cam: Camera, canvasWidth: number, canvasHeight: number): Entity[] {
+    // Optimization: Return cached list if camera hasn't moved significantly
+    const distSq = (cam.x - this.lastCheckX)**2 + (cam.y - this.lastCheckY)**2;
+    if (distSq < this.CACHE_DIST_SQ && this.lastVisibleEntities.length > 0) {
+        return this.lastVisibleEntities;
+    }
+
     const visibleKeys = this.calculateVisibleChunkKeys(cam, canvasWidth, canvasHeight);
     const entities: Entity[] = [];
 
-    // Simple cache check - if set of visible chunks hasn't changed, we could cache the result list
-    // For now, we rebuild the list as it's just pointer references
     for (const key of visibleKeys) {
       const chunk = this.chunks.get(key);
       if (chunk) {
-        // We could do finer culling here, but chunk-level is good for broad phase
-        for (let i = 0; i < chunk.length; i++) {
+        // Fast Array Copy
+        const len = chunk.length;
+        for (let i = 0; i < len; i++) {
             entities.push(chunk[i]);
         }
       }
     }
+    
+    // Update cache
+    this.lastVisibleEntities = entities;
+    this.lastCheckX = cam.x;
+    this.lastCheckY = cam.y;
+
     return entities;
   }
 
@@ -65,17 +83,28 @@ export class ChunkManagerService {
     const keys = new Set<string>();
     
     // Calculate world bounds of the camera view
-    // (Approximate un-projected bounds)
-    const viewW = (w / cam.zoom) * 1.5; // Padding for rotation/iso
-    const viewH = (h / cam.zoom) * 1.5;
+    // Since we are isometric, the view is a diamond, but we use a bounding box for chunk selection.
+    // We pad generousy to avoid pop-in.
     
-    const startX = Math.floor((cam.x - viewW / 2) / this.CHUNK_SIZE);
-    const endX = Math.floor((cam.x + viewW / 2) / this.CHUNK_SIZE);
-    const startY = Math.floor((cam.y - viewH / 2) / this.CHUNK_SIZE);
-    const endY = Math.floor((cam.y + viewH / 2) / this.CHUNK_SIZE);
+    // Effective Viewport Size in World Units
+    const worldW = (w / cam.zoom);
+    const worldH = (h / cam.zoom);
+    
+    // Iso projection rotates 45 deg. The bounding box of the rotated view is larger.
+    const radius = Math.max(worldW, worldH) * 1.0; 
 
-    for (let x = startX - this.LOAD_MARGIN; x <= endX + this.LOAD_MARGIN; x++) {
-      for (let y = startY - this.LOAD_MARGIN; y <= endY + this.LOAD_MARGIN; y++) {
+    const minX = cam.x - radius;
+    const maxX = cam.x + radius;
+    const minY = cam.y - radius;
+    const maxY = cam.y + radius;
+    
+    const startX = Math.floor(minX / this.CHUNK_SIZE);
+    const endX = Math.floor(maxX / this.CHUNK_SIZE);
+    const startY = Math.floor(minY / this.CHUNK_SIZE);
+    const endY = Math.floor(maxY / this.CHUNK_SIZE);
+
+    for (let x = startX; x <= endX; x++) {
+      for (let y = startY; y <= endY; y++) {
         keys.add(`${x},${y}`);
       }
     }

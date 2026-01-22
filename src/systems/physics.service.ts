@@ -108,48 +108,63 @@ export class PhysicsService {
       const zoneId = this.world.currentZone().id;
       
       // Check Dynamic Entities via Spatial Hash
-      const nearbyDynamic = this.spatialHash.query(e.x, e.y, radius + 20, zoneId); 
+      const nearbyDynamic = this.spatialHash.query(e.x, e.y, radius + 50, zoneId); 
       
       // Check Static Entities via Chunk Manager
-      // We simulate a camera at entity position to reuse the chunk logic (hacky but efficient reuse)
-      const nearbyStatic = this.chunkManager.getVisibleStaticEntities({ x: e.x, y: e.y, zoom: 1 }, 200, 200);
+      // Note: We use a lightweight mock Camera to query the ChunkManager at the entity's position
+      // This reuses the spatial partitioning logic of the chunk system.
+      // Optimization: We ask for a small viewport around the entity.
+      const nearbyStatic = this.chunkManager.getVisibleStaticEntities(
+          { x: e.x, y: e.y, zoom: 1 } as any, 
+          200, 200 // Small query window
+      );
 
-      const candidates = [...nearbyDynamic, ...nearbyStatic];
+      // Combine candidates
+      // Note: In high perf scenarios, iterate separately to avoid allocation of combined array
+      
+      // 1. Static Check (Walls)
+      const lenStatic = nearbyStatic.length;
+      for (let i = 0; i < lenStatic; i++) {
+          const obs = nearbyStatic[i];
+          if (obs.type === 'WALL') {
+              if (obs.locked === false) continue; // Skip open doors
 
-      for (const obs of candidates) {
-          if (obs.id === e.id) continue;
-          
-          if (obs.type === 'WALL' || (isDestructible(obs) && obs.state !== 'DEAD')) {
-              if (obs.type === 'WALL' && obs.locked === false) continue;
+              // Dimensions: Prefer specific axes, fallback to width if uniform
+              const colW = obs.width || 40;
+              const colD = obs.depth || obs.width || 40; // Depth is Y-axis in collision
 
-              const colW = obs.width;
-              const colH = obs.depth || obs.height; 
-
-              if (colW && colH) {
-                  // AABB vs Circle
-                  const halfW = colW / 2;
-                  const halfH = colH / 2;
-                  
-                  const closestX = Math.max(obs.x - halfW, Math.min(e.x, obs.x + halfW));
-                  const closestY = Math.max(obs.y - halfH, Math.min(e.y, obs.y + halfH));
-                  
-                  const dx = e.x - closestX;
-                  const dy = e.y - closestY;
-                  const distSq = dx * dx + dy * dy;
-                  
-                  if (distSq < (radius * radius) - 0.1) {
-                      return true;
-                  }
-              } else {
-                  // Circle vs Circle
-                  const obsR = obs.radius || 20;
-                  const dist = Math.hypot(e.x - obs.x, e.y - obs.y);
-                  if (dist < radius + obsR) {
-                      return true;
-                  }
+              // AABB vs Circle
+              const halfW = colW / 2;
+              const halfD = colD / 2;
+              
+              const closestX = Math.max(obs.x - halfW, Math.min(e.x, obs.x + halfW));
+              const closestY = Math.max(obs.y - halfD, Math.min(e.y, obs.y + halfD));
+              
+              const dx = e.x - closestX;
+              const dy = e.y - closestY;
+              const distSq = dx * dx + dy * dy;
+              
+              if (distSq < (radius * radius) - 0.1) {
+                  return true;
               }
           }
       }
+
+      // 2. Dynamic Check (Destructibles)
+      const lenDynamic = nearbyDynamic.length;
+      for (let i = 0; i < lenDynamic; i++) {
+          const obs = nearbyDynamic[i];
+          if (obs.id === e.id) continue;
+          
+          if (isDestructible(obs) && obs.state !== 'DEAD') {
+              const obsR = obs.radius || 20;
+              const dist = Math.hypot(e.x - obs.x, e.y - obs.y);
+              if (dist < radius + obsR) {
+                  return true;
+              }
+          }
+      }
+      
       return false;
   }
 }

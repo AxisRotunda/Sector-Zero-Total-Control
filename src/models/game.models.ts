@@ -17,9 +17,9 @@ export interface Entity {
   z: number;
   
   // Dimensions (Volumetric)
-  width?: number; 
-  height?: number; 
-  depth?: number;  
+  width?: number;  // X-axis span
+  depth?: number;  // Y-axis span (previously often implied equal to width or height)
+  height?: number; // Z-axis span
   
   // Render Sorting
   isoDepth?: number; 
