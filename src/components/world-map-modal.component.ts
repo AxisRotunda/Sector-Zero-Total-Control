@@ -128,10 +128,8 @@ export class WorldMapModalComponent {
   travelToPersonal() {
       const rift = this.waypoint.personalRift();
       if (rift) {
-          this.zoneManager.transitionToZone(rift.sourceZoneId);
-          // Teleport player to specific coords happens inside ZoneManager/Loader if we passed coords
-          // For MVP, we just go to the zone. Ideally ZoneManager.transitionToZone should accept a spawn override.
-          // Let's rely on standard spawn for now or add that feature later.
+          // Pass specific coordinates for personal rift travel
+          this.zoneManager.transitionToZone(rift.sourceZoneId, { x: rift.x, y: rift.y });
           this.close.emit();
       }
   }

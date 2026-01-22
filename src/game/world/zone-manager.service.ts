@@ -17,6 +17,7 @@ import { SpatialHashService } from '../../systems/spatial-hash.service';
 import { ZoneHierarchyManagerService } from './zone-hierarchy-manager.service';
 import { Entity } from '../../models/game.models';
 import { WaypointService } from './waypoint.service';
+import { EntityPoolService } from '../../services/entity-pool.service';
 
 @Injectable({
   providedIn: 'root'
@@ -31,6 +32,7 @@ export class ZoneManagerService {
   private spatialHash = inject(SpatialHashService);
   private hierarchy = inject(ZoneHierarchyManagerService);
   private waypointService = inject(WaypointService);
+  private entityPool = inject(EntityPoolService);
 
   // Strategies
   private staticLoader = inject(StaticZoneLoader);
@@ -51,7 +53,7 @@ export class ZoneManagerService {
       });
   }
 
-  async transitionToZone(targetZoneId: string) {
+  async transitionToZone(targetZoneId: string, spawnOverride?: {x: number, y: number}) {
     const targetConfig = this.graph.zones[targetZoneId];
     
     if (!targetConfig) {
@@ -82,7 +84,7 @@ export class ZoneManagerService {
 
         // 4. Load New Zone
         this.transitionState.set(ZoneTransitionState.LOADING_NEW);
-        await this.loadZoneStrategy(targetConfig.template, currentId);
+        await this.loadZoneStrategy(targetConfig.template, currentId, spawnOverride);
         
         // 5. Update State
         this.currentZoneId.set(targetZoneId);
@@ -92,9 +94,20 @@ export class ZoneManagerService {
         // 6. Discovery & Events
         this.checkDiscovery(targetZoneId, targetConfig.displayName);
         
-        // 7. Check Riftgate
+        // 7. Check Riftgate Unlock
         if (targetConfig.template.metadata.hasRiftgate) {
             this.waypointService.unlockWaypoint(targetZoneId);
+        }
+
+        // 8. Respawn Personal Rift Visual (Persistence Fix)
+        const rift = this.waypointService.personalRift();
+        if (rift && rift.active && rift.sourceZoneId === targetZoneId) {
+            const portal = this.entityPool.acquire('INTERACTABLE', 'PORTAL');
+            portal.x = rift.x;
+            portal.y = rift.y;
+            portal.zoneId = targetZoneId;
+            portal.data = { isPersonal: true };
+            this.world.entities.push(portal);
         }
 
         this.transitionState.set(ZoneTransitionState.COMPLETE);
@@ -138,8 +151,7 @@ export class ZoneManagerService {
     
     // The ones to remove are implicitly dropped
     this.world.entities = keepers;
-    this.spatialHash.clearDynamic(zoneId); // Rebuild next frame or now?
-    // EntityUpdateService rebuilds dynamic hash every frame, so just modifying array is enough
+    this.spatialHash.clearDynamic(zoneId); 
 
     // Reset spawners
     const spawners = this.world.entities.filter(e => e.type === 'SPAWNER');
@@ -154,20 +166,30 @@ export class ZoneManagerService {
     });
   }
 
-  private async loadZoneStrategy(template: ZoneTemplate, previousZoneId?: string) {
+  private async loadZoneStrategy(template: ZoneTemplate, previousZoneId?: string, spawnOverride?: {x: number, y: number}) {
       const isProcedural = (!template.geometry.walls || template.geometry.walls.length === 0) && template.metadata.isInstanced;
       const loader = isProcedural ? this.proceduralLoader : this.staticLoader;
 
       await loader.load(this.world, { template, previousZoneId });
       
-      this.handleSpawnPoint(template, previousZoneId);
+      this.handleSpawnPoint(template, previousZoneId, spawnOverride);
       
       this.world.camera.x = this.world.player.x;
       this.world.camera.y = this.world.player.y;
   }
 
-  private handleSpawnPoint(template: ZoneTemplate, previousZoneId?: string) {
-      if (!previousZoneId) return;
+  private handleSpawnPoint(template: ZoneTemplate, previousZoneId?: string, spawnOverride?: {x: number, y: number}) {
+      if (spawnOverride) {
+          this.world.player.x = spawnOverride.x;
+          this.world.player.y = spawnOverride.y;
+          return;
+      }
+
+      if (!previousZoneId) {
+          this.world.player.x = template.metadata.playerStart.x;
+          this.world.player.y = template.metadata.playerStart.y;
+          return;
+      }
 
       const entrance = this.world.entities.find(e => 
           e.type === 'EXIT' && (e as any).targetSector === previousZoneId
