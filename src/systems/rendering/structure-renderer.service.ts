@@ -119,13 +119,16 @@ export class StructureRendererService {
   drawStructure(ctx: CanvasRenderingContext2D, e: Entity, zone: Zone) {
       if (e.subType === 'BARRIER') { this.drawEnergyBarrier(ctx, e); return; }
       if (e.subType === 'CABLE') { this.drawCable(ctx, e); return; }
-      if (e.type === 'WALL' && (e as any).type === 'DYNAMIC_GLOW') { this.drawDynamicGlow(ctx, e); return; }
+      if (e.subType === 'DYNAMIC_GLOW') { this.drawDynamicGlow(ctx, e); return; }
       
       const w = e.width || 40; 
       const d = e.depth || e.width || 40; 
       const h = e.height || 100;
       const theme = zone ? zone.theme : 'INDUSTRIAL';
-      const structureType = (e as any).type || e.subType || 'WALL';
+      
+      // Fix: Don't check (e as any).type as it always returns 'WALL' for wall entities.
+      // Rely on subType which is correctly populated by SectorLoader.
+      const structureType = e.subType || 'WALL';
       
       const cacheKey = `STRUCT_${e.type}_${structureType}_${w}_${d}_${h}_${e.color}_${theme}_${e.locked}`;
       
@@ -412,10 +415,10 @@ export class StructureRendererService {
       const glowIntensity = baseIntensity * (0.7 + 0.3 * Math.sin(pulsePhase));
       
       const w = e.width || 500;
-      const d = e.depth || 10;
-      const h = e.height || 10;
+      const thickness = e.depth || 10;
+      const elevation = e.height || 0; // Use height as elevation per fix logic
       
-      const pos = IsoUtils.toIso(e.x, e.y, e.z || 340);
+      const pos = IsoUtils.toIso(e.x, e.y, e.z + elevation);
       
       ctx.save();
       ctx.translate(pos.x, pos.y);
@@ -429,6 +432,8 @@ export class StructureRendererService {
       const p1 = p(-w/2, 0);
       const p2 = p(w/2, 0);
       
+      const h = thickness; 
+
       ctx.beginPath();
       ctx.moveTo(p1.x, p1.y - h/2);
       ctx.lineTo(p2.x, p2.y - h/2);

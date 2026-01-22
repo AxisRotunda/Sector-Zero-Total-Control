@@ -242,6 +242,7 @@ export class PlayerControlService {
         }
 
         const hitbox = this.entityPool.acquire('HITBOX');
+        hitbox.zoneId = player.zoneId; // VISIBILITY FIX
         hitbox.source = 'PLAYER'; 
         hitbox.x = player.x + Math.cos(player.angle) * 30; 
         hitbox.y = player.y + Math.sin(player.angle) * 30; 

@@ -71,7 +71,7 @@ export class PlayerAbilitiesService {
         this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: { intensity: shakeIntensity, decay: 0.9, x: Math.cos(attackDir), y: Math.sin(attackDir) } });
         
         // Pitch shift sound slightly for combos
-        this.sound.play('SHOOT'); // Todo: Sound pitch variance support
+        this.sound.play('SHOOT'); 
     }
     if (skill === 'SECONDARY') {
         const cost = 50;
@@ -80,6 +80,7 @@ export class PlayerAbilitiesService {
         this.cooldowns.update(c => ({...c, secondary: 300}));
         
         const hitbox = this.entityPool.acquire('HITBOX');
+        hitbox.zoneId = player.zoneId; // VISIBILITY FIX
         hitbox.source = 'PSIONIC'; hitbox.x = player.x; hitbox.y = player.y; hitbox.radius = 120 + stats.psyche * 3; hitbox.hp = 15 + stats.psyche * 2; hitbox.color = '#a855f7'; hitbox.state = 'ATTACK'; hitbox.timer = 10; hitbox.knockbackForce = 20; hitbox.psionicEffect = 'wave';
         this.world.entities.push(hitbox);
         this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: BALANCE.SHAKE.EXPLOSION });
@@ -104,6 +105,7 @@ export class PlayerAbilitiesService {
         this.cooldowns.update(c => ({...c, utility: BALANCE.COOLDOWNS.UTILITY}));
         const angle = targetAngle ?? player.angle;
         const hitbox = this.entityPool.acquire('HITBOX');
+        hitbox.zoneId = player.zoneId; // VISIBILITY FIX
         hitbox.source = 'PSIONIC'; 
         hitbox.x = player.x + Math.cos(angle) * 70; 
         hitbox.y = player.y + Math.sin(angle) * 70; 
@@ -128,6 +130,7 @@ export class PlayerAbilitiesService {
         player.vy += Math.sin(angle) * 10;
 
         const hitbox = this.entityPool.acquire('HITBOX');
+        hitbox.zoneId = player.zoneId; // VISIBILITY FIX
         hitbox.source = 'PLAYER';
         hitbox.x = player.x + Math.cos(angle) * 40;
         hitbox.y = player.y + Math.sin(angle) * 40;
@@ -145,6 +148,7 @@ export class PlayerAbilitiesService {
         this.stats.psionicEnergy.set(0);
         this.world.player.status.stun = 120;
         const explosion = this.entityPool.acquire('HITBOX');
+        explosion.zoneId = player.zoneId; // VISIBILITY FIX
         explosion.source = 'PSIONIC'; explosion.x = player.x; explosion.y = player.y; explosion.radius = 350; explosion.hp = 100 + this.stats.playerStats().psyche * 5; explosion.knockbackForce = 50; explosion.timer = 15; explosion.color = '#f0abfc'; explosion.psionicEffect = 'wave';
         this.world.entities.push(explosion);
         this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: { intensity: 30, decay: 0.7 } });

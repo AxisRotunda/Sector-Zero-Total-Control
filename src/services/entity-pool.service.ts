@@ -1,3 +1,4 @@
+
 import { Injectable, inject } from '@angular/core';
 import { Entity } from '../models/game.models';
 import { ObjectPool } from '../utils/object-pool';
@@ -50,6 +51,7 @@ export class EntityPoolService {
           e.equipment = undefined;
           e.squadId = undefined;
           e.aiRole = undefined;
+          e.zoneId = undefined; // CRITICAL FIX: Reset zoneId to prevent rendering culling issues
         },
         100 
       ));

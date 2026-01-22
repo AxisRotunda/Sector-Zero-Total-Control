@@ -8,6 +8,7 @@ import { SpawnerService } from './spawner.service';
 import { StatusEffectService } from './status-effect.service';
 import { NpcUpdateService } from './npc-update.service';
 import { CombatService } from './combat.service';
+import { SpatialHashService } from './spatial-hash.service';
 
 @Injectable({ providedIn: 'root' })
 export class EntityUpdateService {
@@ -19,16 +20,39 @@ export class EntityUpdateService {
   private status = inject(StatusEffectService);
   private npc = inject(NpcUpdateService);
   private combat = inject(CombatService);
+  private spatialHash = inject(SpatialHashService);
 
   update(globalTime: number) {
     const player = this.world.player;
     const entities = this.world.entities;
 
+    // 1. Spatial Hash Maintenance (The Bridge to Rendering)
+    // Clear previous frame's dynamic buckets so we don't have ghost entries
+    this.spatialHash.clearDynamic();
+    
+    // Register Player (Dynamic) so enemies can query position via Hash
+    this.spatialHash.insert(player, false);
+
+    // Register all Dynamic Entities
+    for (let i = 0; i < entities.length; i++) {
+        // Insert before logic to ensure physics/AI queries against reasonably fresh data
+        this.spatialHash.insert(entities[i], false);
+    }
+
+    // 2. Logic Updates
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
       if (e.state === 'DEAD') continue;
 
       this.status.processStatusEffects(e, globalTime);
+
+      if (e.hitStopFrames && e.hitStopFrames > 0) {
+          e.hitStopFrames--;
+          continue; // Skip logic this frame for impact weight
+      }
+      
+      // Reset hit stun flag if frames are done
+      if (e.hitStopFrames <= 0) e.isHitStunned = false;
 
       if (e.type === 'ENEMY') {
         this.ai.updateEnemy(e, player);

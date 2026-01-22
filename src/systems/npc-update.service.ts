@@ -32,6 +32,7 @@ export class NpcUpdateService {
               const angle = Math.atan2(nearest.y - t.y, nearest.x - t.x);
               t.angle = angle; 
               const proj = this.entityPool.acquire('HITBOX');
+              proj.zoneId = t.zoneId; // VISIBILITY FIX
               proj.source = 'DEFENSE'; proj.x = t.x + Math.cos(angle) * 30; proj.y = t.y + Math.sin(angle) * 30; proj.z = 30; 
               proj.vx = Math.cos(angle) * 12; proj.vy = Math.sin(angle) * 12; proj.radius = 5; proj.hp = 50; proj.timer = 60; proj.color = '#38bdf8'; 
               this.world.entities.push(proj); t.attackTimer = 40; 

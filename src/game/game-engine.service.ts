@@ -114,6 +114,10 @@ export class GameEngineService {
     if (this.world.player.hp <= 0) return;
 
     this.player.updatePerFrame();
+    
+    // CRITICAL FIX: Player Input/Physics Update was missing
+    this.playerControl.update(this.timeService.globalTime);
+    
     this.entityUpdater.update(this.timeService.globalTime);
     this.worldEffects.update();
     
