@@ -5,7 +5,7 @@ import { IsoUtils } from '../../utils/iso-utils';
 import { EntityRendererService } from './entity-renderer.service';
 import { RENDER_CONFIG } from './render.config';
 import { SpatialHashService } from '../spatial-hash.service';
-import { TextureGeneratorService } from './texture-generator.service';
+import { TextureGeneratorService, ThemeVisuals } from './texture-generator.service';
 
 @Injectable({ providedIn: 'root' })
 export class FloorRendererService {
@@ -22,6 +22,12 @@ export class FloorRendererService {
   private lastZoom: number = 1;
   private readonly CACHE_PADDING = RENDER_CONFIG.FLOOR_CACHE_PADDING; 
 
+  // Vector Pooling (Reuse to prevent GC thrashing)
+  private _p1 = { x: 0, y: 0 };
+  private _p2 = { x: 0, y: 0 };
+  private _p3 = { x: 0, y: 0 };
+  private _p4 = { x: 0, y: 0 };
+
   constructor() {
       if (typeof document !== 'undefined') {
           this.floorCanvas = document.createElement('canvas');
@@ -35,17 +41,19 @@ export class FloorRendererService {
       const viewW = canvasWidth / cam.zoom;
       const viewH = canvasHeight / cam.zoom;
       
+      // Invalidate cache if: Zone changed, Zoom changed significantly, or Pan exceeded padding buffer
       const needsRedraw = 
           zone.id !== this.lastZoneId ||
-          cam.zoom !== this.lastZoom ||
-          Math.abs(cam.x - this.lastViewX) > this.CACHE_PADDING / 2 ||
-          Math.abs(cam.y - this.lastViewY) > this.CACHE_PADDING / 2;
+          Math.abs(cam.zoom - this.lastZoom) > 0.01 || 
+          Math.abs(cam.x - this.lastViewX) > this.CACHE_PADDING / 3 ||
+          Math.abs(cam.y - this.lastViewY) > this.CACHE_PADDING / 3;
 
       if (needsRedraw) {
           this.updateCache(cam, zone, mapBounds, canvasWidth, canvasHeight);
       }
 
-      const cacheCenterIso = IsoUtils.toIso(this.lastViewX, this.lastViewY, 0);
+      // Draw cached canvas relative to current camera position
+      const cacheCenterIso = IsoUtils.toIso(this.lastViewX, this.lastViewY, 0, this._p1);
       
       ctx.drawImage(
           this.floorCanvas, 
@@ -62,6 +70,7 @@ export class FloorRendererService {
       this.lastViewY = cam.y;
       this.lastZoom = cam.zoom;
 
+      // Calculate cache dimensions with padding
       const maxDim = RENDER_CONFIG.MAX_CANVAS_DIMENSION;
       const calcW = Math.ceil((viewW / cam.zoom) + (this.CACHE_PADDING * 2));
       const calcH = Math.ceil((viewH / cam.zoom) + (this.CACHE_PADDING * 2));
@@ -74,25 +83,37 @@ export class FloorRendererService {
       }
 
       const ctx = this.floorCtx;
+      const visuals = this.textureGen.getThemeVisuals(zone.theme);
       
+      // 1. Base Fill
       ctx.fillStyle = zone.groundColor;
       ctx.fillRect(0, 0, width, height);
+
+      // 2. Texture Overlay (Procedural Noise/Pattern)
+      if (visuals.pattern) {
+          ctx.save();
+          ctx.globalAlpha = visuals.fillOpacity * 0.5; // Subtle blend
+          ctx.globalCompositeOperation = 'overlay'; 
+          ctx.fillStyle = visuals.pattern;
+          ctx.fillRect(0, 0, width, height);
+          ctx.restore();
+      }
 
       ctx.save();
       ctx.translate(width/2, height/2);
       
-      const centerIso = IsoUtils.toIso(this.lastViewX, this.lastViewY, 0);
+      const centerIso = IsoUtils.toIso(this.lastViewX, this.lastViewY, 0, this._p1);
       ctx.translate(-centerIso.x, -centerIso.y);
 
-      // 1. Draw Ground Tiles
+      // 3. Draw Geometry (Grid / Hub)
       if (zone.floorPattern === 'HUB') {
           this.drawHubFloor(ctx, zone);
       } else {
-          this.drawGridFloor(ctx, zone, mapBounds, width, height);
+          this.drawGridFloorBatch(ctx, zone, mapBounds, width, height);
       }
 
-      // 2. Draw Static Decorations via Spatial Hash Query
-      const range = Math.max(width, height) * 1.5; 
+      // 4. Draw Static Decorations (Baked into floor)
+      const range = Math.max(width, height) * 1.0; // Query range matches cache size
       
       const entities = this.spatialHash.queryRect(
           this.lastViewX - range, 
@@ -102,8 +123,11 @@ export class FloorRendererService {
           zone.id
       );
 
+      // Sort decorations by Y depth to prevent weird overlapping
+      entities.sort((a, b) => (a.x + a.y) - (b.x + b.y));
+
       for (const d of entities) {
-          if (d.type === 'DECORATION' && (d.subType === 'RUG' || d.subType === 'FLOOR_CRACK' || d.subType === 'GRAFFITI')) {
+          if (d.type === 'DECORATION' && (d.subType === 'RUG' || d.subType === 'FLOOR_CRACK' || d.subType === 'GRAFFITI' || d.subType === 'TRASH')) {
               this.entityRenderer.drawDecoration(ctx, d);
           }
       }
@@ -111,19 +135,68 @@ export class FloorRendererService {
       ctx.restore();
   }
 
-  private drawGridFloor(ctx: CanvasRenderingContext2D, zone: Zone, mapBounds: any, width: number, height: number) {
+  private drawGridFloorBatch(ctx: CanvasRenderingContext2D, zone: Zone, mapBounds: any, width: number, height: number) {
       const tileSize = RENDER_CONFIG.FLOOR_TILE_SIZE;
-      const range = Math.max(width, height) * 1.5;
+      // We render a bit larger than the cache view to ensure lines don't pop out at edges
+      const rangeX = width * 1.0; 
+      const rangeY = height * 1.0;
       
-      const startX = Math.max(mapBounds.minX, Math.floor((this.lastViewX - range) / tileSize) * tileSize);
-      const endX = Math.min(mapBounds.maxX, this.lastViewX + range);
-      const startY = Math.max(mapBounds.minY, Math.floor((this.lastViewY - range) / tileSize) * tileSize);
-      const endY = Math.min(mapBounds.maxY, this.lastViewY + range);
+      const startX = Math.max(mapBounds.minX, Math.floor((this.lastViewX - rangeX) / tileSize) * tileSize);
+      const endX = Math.min(mapBounds.maxX, this.lastViewX + rangeX);
+      const startY = Math.max(mapBounds.minY, Math.floor((this.lastViewY - rangeY) / tileSize) * tileSize);
+      const endY = Math.min(mapBounds.maxY, this.lastViewY + rangeY);
 
+      // Optimization: Batch drawing
+      // Batch 1: Highlight Tiles (Checkerboard / Hazard)
+      ctx.beginPath();
+      ctx.fillStyle = '#ffffff'; // Tint color
+      ctx.globalAlpha = 0.03;
+      
       for (let x = startX; x <= endX; x += tileSize) {
           for (let y = startY; y <= endY; y += tileSize) {
-               this.drawTile(ctx, x, y, tileSize, zone);
+              // Procedural variation based on position
+              if ((x ^ y) % 7 === 0 || (zone.floorPattern === 'HAZARD' && (x + y) % 500 === 0)) {
+                  IsoUtils.toIso(x, y, 0, this._p1);
+                  IsoUtils.toIso(x + tileSize, y, 0, this._p2);
+                  IsoUtils.toIso(x + tileSize, y + tileSize, 0, this._p3);
+                  IsoUtils.toIso(x, y + tileSize, 0, this._p4);
+                  
+                  ctx.moveTo(this._p1.x, this._p1.y);
+                  ctx.lineTo(this._p2.x, this._p2.y);
+                  ctx.lineTo(this._p3.x, this._p3.y);
+                  ctx.lineTo(this._p4.x, this._p4.y);
+                  // Close subpath implicitly by moving to next
+              }
           }
+      }
+      ctx.fill();
+      ctx.globalAlpha = 1.0;
+
+      // Batch 2: Grid Lines
+      if (zone.floorPattern === 'GRID' || zone.floorPattern === 'HAZARD') {
+          ctx.beginPath();
+          ctx.strokeStyle = zone.detailColor;
+          ctx.lineWidth = 1;
+          ctx.globalAlpha = 0.15;
+
+          // Draw vertical lines (X-constant)
+          for (let x = startX; x <= endX; x += tileSize) {
+              IsoUtils.toIso(x, startY, 0, this._p1);
+              IsoUtils.toIso(x, endY, 0, this._p2);
+              ctx.moveTo(this._p1.x, this._p1.y);
+              ctx.lineTo(this._p2.x, this._p2.y);
+          }
+          
+          // Draw horizontal lines (Y-constant)
+          for (let y = startY; y <= endY; y += tileSize) {
+              IsoUtils.toIso(startX, y, 0, this._p1);
+              IsoUtils.toIso(endX, y, 0, this._p2);
+              ctx.moveTo(this._p1.x, this._p1.y);
+              ctx.lineTo(this._p2.x, this._p2.y);
+          }
+          
+          ctx.stroke();
+          ctx.globalAlpha = 1.0;
       }
   }
 
@@ -133,58 +206,38 @@ export class FloorRendererService {
       this.drawOctagon(ctx, 0, 0, plazaRadius);
       ctx.fill();
       
+      // Central Rings
       ctx.strokeStyle = zone.detailColor;
       ctx.lineWidth = 2;
       ctx.globalAlpha = 0.1;
       
+      // Radial spokes
+      ctx.beginPath();
       for (let i = 0; i < 8; i++) {
           const angle = (i / 8) * Math.PI * 2;
-          const p1 = IsoUtils.toIso(0, 0, 0);
-          const p2 = IsoUtils.toIso(Math.cos(angle) * plazaRadius, Math.sin(angle) * plazaRadius, 0);
-          ctx.beginPath();
-          ctx.moveTo(p1.x, p1.y);
-          ctx.lineTo(p2.x, p2.y);
-          ctx.stroke();
+          IsoUtils.toIso(0, 0, 0, this._p1);
+          IsoUtils.toIso(Math.cos(angle) * plazaRadius, Math.sin(angle) * plazaRadius, 0, this._p2);
+          ctx.moveTo(this._p1.x, this._p1.y);
+          ctx.lineTo(this._p2.x, this._p2.y);
       }
+      ctx.stroke();
 
+      // Concentric rings
       for (let r = 200; r <= plazaRadius; r += 200) {
-          this.drawOctagon(ctx, 0, 0, r);
-          ctx.stroke();
+          this.drawOctagon(ctx, 0, 0, r, true); // True = stroke only
       }
       ctx.globalAlpha = 1.0;
   }
 
-  private drawOctagon(ctx: CanvasRenderingContext2D, cx: number, cy: number, radius: number) {
+  private drawOctagon(ctx: CanvasRenderingContext2D, cx: number, cy: number, radius: number, stroke: boolean = false) {
       ctx.beginPath();
       for (let i = 0; i <= 8; i++) {
           const angle = (i / 8) * Math.PI * 2;
-          const p = IsoUtils.toIso(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius, 0);
-          if (i === 0) ctx.moveTo(p.x, p.y);
-          else ctx.lineTo(p.x, p.y);
+          IsoUtils.toIso(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius, 0, this._p1);
+          if (i === 0) ctx.moveTo(this._p1.x, this._p1.y);
+          else ctx.lineTo(this._p1.x, this._p1.y);
       }
       ctx.closePath();
-  }
-
-  private drawTile(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, zone: Zone) {
-      const p1 = IsoUtils.toIso(x, y, 0); 
-      const p2 = IsoUtils.toIso(x + size, y, 0); 
-      const p3 = IsoUtils.toIso(x + size, y + size, 0); 
-      const p4 = IsoUtils.toIso(x, y + size, 0);
-      
-      ctx.fillStyle = zone.groundColor; 
-      ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.fill();
-      
-      if (zone.floorPattern === 'GRID') { 
-          ctx.strokeStyle = zone.detailColor; ctx.globalAlpha = 0.1; ctx.stroke(); 
-      } else if (zone.floorPattern === 'HAZARD') { 
-          ctx.strokeStyle = '#3f3f46'; ctx.globalAlpha = 0.05; 
-          ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p3.x, p3.y); ctx.stroke(); 
-      } else { 
-          ctx.strokeStyle = '#3f3f46'; ctx.globalAlpha = 0.05; ctx.stroke(); 
-          if ((x ^ y) % 7 === 0) {
-              ctx.fillStyle = '#555'; ctx.fillRect(p1.x - 1, p1.y - 1, 2, 2);
-          }
-      }
-      ctx.globalAlpha = 1.0;
+      if (stroke) ctx.stroke();
   }
 }

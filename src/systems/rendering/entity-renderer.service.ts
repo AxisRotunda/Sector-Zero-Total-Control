@@ -18,6 +18,8 @@ export class EntityRendererService {
   drawDecoration(ctx: CanvasRenderingContext2D, e: Entity) {
       if (['RUG', 'FLOOR_CRACK', 'GRAFFITI', 'TRASH'].includes(e.subType || '')) {
           this.structureRenderer.drawFloorDecoration(ctx, e);
+      } else if (e.type === 'INTERACTABLE') {
+          this.drawInteractable(ctx, e);
       } else {
           // Use current zone from world service to ensure theme consistency
           this.structureRenderer.drawStructure(ctx, e, this.world.currentZone());
@@ -124,5 +126,43 @@ export class EntityRendererService {
   
   drawShrine(ctx: CanvasRenderingContext2D, e: Entity) {
       this.structureRenderer.drawStructure(ctx, e, this.world.currentZone());
+  }
+
+  // NEW: Render holographic interaction points (Doors, Keypads)
+  private drawInteractable(ctx: CanvasRenderingContext2D, e: Entity) {
+      const pos = IsoUtils.toIso(e.x, e.y, e.z || 30);
+      ctx.save();
+      ctx.translate(pos.x, pos.y);
+      
+      // Floating motion
+      const float = Math.sin(Date.now() * 0.003) * 5;
+      ctx.translate(0, float);
+
+      // Holographic Panel Look
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = '#06b6d4';
+      ctx.fillStyle = 'rgba(6, 182, 212, 0.2)';
+      ctx.strokeStyle = '#06b6d4';
+      ctx.lineWidth = 2;
+
+      // Draw Keypad Rect
+      ctx.beginPath();
+      ctx.rect(-20, -30, 40, 60);
+      ctx.fill();
+      ctx.stroke();
+
+      // Inner details
+      ctx.fillStyle = '#06b6d4';
+      ctx.globalAlpha = 0.8;
+      ctx.fillRect(-12, -20, 24, 15); // Screen
+      
+      // Buttons
+      ctx.globalAlpha = 0.5;
+      ctx.fillRect(-12, 0, 10, 8);
+      ctx.fillRect(2, 0, 10, 8);
+      ctx.fillRect(-12, 12, 10, 8);
+      ctx.fillRect(2, 12, 10, 8);
+
+      ctx.restore();
   }
 }

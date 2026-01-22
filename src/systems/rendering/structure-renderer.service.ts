@@ -4,6 +4,7 @@ import { Entity, Zone } from '../../models/game.models';
 import { IsoUtils } from '../../utils/iso-utils';
 import { SpriteCacheService } from './sprite-cache.service';
 import { TextureGeneratorService, ThemeVisuals } from './texture-generator.service';
+import { DECORATIONS, DecorationDef } from '../../config/decoration.config';
 
 @Injectable({ providedIn: 'root' })
 export class StructureRendererService {
@@ -15,22 +16,39 @@ export class StructureRendererService {
       if (e.subType === 'CABLE') { this.drawCable(ctx, e); return; }
       if (e.subType === 'DYNAMIC_GLOW') { this.drawDynamicGlow(ctx, e); return; }
       
-      const w = e.width || 40; 
-      const d = e.depth || e.width || 40; 
-      const h = e.height || 100;
       const theme = zone ? zone.theme : 'INDUSTRIAL';
       const structureType = e.subType || 'WALL';
       const visuals = this.textureGen.getThemeVisuals(theme);
 
       // --- ANIMATED GATE OPTIMIZATION ---
       if (structureType === 'GATE_SEGMENT') {
-          this.drawAnimatedGate(ctx, e, w, d, h, theme, visuals);
+          const gw = e.width || 200;
+          const gd = e.depth || 40;
+          const gh = e.height || 300;
+          this.drawAnimatedGate(ctx, e, gw, gd, gh, theme, visuals);
           return;
       }
       
+      // Determine Dimensions & Style from Config
+      let w = e.width || 40;
+      let d = e.depth || e.width || 40;
+      let h = e.height || 100;
+      let renderStyle = 'PRISM';
+      let detailStyle = visuals.detailStyle;
+
+      if (DECORATIONS[structureType]) {
+          const config = DECORATIONS[structureType];
+          // Use config values if entity doesn't override them (0 or undefined)
+          if (!e.width) w = config.width;
+          if (!e.depth) d = config.depth;
+          if (!e.height) h = config.height;
+          if (config.renderStyle) renderStyle = config.renderStyle;
+          if (config.detailStyle) detailStyle = config.detailStyle;
+      }
+
       // --- STATIC CACHED STRUCTURES ---
-      // Add visual style to cache key to ensure theme updates trigger redraw
-      const cacheKey = `STRUCT_${e.type}_${structureType}_${w}_${d}_${h}_${e.color}_${theme}_${e.locked}_v2`;
+      // Cache Key: Includes visual properties to ensure redraw on change
+      const cacheKey = `STRUCT_${structureType}_${w}_${d}_${h}_${e.color}_${theme}_${e.locked}_${detailStyle}_v4`;
       
       const isoBounds = this.calculateIsoBounds(w, d, h);
       const padding = 120;
@@ -43,22 +61,34 @@ export class StructureRendererService {
       const anchorY = -isoBounds.minY + padding;
 
       const sprite = this.cache.getOrRender(cacheKey, canvasW, canvasH, (bufferCtx) => {
-          if (structureType === 'MONOLITH') this.renderMonolith(bufferCtx, e, w, d, h, anchorX, anchorY, visuals);
-          else if (structureType === 'OBSERVATION_DECK') this.renderObservationDeck(bufferCtx, e, w, d, h, anchorX, anchorY, visuals);
-          else if (structureType === 'TRAINING_EXTERIOR') this.renderTrainingExterior(bufferCtx, e, w, d, h, anchorX, anchorY, visuals);
-          else if (e.subType === 'HOLO_TABLE') this.renderHoloTable(bufferCtx, e, w, d, h, anchorX, anchorY);
-          else if (e.subType === 'VENDING_MACHINE') this.renderVendingMachine(bufferCtx, e, w, d, h, anchorX, anchorY);
-          else if (e.subType === 'BENCH') this.renderBench(bufferCtx, e, w, d, h, anchorX, anchorY);
-          else this.renderGenericWall(bufferCtx, e, w, d, h, anchorX, anchorY, visuals);
+          if (renderStyle === 'CUSTOM') {
+              if (structureType === 'MONOLITH') this.renderMonolith(bufferCtx, e, w, d, h, anchorX, anchorY, visuals);
+              else if (structureType === 'OBSERVATION_DECK') this.renderObservationDeck(bufferCtx, e, w, d, h, anchorX, anchorY, visuals);
+              else if (structureType === 'TRAINING_EXTERIOR') this.renderTrainingExterior(bufferCtx, e, w, d, h, anchorX, anchorY, visuals);
+              else if (structureType === 'HOLO_TABLE') this.renderHoloTable(bufferCtx, e, w, d, h, anchorX, anchorY);
+              else if (structureType === 'VENDING_MACHINE') this.renderVendingMachine(bufferCtx, e, w, d, h, anchorX, anchorY);
+              else if (structureType === 'VENT') this.renderVent(bufferCtx, e, w, d, h, anchorX, anchorY);
+              else if (structureType === 'OVERSEER_EYE') this.renderOverseerEye(bufferCtx, e, w, d, h, anchorX, anchorY);
+              else if (structureType === 'STREET_LIGHT') this.renderStreetLight(bufferCtx, e, w, d, h, anchorX, anchorY);
+              else if (structureType === 'NEON') this.renderNeon(bufferCtx, e, w, d, h, anchorX, anchorY);
+              else this.renderGenericPrism(bufferCtx, e, w, d, h, anchorX, anchorY, visuals, detailStyle); // Fallback
+          } 
+          else if (renderStyle === 'CYLINDER') {
+              this.renderGenericPrism(bufferCtx, e, w, d, h, anchorX, anchorY, visuals, detailStyle); 
+          }
+          else {
+              this.renderGenericPrism(bufferCtx, e, w, d, h, anchorX, anchorY, visuals, detailStyle);
+          }
       });
 
-      const pos = IsoUtils.toIso(e.x, e.y, 0);
+      const pos = IsoUtils.toIso(e.x, e.y, e.z || 0); // Apply Z offset for floating structures
       ctx.drawImage(sprite, Math.floor(pos.x - anchorX), Math.floor(pos.y - anchorY)); 
   }
 
   drawFloorDecoration(ctx: CanvasRenderingContext2D, e: Entity) {
-      const w = e.width || 40; 
-      const h = e.height || 40; // Depth/Length for floor items
+      const config = DECORATIONS[e.subType || ''] || { width: 40, depth: 40, height: 40, baseColor: '#333' };
+      const w = e.width || config.width; 
+      const h = e.height || config.depth; // Depth/Length for floor items
       const pos = IsoUtils.toIso(e.x, e.y, 0);
 
       ctx.save();
@@ -75,7 +105,7 @@ export class StructureRendererService {
       const p4 = IsoUtils.toIso(-hw, -hh, 0);// Top-Left
 
       if (e.subType === 'RUG') {
-          ctx.fillStyle = e.data?.color || e.color || '#27272a';
+          ctx.fillStyle = e.data?.color || e.color || config.baseColor;
           ctx.beginPath();
           ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y);
           ctx.fill();
@@ -89,7 +119,7 @@ export class StructureRendererService {
           ctx.save();
           ctx.scale(1, 0.5);
           ctx.rotate(-Math.PI/4);
-          ctx.fillStyle = e.color || '#ef4444';
+          ctx.fillStyle = e.color || config.baseColor;
           ctx.globalAlpha = 0.7;
           ctx.font = 'bold 30px monospace';
           ctx.textAlign = 'center';
@@ -105,9 +135,8 @@ export class StructureRendererService {
           ctx.stroke();
       }
       else if (e.subType === 'TRASH') {
-          ctx.fillStyle = '#52525b';
+          ctx.fillStyle = config.baseColor;
           const p = (x:number, y:number) => IsoUtils.toIso(x,y,0);
-          // Draw scattered debris
           const d1 = p(-5, 5); ctx.fillRect(d1.x, d1.y, 4, 2);
           const d2 = p(10, -5); ctx.fillRect(d2.x, d2.y, 3, 3);
           const d3 = p(2, 2); ctx.fillRect(d3.x, d3.y, 5, 2);
@@ -135,7 +164,7 @@ export class StructureRendererService {
 
       const leftKey = `GATE_PANEL_L_${w}_${d}_${h}_${e.color}_${theme}_v2`;
       const leftSprite = this.cache.getOrRender(leftKey, cW, cH, (bCtx) => {
-          this.renderPrism(bCtx, panelW, d, h, aX, aY, e.color, visuals);
+          this.renderPrism(bCtx, panelW, d, h, aX, aY, e.color, visuals, 'PLATING');
           bCtx.translate(aX, aY);
           bCtx.strokeStyle = '#facc15'; bCtx.lineWidth = 4;
           const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
@@ -146,7 +175,7 @@ export class StructureRendererService {
 
       const rightKey = `GATE_PANEL_R_${w}_${d}_${h}_${e.color}_${theme}_${e.locked}_v2`;
       const rightSprite = this.cache.getOrRender(rightKey, cW, cH, (bCtx) => {
-          this.renderPrism(bCtx, panelW, d, h, aX, aY, e.color, visuals);
+          this.renderPrism(bCtx, panelW, d, h, aX, aY, e.color, visuals, 'PLATING');
           bCtx.translate(aX, aY);
           const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
           const topB = p(-panelW/2, d/2, h - 40); 
@@ -165,7 +194,7 @@ export class StructureRendererService {
   }
 
   // --- CORE RENDERER ---
-  private renderPrism(ctx: any, w: number, d: number, h: number, anchorX: number, anchorY: number, color: string, visuals: ThemeVisuals) {
+  private renderPrism(ctx: any, w: number, d: number, h: number, anchorX: number, anchorY: number, color: string, visuals: ThemeVisuals, detailStyle: string = 'NONE') {
       ctx.translate(anchorX, anchorY);
       const halfW = w / 2; const halfD = d / 2;
       const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
@@ -187,8 +216,8 @@ export class StructureRendererService {
           }
 
           // --- DETAIL PASS ---
-          if (side !== 'TOP' && visuals.detailStyle !== 'NONE') {
-              this.drawFaceDetails(ctx, p1, p2, p3, p4, side, visuals.detailStyle, w, h);
+          if (side !== 'TOP' && detailStyle !== 'NONE') {
+              this.drawFaceDetails(ctx, p1, p2, p3, p4, side, detailStyle, w, h);
           }
       };
 
@@ -309,10 +338,12 @@ export class StructureRendererService {
       ctx.restore();
   }
 
-  private renderGenericWall(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number, visuals: ThemeVisuals) {
-      const coords = this.renderPrism(ctx, w, d, h, ax, ay, e.color, visuals);
+  // --- SPECIALIZED RENDERERS ---
+
+  private renderGenericPrism(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number, visuals: ThemeVisuals, detailStyle: any) {
+      const coords = this.renderPrism(ctx, w, d, h, ax, ay, e.color, visuals, detailStyle);
       
-      // Theme Overlays
+      // Generic Theme Overlays
       if (visuals.overlayColor && Math.random() > 0.7) {
           ctx.translate(ax, ay);
           ctx.globalCompositeOperation = 'source-over';
@@ -359,10 +390,12 @@ export class StructureRendererService {
   }
 
   private renderHoloTable(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number) {
-      this.renderPrism(ctx, 80, 80, 40, ax, ay, '#18181b', this.textureGen.getThemeVisuals('HIGH_TECH'));
+      // Base
+      this.renderPrism(ctx, w, d, h, ax, ay, '#18181b', this.textureGen.getThemeVisuals('HIGH_TECH'), 'NONE');
+      
       ctx.translate(ax, ay);
       const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
-      const center = p(0, 0, 40);
+      const center = p(0, 0, h);
       
       ctx.save();
       ctx.translate(center.x, center.y - 20);
@@ -370,6 +403,7 @@ export class StructureRendererService {
       ctx.strokeStyle = e.color || '#06b6d4';
       ctx.lineWidth = 1;
       
+      // Floating hologram effect
       ctx.beginPath();
       ctx.moveTo(0, -15); ctx.lineTo(15, -5); ctx.lineTo(0, 5); ctx.lineTo(-15, -5); ctx.closePath();
       ctx.stroke();
@@ -383,30 +417,46 @@ export class StructureRendererService {
   }
 
   private renderVendingMachine(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number) {
-      this.renderPrism(ctx, 50, 50, 100, ax, ay, '#27272a', this.textureGen.getThemeVisuals('INDUSTRIAL'));
+      this.renderPrism(ctx, w, d, h, ax, ay, '#27272a', this.textureGen.getThemeVisuals('INDUSTRIAL'), 'NONE');
       ctx.translate(ax, ay);
       const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
-      const frontCenter = p(25, 25, 60); 
+      const frontCenter = p(w/2, d/2, h * 0.6); 
       
       ctx.save();
       ctx.translate(frontCenter.x, frontCenter.y);
-      ctx.rotate(-0.5);
-      ctx.fillStyle = '#06b6d4'; ctx.shadowColor = '#06b6d4'; ctx.shadowBlur = 15;
-      ctx.fillRect(-10, -20, 20, 30);
+      ctx.rotate(-0.5); // Tilt to align with iso right face roughly
+      
+      // Glow Screen
+      ctx.fillStyle = '#06b6d4'; ctx.shadowColor = '#06b6d4'; ctx.shadowBlur = 10;
+      ctx.fillRect(-10, -15, 20, 30);
       ctx.restore();
       ctx.translate(-ax, -ay);
   }
 
-  private renderBench(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number) {
-      this.renderPrism(ctx, 80, 30, 20, ax, ay, '#3f3f46', this.textureGen.getThemeVisuals('INDUSTRIAL'));
+  private renderVent(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number) {
+      this.renderPrism(ctx, w, d, h, ax, ay, '#52525b', this.textureGen.getThemeVisuals('INDUSTRIAL'), 'RIVETS');
+      ctx.translate(ax, ay);
+      // Fan grill on top
+      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
+      const top = p(0, 0, h);
+      
+      ctx.save();
+      ctx.translate(top.x, top.y);
+      ctx.scale(1, 0.5);
+      ctx.strokeStyle = '#18181b';
+      ctx.beginPath(); ctx.arc(0, 0, w/3, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-w/3, 0); ctx.lineTo(w/3, 0); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, -w/3); ctx.lineTo(0, w/3); ctx.stroke();
+      ctx.restore();
+      ctx.translate(-ax, -ay);
   }
 
   private renderTrainingExterior(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number, visuals: ThemeVisuals) {
-      this.renderPrism(ctx, w, d, h, ax, ay, e.color, visuals);
+      this.renderPrism(ctx, w, d, h, ax, ay, e.color, visuals, 'PLATING');
   }
 
   private renderObservationDeck(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number, visuals: ThemeVisuals) {
-      this.renderPrism(ctx, w, d, h, ax, ay, e.color, visuals);
+      this.renderPrism(ctx, w, d, h, ax, ay, e.color, visuals, 'NONE');
       ctx.save();
       ctx.translate(ax, ay);
       const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
@@ -416,6 +466,67 @@ export class StructureRendererService {
       ctx.globalAlpha = 0.2;
       ctx.beginPath(); ctx.arc(front.x, front.y, w/3, 0, Math.PI*2); ctx.fill();
       ctx.restore();
+  }
+
+  private renderStreetLight(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number) {
+      ctx.translate(ax, ay);
+      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
+      
+      // Pole
+      const base = p(0, 0, 0);
+      const top = p(0, 0, h);
+      
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = '#27272a';
+      ctx.beginPath(); ctx.moveTo(base.x, base.y); ctx.lineTo(top.x, top.y); ctx.stroke();
+      
+      // Lamp Head
+      ctx.save();
+      ctx.translate(top.x, top.y);
+      // Angled arm
+      ctx.rotate(-Math.PI/6);
+      ctx.fillStyle = '#18181b';
+      ctx.fillRect(0, -5, 40, 10);
+      
+      // Bulb
+      ctx.translate(35, 0);
+      ctx.fillStyle = '#fbbf24';
+      ctx.shadowColor = '#fbbf24';
+      ctx.shadowBlur = 10;
+      ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI*2); ctx.fill();
+      
+      ctx.restore();
+      ctx.translate(-ax, -ay);
+  }
+
+  private renderNeon(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number) {
+      ctx.translate(ax, ay);
+      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
+      const pos = p(0, 0, 0);
+      
+      ctx.save();
+      ctx.translate(pos.x, pos.y);
+      
+      ctx.shadowColor = e.color;
+      ctx.shadowBlur = 15;
+      ctx.strokeStyle = e.color;
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      
+      // Generic "Sign" shape - rectangle
+      ctx.beginPath();
+      ctx.moveTo(-w/2, 0); ctx.lineTo(w/2, 0);
+      ctx.moveTo(-w/2, -h); ctx.lineTo(w/2, -h);
+      ctx.lineTo(w/2, 0); ctx.lineTo(-w/2, 0); ctx.lineTo(-w/2, -h);
+      ctx.stroke();
+      
+      // Text hint
+      ctx.fillStyle = e.color;
+      ctx.globalAlpha = 0.8;
+      ctx.fillRect(-w/2 + 5, -h + 5, w - 10, h - 10);
+      
+      ctx.restore();
+      ctx.translate(-ax, -ay);
   }
 
   private drawDynamicGlow(ctx: CanvasRenderingContext2D, e: Entity) {
@@ -466,6 +577,24 @@ export class StructureRendererService {
       ctx.fillStyle = grad;
       ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.fill();
       ctx.restore();
+  }
+
+  private renderOverseerEye(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number) {
+      ctx.translate(ax, ay);
+      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
+      const center = p(0, 0, h/2);
+      
+      // Core
+      ctx.fillStyle = '#18181b';
+      ctx.beginPath(); ctx.arc(center.x, center.y, w/2, 0, Math.PI*2); ctx.fill();
+      
+      // Eye
+      ctx.fillStyle = e.color || '#ef4444';
+      ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 10;
+      ctx.beginPath(); ctx.arc(center.x, center.y, w/4, 0, Math.PI*2); ctx.fill();
+      ctx.shadowBlur = 0;
+      
+      ctx.translate(-ax, -ay);
   }
 
   private calculateIsoBounds(width: number, length: number, height: number) {

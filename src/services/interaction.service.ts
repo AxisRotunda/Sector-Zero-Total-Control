@@ -59,7 +59,7 @@ export class InteractionService {
           const dist = Math.hypot(dx, dy);
           const combinedRadius = player.radius + (e.radius || 20);
           
-          // 1. Exits
+          // 1. Exits (Legacy & Zone Transitions)
           if (e.type === 'EXIT') {
                if (dist < combinedRadius + 20) {
                     if (!e.locked) {
@@ -80,8 +80,11 @@ export class InteractionService {
                }
           }
           
-          // 2. Selectable Targets (NPCs, Terminals)
-          if (e.type === 'NPC' || (e.type === 'TERMINAL' && !e.accessed)) {
+          // 2. Selectable Targets (NPCs, Terminals, Generic Interactables)
+          const isInteractiveType = e.type === 'NPC' || e.type === 'TERMINAL' || e.type === 'INTERACTABLE';
+          const isActive = !e.accessed; // Terminals become inactive after access
+
+          if (isInteractiveType && isActive) {
                const interactRange = (e.interactionRadius || 100) + combinedRadius + 50; 
                
                if (dist < interactRange) {
@@ -122,51 +125,35 @@ export class InteractionService {
       const cam = this.world.camera;
       
       // 1. Inverse Camera Transform (Screen -> World)
-      // Center offset
       const sx = screenX - screenWidth / 2;
       const sy = screenY - screenHeight / 2;
       
-      // Unzoom
       const unzoomedX = sx / cam.zoom;
       const unzoomedY = sy / cam.zoom;
       
-      // Cam Center in Iso
       const camIso = IsoUtils.toIso(cam.x, cam.y, 0);
-      
-      // Target in Iso
       const targetIsoX = unzoomedX + camIso.x;
       const targetIsoY = unzoomedY + camIso.y;
       
       // Inverse Iso (Iso -> Cartesian)
-      // x = (2y + x) / 2  -- derived from iso formulas
-      // y = (2y - x) / 2
-      // wait, standard iso: x_iso = x - y, y_iso = (x + y)/2
-      // x_iso = x - y
-      // 2*y_iso = x + y
-      // x = y_iso + 0.5 * x_iso
-      // y = y_iso - 0.5 * x_iso
-      
       const worldX = targetIsoY + 0.5 * targetIsoX;
       const worldY = targetIsoY - 0.5 * targetIsoX;
       
       // 2. Query at World Coords
       const zoneId = this.world.currentZone().id;
-      // Search a small radius around the tap
       const targets = this.spatialHash.query(worldX, worldY, 100, zoneId);
       
       // 3. Filter for interactables
       const validTarget = targets.find(e => 
-          (e.type === 'NPC' || (e.type === 'TERMINAL' && !e.accessed)) && 
+          (e.type === 'NPC' || e.type === 'INTERACTABLE' || (e.type === 'TERMINAL' && !e.accessed)) && 
           e.state !== 'DEAD'
       );
       
       if (validTarget) {
-          // Check distance to player to ensure no telepathic interaction
           const p = this.world.player;
           const dist = Math.hypot(validTarget.x - p.x, validTarget.y - p.y);
-          if (dist < 400) { // Generous tap range
+          if (dist < 400) { 
               this.interact(validTarget);
-              // Visual feedback for tap
               this.eventBus.dispatch({ 
                   type: GameEvents.FLOATING_TEXT_SPAWN, 
                   payload: { x: validTarget.x, y: validTarget.y - 50, text: "▼", color: '#fff', size: 20 } 
@@ -185,7 +172,14 @@ export class InteractionService {
       
       this.haptic.impactLight();
 
-      if (target.subType === 'TRADER') {
+      if (target.subType === 'ZONE_TRANSITION') {
+          // Handle direct entity-based transitions (Doors, Portals)
+          const dest = target.data?.targetZone;
+          if (dest) {
+              this.requestedFloorChange.set(dest);
+              this.sound.play('UI');
+          }
+      } else if (target.subType === 'TRADER') {
           this.shopService.openShop(target);
           this.ui.openPanel('SHOP');
       } else if (['HANDLER', 'CITIZEN', 'ECHO', 'GUARD', 'MEDIC'].includes(target.subType || '')) {
@@ -194,24 +188,37 @@ export class InteractionService {
       } else if (target.type === 'TERMINAL') {
           this.processTerminal(target);
       } else {
+          // Fallback for generic interactables with dialogue
           this.dialogueService.startDialogue(target.dialogueId || 'generic');
       }
   }
 
   getInteractLabel(target: Entity): string {
+      // Allow data-driven override from prefab/entity def
+      if (target.data?.promptText) {
+          return target.data.promptText.toUpperCase();
+      }
+
       switch(target.subType) {
           case 'MEDIC': return 'MEDICAL ASSIST';
           case 'TRADER': return 'MARKET ACCESS';
           case 'HANDLER': return 'BRIEFING';
           case 'CONSOLE': return 'TERMINAL';
           case 'CITIZEN': return 'CONVERSE';
+          case 'ZONE_TRANSITION': return 'ENTER';
           default: return 'INTERACT';
       }
   }
 
   private processTerminal(e: Entity) {
-      if (!e.logId) return;
-      if (this.narrative.discoverLog(e.logId)) {
+      if (!e.logId && !e.dialogueId) return; // Terminals can be purely dialogue or lore logs
+      
+      if (e.dialogueId) {
+          this.dialogueService.startDialogue(e.dialogueId);
+          return;
+      }
+
+      if (e.logId && this.narrative.discoverLog(e.logId)) {
           e.accessed = true; 
           e.color = '#3f3f46'; 
           this.sound.play('POWERUP');

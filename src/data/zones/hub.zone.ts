@@ -95,6 +95,21 @@ export const HUB_ZONE: ZoneTemplate = {
       // Flavor
       { type: 'DECORATION', subType: 'RUG', x: 0, y: 0, data: { width: 800, height: 800, color: '#18181b' } },
       { type: 'DECORATION', subType: 'RUG', x: 0, y: 1000, data: { width: 300, height: 600, color: '#18181b' } },
+
+      // --- LIGHTING & ATMOSPHERE ---
+      // Plaza Corners
+      { type: 'DECORATION', subType: 'STREET_LIGHT', x: -300, y: -300, data: {} },
+      { type: 'DECORATION', subType: 'STREET_LIGHT', x: 300, y: -300, data: {} },
+      { type: 'DECORATION', subType: 'STREET_LIGHT', x: -300, y: 300, data: {} },
+      { type: 'DECORATION', subType: 'STREET_LIGHT', x: 300, y: 300, data: {} },
+      
+      // Path to Gate
+      { type: 'DECORATION', subType: 'STREET_LIGHT', x: -150, y: 800, data: {} },
+      { type: 'DECORATION', subType: 'STREET_LIGHT', x: 150, y: 800, data: {} },
+
+      // Glow Strips
+      { type: 'DECORATION', subType: 'DYNAMIC_GLOW', x: 0, y: 600, data: { z: 5, color: '#3b82f6', width: 200, depth: 10, glowIntensity: 0.3 } },
+      { type: 'DECORATION', subType: 'DYNAMIC_GLOW', x: 0, y: 900, data: { z: 5, color: '#3b82f6', width: 200, depth: 10, glowIntensity: 0.3 } },
     ],
     dynamic: []
   },
@@ -106,14 +121,8 @@ export const HUB_ZONE: ZoneTemplate = {
       targetZoneId: 'SECTOR_9_N', 
       transitionType: 'GATE', 
       locked: true,
-    },
-    // Exit definition for Training (Coordinates match door position in prefab)
-    {
-        x: -800,
-        y: 980,
-        targetZoneId: 'HUB_TRAINING',
-        transitionType: 'GATE'
     }
+    // Training exit is now handled by the prefab entity
   ],
 
   environment: {

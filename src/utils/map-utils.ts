@@ -6,7 +6,8 @@ export class MapUtils {
   
   // Maximum length of a merged wall segment to prevent Z-sorting issues
   // with entities standing near the ends of the wall.
-  private static readonly MAX_WALL_LENGTH = 600; 
+  // REDUCED from 600 to 300 to improve sort accuracy in Hub.
+  private static readonly MAX_WALL_LENGTH = 300; 
 
   /**
    * Merges collinear wall entities to reduce draw calls and entity count.
@@ -85,6 +86,10 @@ export class MapUtils {
               mergedWalls.push(merged);
           }
       });
+
+      // Also try vertical merge (Logic similar to horizontal but rotated)
+      // For MVP, we stick to horizontal primarily, but simple vertical adjacencies often come pre-merged in prefabs.
+      // If needed, a second pass here for vertical sorting.
 
       return [...others, ...mergedWalls];
   }

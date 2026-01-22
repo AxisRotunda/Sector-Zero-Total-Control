@@ -133,6 +133,7 @@ export interface Zone {
   weather: 'NONE' | 'RAIN' | 'ASH';
   floorPattern: 'PLAIN' | 'GRID' | 'HAZARD' | 'ORGANIC' | 'HUB';
   isTrainingZone?: boolean;
+  ambientColor?: string;
 }
 
 export interface Camera {
@@ -154,4 +155,7 @@ export interface Particle {
   rotation: number;
   rotSpeed: number;
   composite?: GlobalCompositeOperation;
+  
+  // Render Sorting
+  isoDepth?: number;
 }

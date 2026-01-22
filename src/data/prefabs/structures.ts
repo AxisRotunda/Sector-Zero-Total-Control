@@ -1,7 +1,6 @@
 
 import { ZoneEntityDef } from "../../models/zone.models";
 
-// Phase 1: Semantic Extraction
 export const STRUCTURE_DIMENSIONS = {
     WALL_THICKNESS: 200,
     WALL_HEIGHT_OUTER: 400,
@@ -15,12 +14,23 @@ export const STRUCTURE_DIMENSIONS = {
     PILLAR_DEPTH: 220
 };
 
+export interface PrefabWall {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    height: number;
+    color: string;
+    type?: string;
+    locked?: boolean;
+    data?: any;
+}
+
 export interface PrefabResult {
-    walls: any[];
+    walls: PrefabWall[];
     entities: ZoneEntityDef[];
 }
 
-// Phase 3: Modular Composition
 export const BUILDING_PREFABS = {
     
     medBay: (x: number, y: number): PrefabResult => ({
@@ -29,7 +39,9 @@ export const BUILDING_PREFABS = {
         ],
         entities: [
             { type: 'NPC', subType: 'MEDIC', x: x + 50, y: y, data: { dialogueId: 'medic_intro', color: '#ef4444' } },
-            { type: 'DECORATION', subType: 'HOLO_TABLE', x: x + 50, y: y - 50, data: { color: '#ef4444' } }
+            { type: 'DECORATION', subType: 'HOLO_TABLE', x: x + 50, y: y - 50, data: { color: '#ef4444' } },
+            // Added Sign
+            { type: 'DECORATION', subType: 'NEON', x: x - 20, y: y - 100, data: { z: 120, color: '#ef4444', width: 40, height: 40 } }
         ]
     }),
 
@@ -39,7 +51,9 @@ export const BUILDING_PREFABS = {
         ],
         entities: [
             { type: 'NPC', subType: 'TRADER', x: x - 50, y: y, data: { dialogueId: 'generic', color: '#eab308' } },
-            { type: 'DECORATION', subType: 'VENDING_MACHINE', x: x - 50, y: y - 80, data: {} }
+            { type: 'DECORATION', subType: 'VENDING_MACHINE', x: x - 50, y: y - 80, data: {} },
+            // Added Sign
+            { type: 'DECORATION', subType: 'NEON', x: x, y: y, data: { z: 160, color: '#eab308', width: 60, height: 20 } }
         ]
     }),
 
@@ -49,13 +63,15 @@ export const BUILDING_PREFABS = {
         ],
         entities: [
             { type: 'DECORATION', subType: 'CABLE', x: x, y: y, data: { targetX: x + 650, targetY: y + 300, z: 400 } },
-            { type: 'DECORATION', subType: 'CABLE', x: x, y: y, data: { targetX: x - 650, targetY: y + 500, z: 400 } }
+            { type: 'DECORATION', subType: 'CABLE', x: x, y: y, data: { targetX: x - 650, targetY: y + 500, z: 400 } },
+            // Base lights
+            { type: 'DECORATION', subType: 'DYNAMIC_GLOW', x: x, y: y - 120, data: { z: 10, color: '#06b6d4', width: 100, depth: 20 } }
         ]
     }),
 
     gateAssembly: (y: number, locked: boolean = true): PrefabResult => {
         const D = STRUCTURE_DIMENSIONS;
-        const walls = [
+        const walls: PrefabWall[] = [
             // Left Flank
             { x: -D.GATE_FLANK_OFFSET, y: y, w: D.GATE_FLANK_WIDTH, h: D.WALL_THICKNESS, height: 350, color: '#18181b' },
             // Right Flank
@@ -73,60 +89,62 @@ export const BUILDING_PREFABS = {
             { x: -260, y: y - 120, w: 20, h: 100, height: 200, color: '#3f3f46' },
             // Right Side
             { x: -140, y: y - 120, w: 20, h: 100, height: 200, color: '#3f3f46' },
-            // Roof Slab
-            { x: -200, y: y - 120, w: 140, h: 100, height: 20, color: '#27272a', data: { z: 200 } } // Note: Standard renderer doesn't support Z offset for walls, will just render as a low wall if processed normally. Relying on height for now.
+            // Roof Slab (data.z indicates vertical offset for future advanced renderers)
+            { x: -200, y: y - 120, w: 140, h: 100, height: 20, color: '#27272a', data: { z: 200 } } 
         ];
 
         const entities: ZoneEntityDef[] = [
-            { type: 'NPC', subType: 'GUARD', x: -200, y: y - 120, data: { dialogueId: 'gate_locked', color: '#3b82f6' } }
+            { type: 'NPC', subType: 'GUARD', x: -200, y: y - 120, data: { dialogueId: 'gate_locked', color: '#3b82f6' } },
+            // Added Lights on gate pillars
+            { type: 'DECORATION', subType: 'NEON', x: -D.PILLAR_OFFSET_X, y: y, data: { z: 300, color: '#ef4444', width: 20, height: 40 } },
+            { type: 'DECORATION', subType: 'NEON', x: D.PILLAR_OFFSET_X, y: y, data: { z: 300, color: '#ef4444', width: 20, height: 40 } }
         ];
 
         return { walls, entities };
     },
 
     trainingChamber: (x: number, y: number): PrefabResult => {
+        const wallColor = '#3f3f46';
+        const accentColor = '#27272a';
+        
         return {
             walls: [
-                // Main containment structure (brutalist block)
-                { 
-                    x, y, 
-                    w: 500, h: 400, depth: 400, 
-                    height: 350, 
-                    color: '#3f3f46', 
-                    type: 'TRAINING_EXTERIOR'
-                },
-                // Entrance alcove (recessed door frame)
-                { 
-                    x, y: y + 150, 
-                    w: 140, h: 100, depth: 100, 
-                    height: 320, 
-                    color: '#27272a' 
-                },
-                // Cyan neon accent strip (glows when player inside)
+                // Redesigned to be a U-shaped enterable room
+                // Back Wall
+                { x: x, y: y - 170, w: 500, h: 60, height: 350, color: wallColor, type: 'TRAINING_EXTERIOR' },
+                // Left Wall
+                { x: x - 220, y: y + 30, w: 60, h: 340, height: 350, color: wallColor, type: 'TRAINING_EXTERIOR' },
+                // Right Wall
+                { x: x + 220, y: y + 30, w: 60, h: 340, height: 350, color: wallColor, type: 'TRAINING_EXTERIOR' },
+                
+                // Entrance Columns
+                { x: x - 150, y: y + 200, w: 80, h: 20, height: 350, color: wallColor },
+                { x: x + 150, y: y + 200, w: 80, h: 20, height: 350, color: wallColor },
+
+                // Interior Terminal Stand
+                { x: x, y: y - 130, w: 140, h: 20, height: 120, color: accentColor },
+                
+                // Floor Strip
                 {
-                    x, y: y + 120, 
-                    w: 500, h: 10, depth: 10,
-                    height: 340,
+                    x: x, y: y, 
+                    w: 300, h: 10,
+                    height: 5,
                     color: '#06b6d4',
                     type: 'DYNAMIC_GLOW',
-                    data: { 
-                        glowIntensity: 0.6,
-                        pulseSpeed: 2.0,
-                        activeColor: '#a855f7' // Changes when isPlayerInTraining = true
-                    }
+                    data: { glowIntensity: 0.4, pulseSpeed: 1.5 }
                 }
             ],
             entities: [
-                // Zone transition door
+                // Zone transition (Inside the room)
                 {
-                    type: 'INTERACTABLE', // Custom type mapping to EXIT logic via data
+                    type: 'INTERACTABLE',
                     subType: 'ZONE_TRANSITION',
                     x: x,
-                    y: y + 180,
+                    y: y - 100,
                     data: {
                         targetZone: 'HUB_TRAINING',
-                        spawnPoint: 'chamber_entrance', // Handled via spawn point logic
-                        promptText: 'Access Neural Simulation',
+                        spawnPoint: 'chamber_entrance',
+                        promptText: 'ENTER SIMULATION',
                         isTransition: true
                     }
                 }

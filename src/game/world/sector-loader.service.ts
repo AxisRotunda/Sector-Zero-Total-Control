@@ -6,6 +6,7 @@ import { ZoneTemplate, ZoneEntityDef } from '../../models/zone.models';
 import { NarrativeService } from '../narrative.service';
 import { MapUtils } from '../../utils/map-utils';
 import { SpatialHashService } from '../../systems/spatial-hash.service';
+import { DECORATIONS } from '../../config/decoration.config';
 
 @Injectable({ providedIn: 'root' })
 export class SectorLoaderService {
@@ -13,19 +14,13 @@ export class SectorLoaderService {
   private narrative = inject(NarrativeService);
   private spatialHash = inject(SpatialHashService);
 
-  private readonly STATIC_DECORATION_TYPES = new Set([
-      'RUG', 'FLOOR_CRACK', 'GRAFFITI', 'TRASH', 'CABLE', 
-      'VENDING_MACHINE', 'BENCH', 'STREET_LIGHT', 'SIGN_POST', 
-      'PLANT_BOX', 'MURAL', 'MONOLITH', 'NEON', 'HOLO_TABLE'
-  ]);
-
   loadFromTemplate(world: WorldService, template: ZoneTemplate): void {
       try {
           const zoneId = template.id;
 
           // 1. Set Global Zone Params
           world.currentZone.set({
-              id: template.id, // Set ID
+              id: template.id,
               name: template.name,
               theme: template.theme,
               groundColor: template.environment.colors.ground,
@@ -34,7 +29,8 @@ export class SectorLoaderService {
               minDepth: 0,
               difficultyMult: template.metadata.difficulty,
               weather: template.environment.weather,
-              floorPattern: template.environment.floorPattern
+              floorPattern: template.environment.floorPattern,
+              ambientColor: template.environment.ambientColor
           });
           world.mapBounds = template.bounds;
 
@@ -105,14 +101,26 @@ export class SectorLoaderService {
       const e = this.entityPool.acquire(def.type as any, def.subType as any);
       e.x = def.x; e.y = def.y; e.zoneId = zoneId;
       
+      // Defaults
       if (!e.radius) e.radius = 20;
       if (!e.color) e.color = '#fff';
 
+      // Apply Config Defaults if available
+      if (def.subType && DECORATIONS[def.subType]) {
+          const config = DECORATIONS[def.subType];
+          e.width = config.width;
+          e.height = config.height;
+          e.depth = config.depth; // Entity interface uses depth? Actually entity interface has depth.
+          e.color = config.baseColor;
+      }
+
+      // Apply Instance Overrides
       if (def.data) {
           if (def.data.dialogueId) e.dialogueId = def.data.dialogueId;
           if (def.data.color) e.color = def.data.color;
           if (def.data.width) e.width = def.data.width;
           if (def.data.height) e.height = def.data.height;
+          if (def.data.depth) e.depth = def.data.depth;
           
           if (def.data.targetX !== undefined) {
               e.targetX = def.data.targetX;
@@ -132,25 +140,22 @@ export class SectorLoaderService {
           if (def.data.patrolPoints) e.patrolPoints = def.data.patrolPoints;
           if (def.data.homeX !== undefined) e.homeX = def.data.homeX;
           if (def.data.homeY !== undefined) e.homeY = def.data.homeY;
-          if (def.data.wanderRadius !== undefined) e.aggroRadius = def.data.wanderRadius; // Reuse aggro for wander bounds
+          if (def.data.wanderRadius !== undefined) e.aggroRadius = def.data.wanderRadius;
       }
       
-      if (e.type === 'NPC') {
+      // Special logic for NPCs colors if not overridden
+      if (e.type === 'NPC' && (!def.data || !def.data.color)) {
           if (!e.radius) e.radius = 25;
           e.interactionRadius = 100;
-          if (!e.color) {
-              if (e.subType === 'MEDIC') e.color = '#ef4444';
-              else if (e.subType === 'TRADER') e.color = '#eab308';
-              else if (e.subType === 'HANDLER') e.color = '#3b82f6';
-              else if (e.subType === 'GUARD') e.color = '#1d4ed8';
-              else e.color = '#94a3b8';
-          }
+          if (e.subType === 'MEDIC') e.color = '#ef4444';
+          else if (e.subType === 'TRADER') e.color = '#eab308';
+          else if (e.subType === 'HANDLER') e.color = '#3b82f6';
+          else if (e.subType === 'GUARD') e.color = '#1d4ed8';
+          else e.color = '#94a3b8';
       }
 
-      if (e.type === 'DECORATION' && !e.width) e.width = 40;
-      if (e.type === 'DECORATION' && !e.height) e.height = 40;
-
-      if (e.type === 'DECORATION' && this.STATIC_DECORATION_TYPES.has(e.subType || '')) {
+      // Determine storage list based on Config
+      if (e.type === 'DECORATION' && e.subType && DECORATIONS[e.subType]?.isStaticFloor) {
           world.staticDecorations.push(e);
       } else {
           world.entities.push(e);
@@ -160,7 +165,7 @@ export class SectorLoaderService {
   private spawnExit(world: WorldService, def: any, zoneId: string) {
       const exit = this.entityPool.acquire('EXIT');
       exit.x = def.x; exit.y = def.y;
-      exit.exitType = def.direction || 'DOWN'; // Legacy compat
+      exit.exitType = def.direction || 'DOWN'; 
       exit.targetX = 0;
       exit.color = def.transitionType === 'GATE' ? '#ef4444' : '#f97316';
       exit.radius = 40; 

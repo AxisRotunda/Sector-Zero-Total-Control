@@ -8,6 +8,7 @@ import { UnitRendererService } from './rendering/unit-renderer.service';
 import { ShadowRendererService } from './rendering/shadow-renderer.service';
 import { EffectRendererService } from './rendering/effect-renderer.service';
 import { EntityRendererService } from './rendering/entity-renderer.service'; 
+import { LightingRendererService } from './rendering/lighting-renderer.service';
 import { IsoUtils } from '../utils/iso-utils';
 import { PlayerService } from '../game/player/player.service';
 import { EntitySorterService } from './rendering/entity-sorter.service';
@@ -32,28 +33,31 @@ export class RenderService {
   private chunkManager = inject(ChunkManagerService);
   private interaction = inject(InteractionService);
   
+  // Renderers
   private floorRenderer = inject(FloorRendererService);
   private structureRenderer = inject(StructureRendererService);
   private unitRenderer = inject(UnitRendererService);
   private shadowRenderer = inject(ShadowRendererService);
   private effectRenderer = inject(EffectRendererService);
   private entityRenderer = inject(EntityRendererService);
+  private lightingRenderer = inject(LightingRendererService);
   
   private player = inject(PlayerService);
   
   debugMode = signal(false);
-  
-  // Performance Tiering
   private isHighEnd = true;
-
   private camCenter = { x: 0, y: 0 };
+
+  // Optimization: Reusable render list to prevent GC pressure
+  private renderList: (Entity | Particle)[] = [];
+  private staticEntities: Entity[] = []; // Reused for reference
 
   init(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d', { alpha: false });
     this.inputService.setCanvas(canvas);
     
-    // Simple hardware check
+    // Performance Check
     this.isHighEnd = navigator.hardwareConcurrency > 4 && !/Mobile|Android/.test(navigator.userAgent);
     
     this.resize();
@@ -72,6 +76,7 @@ export class RenderService {
     if (this.canvas) {
       this.canvas.width = Math.max(window.innerWidth, 320);
       this.canvas.height = Math.max(window.innerHeight, 320);
+      this.lightingRenderer.resize(this.canvas.width, this.canvas.height);
     }
   }
 
@@ -107,158 +112,215 @@ export class RenderService {
     const w = this.canvas.width;
     const h = this.canvas.height;
     
-    // Clear
+    // 1. Setup Frame
     this.ctx.fillStyle = '#000000';
     this.ctx.fillRect(0, 0, w, h);
-
     this.ctx.save();
     
-    // Apply Camera Shake & Centering
-    IsoUtils.toIso(cam.x, cam.y, 0, this.camCenter);
-    this.ctx.translate(w/2, h/2);
-    
-    if (shake.intensity > 0.1) {
-        let sx = (Math.random()-0.5) * shake.intensity;
-        let sy = (Math.random()-0.5) * shake.intensity;
-        sx += shake.x * shake.intensity * 0.5;
-        sy += shake.y * shake.intensity * 0.5;
-        this.ctx.translate(sx, sy);
-    }
+    // 2. Camera Transform
+    this.applyCameraTransform(cam, w, h, shake);
 
-    this.ctx.scale(cam.zoom, cam.zoom);
-    this.ctx.translate(-this.camCenter.x, -this.camCenter.y);
+    // 3. Prepare Render Lists (Culling & Sorting)
+    // Mutates this.renderList in place to avoid allocations
+    this.prepareRenderList(cam, zone, entities, player, particles, w, h);
 
-    // --- PASS 1: BACKGROUND (Cached Floor) ---
+    // 4. Background Pass
     this.floorRenderer.drawFloor(this.ctx, cam, zone, this.world.mapBounds, w, h);
 
-    // --- PASS 2: CULLING ---
-    const frustum = this.calculateFrustum(cam, w, h);
-    
-    // A. Get Static Structures from ChunkManager (Walls, Buildings)
-    const staticEntities = this.chunkManager.getVisibleStaticEntities(cam, w, h);
-    
-    // B. Get Dynamic Entities from SpatialHash (Enemies, Projectiles, Props)
-    const dynamicEntities = this.spatialHash.queryRect(frustum.minX, frustum.minY, frustum.maxX, frustum.maxY, zone.id);
-    
-    // Filter out items already drawn in floor cache (Decorations)
-    // Note: If ChunkManager handles Walls, SpatialHash might still contain them if not cleared carefully.
-    // Ideally, spatialHash should NOT contain static walls if ChunkManager does.
-    // For safety, we deduplicate or filter.
-    const renderableDynamic = dynamicEntities.filter(e => 
-        e.type !== 'WALL' && 
-        !(e.type === 'DECORATION' && (e.subType === 'RUG' || e.subType === 'FLOOR_CRACK' || e.subType === 'GRAFFITI'))
-    );
-    
-    const visibleParticles = particles.filter(p => 
-        p.x >= frustum.minX && p.x <= frustum.maxX &&
-        p.y >= frustum.minY && p.y <= frustum.maxY
-    );
-
-    // --- PASS 3: SORTING ---
-    // Merge lists: Static Chunks + Dynamic Entities + Player + Particles
-    const renderList: (Entity | Particle)[] = [...staticEntities, ...renderableDynamic, player, ...visibleParticles];
-    const sortedList = this.sorter.sortForRender(renderList, player);
-    
-    // --- PASS 4: SHADOWS (High End Only) ---
+    // 5. Shadow Pass (High End Only)
     if (this.isHighEnd) {
-        for (const e of renderList) {
-            if (!(e as any).type) continue; // Skip particles
-            const ent = e as Entity;
-            if (ent.type === 'PLAYER' || ent.type === 'ENEMY' || ent.type === 'NPC') {
-                this.shadowRenderer.drawUnitShadow(this.ctx, ent);
-            } else if (ent.type === 'WALL' || ent.type === 'DECORATION') {
-                if (ent.height && ent.height > 50 && ent.subType !== 'CABLE') { 
-                    this.shadowRenderer.drawStructureShadow(this.ctx, ent);
-                }
-            }
-        }
+        this.drawShadows(this.renderList);
     }
 
-    // --- PASS 5: MAIN DRAW LOOP ---
-    const len = sortedList.length;
-    for (let i = 0; i < len; i++) {
-        const obj = sortedList[i];
-        
-        // Type Guard Hack for Particle vs Entity
-        if ((obj as Particle).life !== undefined) {
-            this.effectRenderer.drawParticleIso(this.ctx, obj as Particle);
-            continue;
-        }
+    // 6. Main Geometry Pass
+    this.drawGeometry(this.renderList, zone);
 
-        const e = obj as Entity;
+    // 7. Occlusion / X-Ray Pass
+    // Uses this.staticEntities which was updated in prepareRenderList
+    this.drawOcclusion(player, this.staticEntities);
 
-        if (e.type === 'PLAYER') {
-          this.effectRenderer.drawPsionicWave(this.ctx, e); 
-          this.unitRenderer.drawHumanoid(this.ctx, e);
-        }
-        else if (e.type === 'ENEMY') this.unitRenderer.drawHumanoid(this.ctx, e);
-        else if (e.type === 'NPC') this.unitRenderer.drawNPC(this.ctx, e);
-        else if (e.type === 'WALL') this.structureRenderer.drawStructure(this.ctx, e, zone);
-        else if (e.type === 'DECORATION') this.entityRenderer.drawDecoration(this.ctx, e);
-        else if (e.type === 'EXIT') this.entityRenderer.drawExit(this.ctx, e);
-        else if (e.type === 'SHRINE') this.entityRenderer.drawShrine(this.ctx, e);
-        else if (e.type === 'DESTRUCTIBLE') this.entityRenderer.drawDestructible(this.ctx, e);
-        else if (e.type === 'PICKUP') this.entityRenderer.drawPickup(this.ctx, e);
-        else if (e.type === 'HITBOX') {
-            if (e.psionicEffect === 'wave') this.effectRenderer.drawPsionicWave(this.ctx, e);
-            else if (e.subType === 'VENT' && e.state === 'ACTIVE') this.effectRenderer.drawSteamColumn(this.ctx, e);
-            else if (e.subType === 'SLUDGE') this.effectRenderer.drawSludge(this.ctx, e);
-            else this.effectRenderer.drawHitboxIso(this.ctx, e);
-        }
-
-        if (this.debugMode() && e.radius) {
-            this.effectRenderer.drawDebugHitbox(this.ctx, e);
-        }
-    }
-
-    // --- PASS 6: OCCLUSION X-RAY ---
-    // If player is behind a tall structure in the sort list, we draw a silhouette
-    const playerIndex = sortedList.indexOf(player);
-    // Heuristic: If player is drawn early in the list, and there are Walls after it that obscure pos
-    // This is complex to check perfectly in 2D list. 
-    // Simpler: Check specific neighbors in spatial hash or Chunk manager near player pos
-    if (this.checkOcclusion(player)) {
-        this.ctx.save();
-        this.ctx.globalAlpha = 0.3;
-        this.ctx.globalCompositeOperation = 'source-over'; 
-        this.unitRenderer.drawHumanoid(this.ctx, player);
-        this.ctx.restore();
-    }
-
-    // --- PASS 7: EFFECTS & UI ---
-    this.effectRenderer.drawGlobalEffects(this.ctx, sortedList as Entity[], player, zone, rainDrops);
-    this.effectRenderer.drawFloatingTexts(this.ctx, texts, cam);
+    // 8. Visual Effects (Particles, Weather)
+    // Note: renderList is typed as (Entity | Particle)[], casting for effect renderer safety if needed
+    this.effectRenderer.drawGlobalEffects(this.ctx, this.renderList as Entity[], player, zone, rainDrops);
     
-    const activeTarget = this.interaction.activeInteractable();
-    if (activeTarget) {
-        const label = this.interaction.getInteractLabel(activeTarget);
-        this.effectRenderer.drawInteractionIndicator(this.ctx, activeTarget, label);
-    }
+    // 9. World Space UI (Text, Indicators)
+    this.drawWorldUI(texts, cam);
 
+    // End World Transform
     this.ctx.restore();
     
-    // --- PASS 8: POST-PROCESSING ---
+    // 10. Atmospheric Lighting Pass (Overlay)
+    this.lightingRenderer.drawLighting(this.ctx, this.renderList as Entity[], player, cam, zone, w, h);
+
+    // 11. Post-Processing (Vignette)
     this.applyPostEffects(w, h);
   }
 
-  private checkOcclusion(player: Entity): boolean {
-      // Check for walls south-east/south-west of player (visually "in front")
-      const checkDist = 150;
-      // Get static entities from chunks near player
-      const statics = this.chunkManager.getVisibleStaticEntities(this.world.camera, 100, 100); 
-      // This is inefficient to query ALL visible, but ChunkManager returns subsets.
-      // Better: ask spatial hash for walls? But we moved walls to ChunkManager.
-      // Let's iterate the visible statics since it's a culled list.
+  private applyCameraTransform(cam: Camera, w: number, h: number, shake: {intensity: number, x: number, y: number}) {
+      if (!this.ctx) return;
+      IsoUtils.toIso(cam.x, cam.y, 0, this.camCenter);
+      this.ctx.translate(w/2, h/2);
       
-      for (const e of statics) {
-          if (e.type === 'WALL' && (e.height || 0) > 80) {
-              const dist = Math.hypot(e.x - player.x, e.y - player.y);
-              if (dist < 100) {
-                  // Simple depth check: Is the wall "visually below" the player?
-                  // In iso, Y down is "forward/down".
-                  const pIso = IsoUtils.toIso(player.x, player.y);
-                  const wIso = IsoUtils.toIso(e.x, e.y);
-                  if (wIso.y > pIso.y) return true;
+      if (shake.intensity > 0.1) {
+          let sx = (Math.random()-0.5) * shake.intensity;
+          let sy = (Math.random()-0.5) * shake.intensity;
+          sx += shake.x * shake.intensity * 0.5;
+          sy += shake.y * shake.intensity * 0.5;
+          this.ctx.translate(sx, sy);
+      }
+
+      this.ctx.scale(cam.zoom, cam.zoom);
+      this.ctx.translate(-this.camCenter.x, -this.camCenter.y);
+  }
+
+  private prepareRenderList(cam: Camera, zone: Zone, dynamicEntities: Entity[], player: Entity, particles: Particle[], w: number, h: number) {
+      const frustum = this.calculateFrustum(cam, w, h);
+      
+      // 1. Reset Arrays (No Allocation)
+      this.renderList.length = 0;
+      
+      // 2. Collect Static Entities (Chunks)
+      // ChunkManager optimizes internally via cache
+      this.staticEntities = this.chunkManager.getVisibleStaticEntities(cam, w, h);
+      const sLen = this.staticEntities.length;
+      for (let i = 0; i < sLen; i++) {
+          this.renderList.push(this.staticEntities[i]);
+      }
+      
+      // 3. Collect Dynamic Entities (Spatial Hash)
+      const visibleDynamic = this.spatialHash.queryRect(frustum.minX, frustum.minY, frustum.maxX, frustum.maxY, zone.id);
+      const dLen = visibleDynamic.length;
+      for (let i = 0; i < dLen; i++) {
+          const e = visibleDynamic[i];
+          // Exclude walls (handled by chunks) and floor decor (handled by floor renderer)
+          // Exception: GATE_SEGMENT walls are dynamic
+          if (e.type === 'WALL' && e.subType !== 'GATE_SEGMENT') continue;
+          if (e.type === 'DECORATION' && (e.subType === 'RUG' || e.subType === 'FLOOR_CRACK' || e.subType === 'GRAFFITI')) continue;
+          
+          this.renderList.push(e);
+      }
+      
+      // 4. Add Player
+      this.renderList.push(player);
+
+      // 5. Add Particles
+      const pLen = particles.length;
+      for (let i = 0; i < pLen; i++) {
+          const p = particles[i];
+          // Basic frustum cull for particles
+          if (p.x >= frustum.minX && p.x <= frustum.maxX && p.y >= frustum.minY && p.y <= frustum.maxY) {
+              this.renderList.push(p);
+          }
+      }
+
+      // 6. Sort In-Place
+      this.sorter.sortForRender(this.renderList, player);
+  }
+
+  private drawShadows(renderList: (Entity | Particle)[]) {
+      if (!this.ctx) return;
+      const len = renderList.length;
+      for (let i = 0; i < len; i++) {
+          const e = renderList[i];
+          // Particles don't cast shadows
+          if (!('type' in e)) continue;
+          
+          const ent = e as Entity;
+          if (ent.type === 'PLAYER' || ent.type === 'ENEMY' || ent.type === 'NPC') {
+              this.shadowRenderer.drawUnitShadow(this.ctx, ent);
+          } else if (ent.type === 'WALL' || ent.type === 'DECORATION') {
+              if (ent.height && ent.height > 50 && ent.subType !== 'CABLE') { 
+                  this.shadowRenderer.drawStructureShadow(this.ctx, ent);
+              }
+          }
+      }
+  }
+
+  private drawGeometry(renderList: (Entity | Particle)[], zone: Zone) {
+      if (!this.ctx) return;
+      const len = renderList.length;
+      
+      for (let i = 0; i < len; i++) {
+          const obj = renderList[i];
+          
+          // Check if Particle
+          if ('life' in obj) {
+              this.effectRenderer.drawParticleIso(this.ctx, obj as Particle);
+              continue;
+          }
+          
+          const e = obj as Entity;
+
+          if (e.type === 'PLAYER') {
+            this.effectRenderer.drawPsionicWave(this.ctx, e); 
+            this.unitRenderer.drawHumanoid(this.ctx, e);
+          }
+          else if (e.type === 'ENEMY') this.unitRenderer.drawHumanoid(this.ctx, e);
+          else if (e.type === 'NPC') this.unitRenderer.drawNPC(this.ctx, e);
+          else if (e.type === 'WALL') this.structureRenderer.drawStructure(this.ctx, e, zone);
+          else if (e.type === 'DECORATION') this.entityRenderer.drawDecoration(this.ctx, e);
+          else if (e.type === 'EXIT') this.entityRenderer.drawExit(this.ctx, e);
+          else if (e.type === 'SHRINE') this.entityRenderer.drawShrine(this.ctx, e);
+          else if (e.type === 'DESTRUCTIBLE') this.entityRenderer.drawDestructible(this.ctx, e);
+          else if (e.type === 'PICKUP') this.entityRenderer.drawPickup(this.ctx, e);
+          else if (e.type === 'HITBOX') {
+              if (e.psionicEffect === 'wave') this.effectRenderer.drawPsionicWave(this.ctx, e);
+              else if (e.subType === 'VENT' && e.state === 'ACTIVE') this.effectRenderer.drawSteamColumn(this.ctx, e);
+              else if (e.subType === 'SLUDGE') this.effectRenderer.drawSludge(this.ctx, e);
+              else this.effectRenderer.drawHitboxIso(this.ctx, e);
+          }
+
+          if (this.debugMode() && e.radius) {
+              this.effectRenderer.drawDebugHitbox(this.ctx, e);
+          }
+      }
+  }
+
+  private drawOcclusion(player: Entity, staticEntities: Entity[]) {
+      if (!this.ctx) return;
+      if (this.checkOcclusion(player, staticEntities)) {
+          this.ctx.save();
+          this.ctx.globalAlpha = 0.3;
+          this.ctx.globalCompositeOperation = 'source-over'; 
+          this.ctx.shadowColor = '#06b6d4';
+          this.ctx.shadowBlur = 15;
+          this.unitRenderer.drawHumanoid(this.ctx, player);
+          this.ctx.restore();
+      }
+  }
+
+  private drawWorldUI(texts: FloatingText[], cam: Camera) {
+      if (!this.ctx) return;
+      this.effectRenderer.drawFloatingTexts(this.ctx, texts, cam);
+      
+      const activeTarget = this.interaction.activeInteractable();
+      if (activeTarget) {
+          const label = this.interaction.getInteractLabel(activeTarget);
+          this.effectRenderer.drawInteractionIndicator(this.ctx, activeTarget, label);
+      }
+  }
+
+  private checkOcclusion(player: Entity, staticEntities: Entity[]): boolean {
+      const margin = 20;
+      const px = player.x;
+      const py = player.y;
+      const pDepth = px + py;
+
+      // Iterating cached array is fast
+      const len = staticEntities.length;
+      for (let i = 0; i < len; i++) {
+          const e = staticEntities[i];
+          if ((e.type === 'WALL' || (e.type === 'DECORATION' && (e.height || 0) > 80))) {
+              const eDepth = e.x + e.y;
+              if (eDepth <= pDepth) continue; // Behind player
+
+              const w = e.width || 40;
+              const d = e.depth || 40;
+              const halfW = w / 2 + margin;
+              const halfD = d / 2 + margin;
+              
+              if (Math.abs(e.x - px) < halfW && Math.abs(e.y - py) < halfD) {
+                  return true;
               }
           }
       }
