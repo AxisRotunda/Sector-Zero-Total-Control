@@ -2,10 +2,14 @@
 import { ZoneTheme } from "./game.models";
 
 export enum ZoneLifecycle {
-  PERSISTENT = 'PERSISTENT',      // Hub: never resets
-  CHECKPOINT = 'CHECKPOINT',       // Sector: resets on death/logout
-  INSTANCED = 'INSTANCED',         // Dungeon: fresh on entry
-  BOSS_ARENA = 'BOSS_ARENA'        // Special: resets on exit
+  /** Never resets. Used for player hubs, towns, and safe houses. State is saved indefinitely. */
+  PERSISTENT = 'PERSISTENT',
+  /** Resets on death or logout. Used for standard campaign zones to allow retries. */
+  CHECKPOINT = 'CHECKPOINT',
+  /** Always fresh on entry. Used for procedural dungeons or one-time events. */
+  INSTANCED = 'INSTANCED',
+  /** Resets on exit. Used for boss rooms to allow immediate re-attempts without reloading the whole sector. */
+  BOSS_ARENA = 'BOSS_ARENA'
 }
 
 export interface ZoneBounds {

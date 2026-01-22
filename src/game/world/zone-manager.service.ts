@@ -18,6 +18,7 @@ import { ZoneHierarchyManagerService } from './zone-hierarchy-manager.service';
 import { Entity } from '../../models/game.models';
 import { WaypointService } from './waypoint.service';
 import { EntityPoolService } from '../../services/entity-pool.service';
+import { IdGeneratorService } from '../../utils/id-generator.service';
 
 @Injectable({
   providedIn: 'root'
@@ -33,6 +34,7 @@ export class ZoneManagerService {
   private hierarchy = inject(ZoneHierarchyManagerService);
   private waypointService = inject(WaypointService);
   private entityPool = inject(EntityPoolService);
+  private idGenerator = inject(IdGeneratorService);
 
   // Strategies
   private staticLoader = inject(StaticZoneLoader);
@@ -162,6 +164,11 @@ export class ZoneManagerService {
       
       const loader = isProcedural ? this.proceduralLoader : this.staticLoader;
 
+      // Validate Configuration
+      if (config.lifecycle === ZoneLifecycle.CHECKPOINT && isProcedural) {
+          console.warn(`[ZoneManager] Warning: Zone '${zoneId}' is configured as CHECKPOINT but is Procedural. Geometry layout may not persist correctly.`);
+      }
+
       // Lifecycle Switch
       let shouldLoadFromSnapshot = false;
       
@@ -178,18 +185,23 @@ export class ZoneManagerService {
               break;
       }
 
-      // If we are loading from snapshot, we do load entities from state
-      // But we still need geometry. The static loader handles both geometry + entity restoration if snapshot exists.
-      // However, procedural loader might regenerate geometry every time if INSTANCED.
-      
+      // Load Zone Content
       if (isProcedural && !shouldLoadFromSnapshot) {
           // Fresh Procedural
           await loader.load(this.world, { template, previousZoneId });
       } else {
-          // Static or Persisted Procedural (if we supported saving procedural layout, which we don't fully yet)
-          // For now, procedural is always re-gen geometry, but we could restore entities on top?
-          // Simplification: procedural ignores snapshot for layout, but static respects it.
+          // Static or Persisted Procedural
           await loader.load(this.world, { template, previousZoneId });
+      }
+
+      // Sync ID Generator if we loaded entities
+      // This prevents newly spawned entities from having colliding IDs with loaded ones
+      if (this.world.entities.length > 0) {
+          let maxId = 0;
+          for (const e of this.world.entities) {
+              if (e.id > maxId) maxId = e.id;
+          }
+          this.idGenerator.updateHead(maxId);
       }
       
       this.handleSpawnPoint(template, previousZoneId, spawnOverride);

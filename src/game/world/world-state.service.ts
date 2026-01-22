@@ -4,6 +4,7 @@ import { Entity, SectorId } from '../../models/game.models';
 import { Item } from '../../models/item.models';
 
 interface EntitySnapshot {
+    id: number;
     type: string;
     subType?: string;
     x: number; y: number; z: number;
@@ -49,6 +50,7 @@ export class WorldStateService {
             return true;
         })
         .map(e => ({
+            id: e.id,
             type: e.type,
             subType: e.subType,
             x: e.x, y: e.y, z: e.z,
@@ -75,7 +77,7 @@ export class WorldStateService {
       
       return state.entities.map(s => {
           const e = { ...s } as Entity;
-          e.id = -1; // ID will be reassigned by pool or loader
+          e.id = s.id; // Restore ID to preserve references
           e.vx = 0; e.vy = 0; e.angle = 0; e.radius = 20; 
           e.maxHp = s.hp; // Assume saved HP is current max
           e.hp = s.hp;
