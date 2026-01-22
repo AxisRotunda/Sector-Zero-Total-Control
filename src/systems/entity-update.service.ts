@@ -46,7 +46,17 @@ export class EntityUpdateService {
         this.spatialHash.insert(entities[i], false);
     }
 
-    // 2. Logic Updates
+    // 2. Player Updates (Generic Entity Logic)
+    if (player.hitFlash > 0) player.hitFlash--;
+    
+    if (player.iframeTimer && player.iframeTimer > 0) {
+        player.iframeTimer--;
+        if (player.iframeTimer <= 0) player.invulnerable = false;
+    }
+    
+    this.status.processStatusEffects(player, globalTime);
+
+    // 3. Logic Updates for World Entities
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
       if (e.state === 'DEAD') continue;

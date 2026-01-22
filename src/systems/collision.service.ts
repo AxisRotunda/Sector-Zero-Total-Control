@@ -35,7 +35,7 @@ export class CollisionService {
             if (player.state !== 'DEAD' && !player.invulnerable) {
                 this.playerService.stats.takeDamage(hitbox.hp);
                 player.invulnerable = true;
-                setTimeout(() => player.invulnerable = false, 500); // 0.5s iframes
+                player.iframeTimer = 30; // 0.5s @ 60fps
                 hitbox.timer = 0;
             }
         }

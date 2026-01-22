@@ -92,6 +92,7 @@ export interface Entity extends Volumetric {
   hitStopFrames?: number;
   isHitStunned?: boolean;
   invulnerable?: boolean; // New: Iframes support
+  iframeTimer?: number; // New: Frame-based invulnerability countdown
   resistances?: {
       burn?: number;
       poison?: number;
