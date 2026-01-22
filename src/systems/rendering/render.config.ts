@@ -25,7 +25,8 @@ export const RENDER_CONFIG = {
       DYNAMIC_GLOW: { radius: 200, intensity: 0.5, z: 10 },
       PROJECTILE: { radiusMultiplier: 4, intensity: 0.7, z: 20 },
       EXIT: { radius: 300, intensity: 0.5, z: 10 },
-      PARTICLE: { radiusMultiplier: 3, intensityDivisor: 100, z: 10 }
+      PARTICLE: { radiusMultiplier: 3, z: 10 },
+      BOSS_ENEMY: { radius: 200, intensity: 0.6, color: '#ef4444', z: 30 }
     }
   },
 

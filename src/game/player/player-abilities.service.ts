@@ -85,6 +85,13 @@ export class PlayerAbilitiesService {
         this.world.entities.push(hitbox);
         this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: BALANCE.SHAKE.EXPLOSION });
         this.sound.play('EXPLOSION');
+        
+        // Emissive particles for Blast
+        this.particleService.addParticles({
+            x: player.x, y: player.y, z: 20,
+            count: 20, speed: 8, color: '#d8b4fe', size: 4, type: 'circle',
+            life: 0.5, emitsLight: true
+        });
     }
     if (skill === 'DASH') {
         if (cds.dash > 0) return;
@@ -142,6 +149,13 @@ export class PlayerAbilitiesService {
         hitbox.knockbackForce = 15;
         this.world.entities.push(hitbox);
         this.sound.play('IMPACT');
+        
+        // Gold Sparks
+        this.particleService.addParticles({
+            x: hitbox.x, y: hitbox.y, z: 20,
+            count: 15, speed: 6, color: '#fbbf24', size: 3, type: 'square',
+            life: 0.4, emitsLight: true
+        });
     }
     if (skill === 'OVERLOAD') {
         if (this.stats.psionicEnergy() < this.stats.maxPsionicEnergy()) return;
@@ -153,6 +167,13 @@ export class PlayerAbilitiesService {
         this.world.entities.push(explosion);
         this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: { intensity: 30, decay: 0.7 } });
         this.sound.play('EXPLOSION');
+        
+        // Massive burst
+        this.particleService.addParticles({
+            x: player.x, y: player.y, z: 20,
+            count: 50, speed: 12, color: '#f0abfc', size: 6, type: 'circle',
+            life: 1.0, emitsLight: true
+        });
     }
   }
   reset() { this.cooldowns.set({ primary: 0, secondary: 0, dash: 0, utility: 0 }); this.currentCombo.set(0); }

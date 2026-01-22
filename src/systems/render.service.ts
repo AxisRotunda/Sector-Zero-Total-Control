@@ -18,6 +18,7 @@ import { SpatialHashService } from './spatial-hash.service';
 import { InteractionService } from '../services/interaction.service';
 import { ChunkManagerService } from '../game/world/chunk-manager.service';
 import { LightingService } from './rendering/lighting.service';
+import { TimeService } from '../game/time.service';
 
 @Injectable({
   providedIn: 'root'
@@ -34,6 +35,7 @@ export class RenderService {
   private chunkManager = inject(ChunkManagerService);
   private interaction = inject(InteractionService);
   private lighting = inject(LightingService);
+  private timeService = inject(TimeService);
   
   // Renderers
   private floorRenderer = inject(FloorRendererService);
@@ -112,12 +114,18 @@ export class RenderService {
     const w = this.canvas.width;
     const h = this.canvas.height;
     
+    // Calculate View Frustum
+    const frustum = this.calculateFrustum(cam, w, h);
+
     // 1. Prepare Scene (Logic Phase)
     // Gather renderable entities and sort them
-    this.prepareRenderList(cam, zone, entities, player, particles, w, h);
+    this.prepareRenderList(cam, zone, entities, player, particles, w, h, frustum);
     
     // Prepare Lights (Culling & Extraction)
-    this.prepareLighting(player, this.renderList, cam, w, h);
+    this.prepareLighting(player, this.renderList, cam, w, h, frustum);
+    
+    // Update Lighting Animation
+    this.lighting.update(1, this.timeService.globalTime);
 
     // 2. Draw Frame
     this.ctx.fillStyle = '#000000';
@@ -156,7 +164,14 @@ export class RenderService {
     this.applyPostEffects(w, h);
   }
 
-  private prepareLighting(player: Entity, renderList: (Entity | Particle)[], cam: Camera, w: number, h: number) {
+  private prepareLighting(
+      player: Entity, 
+      renderList: (Entity | Particle)[], 
+      cam: Camera, 
+      w: number, 
+      h: number,
+      frustum: {minX: number, maxX: number, minY: number, maxY: number}
+  ) {
       this.lighting.clear();
       const presets = RENDER_CONFIG.LIGHTING.PRESETS;
       
@@ -178,14 +193,17 @@ export class RenderService {
               // Particle Light
               const p = obj as Particle;
               if (p.emitsLight) {
-                  this.lighting.registerLight({
-                      id: `LP_${i}`,
-                      x: p.x, y: p.y, z: p.z || presets.PARTICLE.z,
-                      radius: p.sizeStart * presets.PARTICLE.radiusMultiplier,
-                      intensity: p.life, // Fade with life
-                      color: p.color,
-                      type: 'DYNAMIC'
-                  });
+                  // Culling check for particles before registering light
+                  if (p.x >= frustum.minX && p.x <= frustum.maxX && p.y >= frustum.minY && p.y <= frustum.maxY) {
+                      this.lighting.registerLight({
+                          id: `LP_${i}`, // Safe since list is rebuilt per frame
+                          x: p.x, y: p.y, z: p.z || presets.PARTICLE.z,
+                          radius: p.sizeStart * presets.PARTICLE.radiusMultiplier,
+                          intensity: p.life, // Fade with life
+                          color: p.color,
+                          type: 'DYNAMIC'
+                      });
+                  }
               }
               continue;
           }
@@ -216,7 +234,7 @@ export class RenderService {
               this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, color: ent.color, type: 'STATIC', ...presets.EXIT });
           }
           else if (ent.type === 'ENEMY' && ent.subType === 'BOSS') {
-              this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, radius: 200, intensity: 0.6, color: '#ef4444', z: 30, type: 'DYNAMIC' });
+              this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, type: 'DYNAMIC', ...presets.BOSS_ENEMY });
           }
       }
 
@@ -241,9 +259,16 @@ export class RenderService {
       this.ctx.translate(-this.camCenter.x, -this.camCenter.y);
   }
 
-  private prepareRenderList(cam: Camera, zone: Zone, dynamicEntities: Entity[], player: Entity, particles: Particle[], w: number, h: number) {
-      const frustum = this.calculateFrustum(cam, w, h);
-      
+  private prepareRenderList(
+      cam: Camera, 
+      zone: Zone, 
+      dynamicEntities: Entity[], 
+      player: Entity, 
+      particles: Particle[], 
+      w: number, 
+      h: number,
+      frustum: {minX: number, maxX: number, minY: number, maxY: number}
+  ) {
       this.renderList.length = 0;
       
       this.staticEntities = this.chunkManager.getVisibleStaticEntities(cam, w, h);
