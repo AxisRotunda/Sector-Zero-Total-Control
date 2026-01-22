@@ -41,26 +41,6 @@ export class PlayerControlService {
     update(globalTime: number) {
         const player = this.world.player;
         
-        // Narrative Checks (e.g. unlocking gates based on flags)
-        if (this.narrative.getFlag('GATE_OPEN')) {
-            // Unlock Exits
-            const exit = this.world.entities.find(e => e.type === 'EXIT' && e.locked);
-            if (exit) { 
-                exit.locked = false; 
-                exit.color = '#22c55e'; 
-                const guard = this.world.entities.find(e => e.subType === 'GUARD' && e.dialogueId === 'gate_locked'); 
-                if (guard) guard.dialogueId = 'gate_unlocked'; 
-            }
-
-            // Unlock Physical Gate Walls (GATE_SEGMENT)
-            const gateWall = this.world.entities.find(e => e.type === 'WALL' && e.subType === 'GATE_SEGMENT' && e.locked);
-            if (gateWall) {
-                gateWall.locked = false;
-                gateWall.color = '#22c55e'; // Visual feedback: Green means open
-                this.haptic.success(); // Tactile feedback for gate opening
-            }
-        }
-
         // Status Effects (Stun)
         if (player.status.stun > 0) {
             player.status.stun--; 

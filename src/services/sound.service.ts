@@ -1,8 +1,9 @@
+
 import { Injectable } from '@angular/core';
 
 export type SoundType = 'HIT' | 'CRIT' | 'SHOOT' | 'EXPLOSION' | 'DASH' | 'UI' | 'CHARGE' | 'POWERUP' | 
   'DEATH' | 'PICKUP' | 'LEVELUP' | 'FOOTSTEP' | 'RELOAD' | 'SWOOSH' | 'IMPACT' | 'WHOOSH' | 
-  'BONUS' | 'ZONE_CHANGE' | 'BOSS_SPAWN' | 'ABILITY_READY' | 'DEFLECT' | 'PARRY' | 'CRAFT';
+  'BONUS' | 'ZONE_CHANGE' | 'BOSS_SPAWN' | 'ABILITY_READY' | 'DEFLECT' | 'PARRY' | 'CRAFT' | 'GATE_OPEN';
 
 @Injectable({
   providedIn: 'root'
@@ -45,6 +46,7 @@ export class SoundService {
       this.soundBuffers.set('ZONE_CHANGE', this.createToneBuffer(100, 'sine', 1.5, true));
       this.soundBuffers.set('CRAFT', this.createToneBuffer(150, 'square', 0.2));
       this.soundBuffers.set('IMPACT', this.createToneBuffer(100, 'square', 0.1));
+      this.soundBuffers.set('GATE_OPEN', this.createToneBuffer(60, 'sawtooth', 2.0, true)); // Long low rumble
   }
 
   public play(type: SoundType, x?: number, y?: number): void {

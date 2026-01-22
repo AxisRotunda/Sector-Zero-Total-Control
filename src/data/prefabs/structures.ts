@@ -64,11 +64,21 @@ export const BUILDING_PREFABS = {
             { x: 0, y: y, w: D.GATE_WIDTH, h: 60, height: 300, color: '#3f3f46', type: 'GATE_SEGMENT', locked: locked },
             // Pillars
             { x: -D.PILLAR_OFFSET_X, y: y, w: D.PILLAR_WIDTH, h: D.PILLAR_DEPTH, height: D.PILLAR_HEIGHT, color: '#52525b', type: 'PILLAR' },
-            { x: D.PILLAR_OFFSET_X, y: y, w: D.PILLAR_WIDTH, h: D.PILLAR_DEPTH, height: D.PILLAR_HEIGHT, color: '#52525b', type: 'PILLAR' }
+            { x: D.PILLAR_OFFSET_X, y: y, w: D.PILLAR_WIDTH, h: D.PILLAR_DEPTH, height: D.PILLAR_HEIGHT, color: '#52525b', type: 'PILLAR' },
+            
+            // Guard Booth (Left of Gate)
+            // Back Wall
+            { x: -200, y: y - 160, w: 100, h: 20, height: 200, color: '#3f3f46' },
+            // Left Side
+            { x: -260, y: y - 120, w: 20, h: 100, height: 200, color: '#3f3f46' },
+            // Right Side
+            { x: -140, y: y - 120, w: 20, h: 100, height: 200, color: '#3f3f46' },
+            // Roof Slab
+            { x: -200, y: y - 120, w: 140, h: 100, height: 20, color: '#27272a', data: { z: 200 } } // Note: Standard renderer doesn't support Z offset for walls, will just render as a low wall if processed normally. Relying on height for now.
         ];
 
         const entities: ZoneEntityDef[] = [
-            { type: 'NPC', subType: 'GUARD', x: -200, y: y - 100, data: { dialogueId: 'gate_locked', color: '#3b82f6' } }
+            { type: 'NPC', subType: 'GUARD', x: -200, y: y - 120, data: { dialogueId: 'gate_locked', color: '#3b82f6' } }
         ];
 
         return { walls, entities };
@@ -94,7 +104,7 @@ export const BUILDING_PREFABS = {
                 },
                 // Cyan neon accent strip (glows when player inside)
                 {
-                    x, y: y + 120,
+                    x, y: y + 120, 
                     w: 500, h: 10, depth: 10,
                     height: 340,
                     color: '#06b6d4',

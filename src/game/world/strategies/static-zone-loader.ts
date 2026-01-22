@@ -21,17 +21,18 @@ export class StaticZoneLoader implements ZoneLoadStrategy {
     this.sectorLoader.loadFromTemplate(world, template);
 
     // 2. Move Walls to ChunkManager
-    const staticWalls = world.entities.filter(e => e.type === 'WALL');
+    // EXCEPTION: Keep GATE_SEGMENT walls dynamic so they can animate open/closed
+    const staticWalls = world.entities.filter(e => e.type === 'WALL' && e.subType !== 'GATE_SEGMENT');
     staticWalls.forEach(w => this.chunkManager.registerStaticEntity(w));
     
-    // 3. Keep only dynamic entities in main list
-    world.entities = world.entities.filter(e => e.type !== 'WALL');
+    // 3. Keep only dynamic entities in main list (including GATE_SEGMENT)
+    world.entities = world.entities.filter(e => e.type !== 'WALL' || e.subType === 'GATE_SEGMENT');
 
     // 4. Restore Dynamic State (if persistent)
     if (this.worldState.hasSector(template.id) && !template.metadata.isInstanced) {
         const savedEntities = this.worldState.loadSector(template.id);
         // Remove default dynamic entities from template to avoid dupes
-        world.entities = world.entities.filter(e => e.type !== 'SPAWNER' && e.type !== 'DESTRUCTIBLE');
+        world.entities = world.entities.filter(e => e.type !== 'SPAWNER' && e.type !== 'DESTRUCTIBLE' && e.subType !== 'GATE_SEGMENT');
         world.entities.push(...savedEntities);
     } else {
         world.player.x = template.metadata.playerStart.x;

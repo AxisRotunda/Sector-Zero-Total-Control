@@ -4,6 +4,10 @@ import { StaticWall } from '../models/map.models';
 
 export class MapUtils {
   
+  // Maximum length of a merged wall segment to prevent Z-sorting issues
+  // with entities standing near the ends of the wall.
+  private static readonly MAX_WALL_LENGTH = 600; 
+
   /**
    * Merges collinear wall entities to reduce draw calls and entity count.
    */
@@ -53,12 +57,21 @@ export class MapUtils {
                       const currentRight = merged.x + (merged.width || 0) / 2;
                       const nextLeft = next.x - (next.width || 0) / 2;
                       
-                      // Check for adjacency (within small tolerance)
+                      const currentLen = merged.width || 0;
+                      const nextLen = next.width || 0;
+
+                      // Check for adjacency (within small tolerance) AND Max Length Cap
                       if (Math.abs(nextLeft - currentRight) < 5) {
+                          if (currentLen + nextLen > MapUtils.MAX_WALL_LENGTH) {
+                              // Don't break the loop, just stop merging into *this* segment
+                              // The next segment will start a new merge block in the outer loop
+                              break;
+                          }
+
                           // Merge!
-                          const newWidth = (merged.width || 0) + (next.width || 0);
+                          const newWidth = currentLen + nextLen;
                           // Recalculate center X
-                          const leftEdge = (merged.x - (merged.width || 0)/2); 
+                          const leftEdge = (merged.x - currentLen/2); 
                           merged.width = newWidth;
                           merged.x = leftEdge + newWidth / 2;
 
@@ -99,10 +112,7 @@ export class MapUtils {
         });
 
         // Skip Gate openings (North, South, East, West indices)
-        // 0=East, 2=South, 4=West, 6=North (approximate based on standard trig)
-        // Adjusted for visual orientation: 
-        // 0 (Right), 2 (Bottom), 4 (Left), 6 (Top)
-        if (i === 2 || i === 6) continue; // Leave gaps for Main Gates (Top/Bottom)
+        if (i === 2 || i === 6) continue; 
 
         const x1 = Math.cos(angle) * radius;
         const y1 = Math.sin(angle) * radius;
@@ -142,7 +152,6 @@ export class MapUtils {
           const y2 = Math.sin(nextAngle) * radius;
           
           const dist = Math.hypot(x2 - x1, y2 - y1);
-          // Use blocks to approximate wall
           const blockCount = Math.ceil(dist / thickness);
           
           for(let j=0; j<blockCount; j++) {

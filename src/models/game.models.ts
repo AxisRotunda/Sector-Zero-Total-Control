@@ -80,7 +80,10 @@ export interface Entity extends Volumetric {
   logId?: string;
   accessed?: boolean;
   factionId?: 'REMNANT' | 'VANGUARD' | 'RESONANT';
+  
+  // Logic State
   locked?: boolean;
+  openness?: number; // 0.0 (Closed) to 1.0 (Open) for gates/doors
 
   hitStopFrames?: number;
   isHitStunned?: boolean;

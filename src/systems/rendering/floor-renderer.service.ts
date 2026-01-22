@@ -5,11 +5,13 @@ import { IsoUtils } from '../../utils/iso-utils';
 import { EntityRendererService } from './entity-renderer.service';
 import { RENDER_CONFIG } from './render.config';
 import { SpatialHashService } from '../spatial-hash.service';
+import { TextureGeneratorService } from './texture-generator.service';
 
 @Injectable({ providedIn: 'root' })
 export class FloorRendererService {
   private entityRenderer = inject(EntityRendererService);
   private spatialHash = inject(SpatialHashService);
+  private textureGen = inject(TextureGeneratorService);
   
   // Cache System
   private floorCanvas: HTMLCanvasElement | null = null;
@@ -90,11 +92,8 @@ export class FloorRendererService {
       }
 
       // 2. Draw Static Decorations via Spatial Hash Query
-      // Calculate world bounds of the cache area (inverse iso projection approx)
-      // Since it's a large rect, simple AABB centered on view is sufficient
-      const range = Math.max(width, height) * 1.5; // Padding for safety
+      const range = Math.max(width, height) * 1.5; 
       
-      // FIX: Use zone ID to query spatial hash for decorations
       const entities = this.spatialHash.queryRect(
           this.lastViewX - range, 
           this.lastViewY - range, 
@@ -104,7 +103,6 @@ export class FloorRendererService {
       );
 
       for (const d of entities) {
-          // Filter for decorations that belong on the floor layer
           if (d.type === 'DECORATION' && (d.subType === 'RUG' || d.subType === 'FLOOR_CRACK' || d.subType === 'GRAFFITI')) {
               this.entityRenderer.drawDecoration(ctx, d);
           }

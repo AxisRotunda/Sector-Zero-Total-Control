@@ -69,38 +69,50 @@ export class EntityRendererService {
       ctx.save(); 
       ctx.translate(pos.x, pos.y);
       
-      const isGate = e.color === '#ef4444' || e.locked; // Logic to detect major gate transition or if explictly defined in future
+      // Determine if this is a "Gate" type exit (rectangular) or standard (circular)
+      const isGate = e.color === '#ef4444' || e.locked || e.color === '#991b1b'; 
       
       if (isGate) {
-          // Render as a floor threshold marker
-          // Flatten to floor
+          // Render as a holographic floor threshold
           ctx.scale(1, 0.5); 
-          const pulse = Math.sin(Date.now() * 0.005);
+          const pulse = (Math.sin(Date.now() * 0.005) + 1) * 0.5; // 0 to 1
           
+          // Background Glow
           ctx.fillStyle = e.color; 
-          ctx.globalAlpha = 0.3 + pulse * 0.1;
+          ctx.globalAlpha = 0.2 + pulse * 0.1;
           
-          // Rectangular mat
-          const w = 120;
+          const w = 140;
           const h = 60;
+          
+          // Draw dashed border rectangle
+          ctx.strokeStyle = e.color;
+          ctx.lineWidth = 2;
+          ctx.setLineDash([10, 5]);
+          ctx.strokeRect(-w/2, -h/2, w, h);
+          ctx.setLineDash([]);
+          
+          // Fill
           ctx.fillRect(-w/2, -h/2, w, h);
           
-          // Warning chevrons
-          ctx.strokeStyle = '#000';
-          ctx.lineWidth = 2;
-          ctx.globalAlpha = 0.5;
-          ctx.beginPath();
-          for(let i = -w/2; i < w/2; i+=20) {
-              ctx.moveTo(i, h/2);
-              ctx.lineTo(i+10, -h/2);
-          }
-          ctx.stroke();
+          // Status Text
+          ctx.globalAlpha = 0.8;
+          ctx.fillStyle = '#fff';
+          ctx.font = 'bold 12px monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(e.locked ? 'LOCKED' : 'ACCESS GRANTED', 0, 0);
           
       } else {
           // Standard Circular Exit
           ctx.scale(1, 0.5);
           ctx.fillStyle = e.color; 
+          ctx.globalAlpha = 0.4;
           ctx.beginPath(); ctx.arc(0, 0, e.radius, 0, Math.PI*2); ctx.fill();
+          
+          // Inner ring
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(0, 0, e.radius * 0.7, 0, Math.PI*2); ctx.stroke();
       }
       
       ctx.restore();
