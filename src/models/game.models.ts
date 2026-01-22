@@ -19,6 +19,7 @@ export interface Entity extends Volumetric {
   source?: 'PLAYER' | 'ENEMY' | 'ENVIRONMENT' | 'PSIONIC' | 'DEFENSE';
   exitType?: 'UP' | 'DOWN'; 
   targetSector?: string; 
+  spawnOverride?: { x: number; y: number }; // Target spawn coordinates when transitioning via this entity
   x: number;
   y: number;
   z: number;

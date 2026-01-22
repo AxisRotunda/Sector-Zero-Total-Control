@@ -51,6 +51,7 @@ export interface ZoneExit {
   direction?: 'UP' | 'DOWN'; // Deprecated in favor of generic transition
   transitionType?: 'GATE' | 'PORTAL' | 'WALK';
   locked?: boolean;
+  spawnOverride?: { x: number; y: number }; // Optional override for player spawn location in target zone
 }
 
 export interface RenderLayerConfig {

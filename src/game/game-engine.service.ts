@@ -76,8 +76,8 @@ export class GameEngineService {
       this.isInMenu.set(false);
   }
 
-  changeFloor(targetZoneId: string) {
-      this.zoneManager.transitionToZone(targetZoneId);
+  changeFloor(targetZoneId: string, spawnOverride?: {x: number, y: number}) {
+      this.zoneManager.transitionToZone(targetZoneId, spawnOverride);
       this.mapService.setSector(targetZoneId);
       this.persistence.saveGame();
   }
@@ -125,13 +125,18 @@ export class GameEngineService {
     // Check floor changes
     const request = this.playerControl.requestedFloorChange();
     if (request) {
-        if (request === 'UP' || request === 'DOWN') {
-             // Fallback
-             if (this.player.currentSectorId() === 'HUB' && request === 'DOWN') this.changeFloor('SECTOR_9_N');
-             else if (this.player.currentSectorId() === 'SECTOR_9_N' && request === 'UP') this.changeFloor('HUB');
-        } else {
-             this.changeFloor(request);
+        let targetId = request.id;
+        
+        // Fallback for legacy 'UP'/'DOWN' commands
+        if (targetId === 'UP' || targetId === 'DOWN') {
+             if (this.player.currentSectorId() === 'HUB' && targetId === 'DOWN') targetId = 'SECTOR_9_N';
+             else if (this.player.currentSectorId() === 'SECTOR_9_N' && targetId === 'UP') targetId = 'HUB';
         }
+        
+        if (targetId !== 'UP' && targetId !== 'DOWN') {
+             this.changeFloor(targetId, request.spawn);
+        }
+        
         this.playerControl.requestedFloorChange.set(null);
     }
 

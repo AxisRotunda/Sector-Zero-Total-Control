@@ -178,6 +178,7 @@ export class SectorLoaderService {
       exit.radius = 40; 
       exit.zoneId = zoneId;
       (exit as any).targetSector = def.targetZoneId;
+      exit.spawnOverride = def.spawnOverride; // Copy spawn override
       
       if (def.locked) {
           const isOpen = this.narrative.getFlag('GATE_OPEN'); 

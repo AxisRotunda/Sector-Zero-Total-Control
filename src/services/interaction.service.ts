@@ -36,7 +36,8 @@ export class InteractionService {
       return null; 
   });
   
-  requestedFloorChange = signal<'UP' | 'DOWN' | string | null>(null);
+  // Refactored to support complex transition requests
+  requestedFloorChange = signal<{ id: string; spawn?: {x: number, y: number} } | null>(null);
 
   update(player: Entity, globalTime: number) {
       let bestTarget: Entity | null = null;
@@ -63,11 +64,11 @@ export class InteractionService {
           if (e.type === 'EXIT') {
                if (dist < combinedRadius + 20) {
                     if (!e.locked) {
-                        if ((e as any).targetSector) {
-                            this.requestedFloorChange.set((e as any).targetSector);
-                        } else {
-                            this.requestedFloorChange.set(e.exitType || 'DOWN');
-                        }
+                        const targetId = (e as any).targetSector || e.exitType || 'DOWN';
+                        this.requestedFloorChange.set({ 
+                            id: targetId,
+                            spawn: e.spawnOverride 
+                        });
                     }
                     else if (globalTime % 60 === 0) {
                         this.eventBus.dispatch({ 
@@ -175,7 +176,7 @@ export class InteractionService {
       if (target.subType === 'ZONE_TRANSITION') {
           const dest = target.data?.targetZone;
           if (dest) {
-              this.requestedFloorChange.set(dest);
+              this.requestedFloorChange.set({ id: dest });
               this.sound.play('UI');
           }
       } else if (target.subType === 'TRADER') {

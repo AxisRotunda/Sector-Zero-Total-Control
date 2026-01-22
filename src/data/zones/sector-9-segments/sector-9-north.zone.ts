@@ -31,7 +31,13 @@ export const SECTOR_9_N_ZONE: ZoneTemplate = {
   },
 
   exits: [
-    { x: 0, y: -950, targetZoneId: 'HUB', transitionType: 'GATE' },
+    { 
+      x: 0, 
+      y: -800, 
+      targetZoneId: 'HUB', 
+      transitionType: 'GATE',
+      spawnOverride: { x: 0, y: 900 }
+    },
     { x: 0, y: 950, targetZoneId: 'SECTOR_9_S', transitionType: 'WALK' }, // To South/Center
     { x: 950, y: 0, targetZoneId: 'SECTOR_9_E', transitionType: 'WALK' },
     { x: -950, y: 0, targetZoneId: 'SECTOR_9_W', transitionType: 'WALK' }
