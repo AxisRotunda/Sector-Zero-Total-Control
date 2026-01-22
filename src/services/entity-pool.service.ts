@@ -8,7 +8,7 @@ const baseEntity: Omit<Entity, 'id' | 'type' | 'x' | 'y'> = {
     z: 0, vx: 0, vy: 0, angle: 0, radius: 20, hp: 1, maxHp: 1, armor: 0,
     color: '#fff', state: 'IDLE', animFrame: 0, animFrameTimer: 0, timer: 0, speed: 0, hitFlash: 0, xpValue: 0,
     status: { stun: 0, slow: 0, poison: null, burn: null, weakness: null, bleed: null },
-    hitStopFrames: 0, isHitStunned: false
+    hitStopFrames: 0, isHitStunned: false, invulnerable: false
 };
 
 @Injectable({
@@ -47,6 +47,7 @@ export class EntityPoolService {
           e.name = undefined;
           e.hitStopFrames = 0;
           e.isHitStunned = false;
+          e.invulnerable = false; // Reset iframes
           e.resistances = undefined;
           e.equipment = undefined;
           e.squadId = undefined;
@@ -60,9 +61,10 @@ export class EntityPoolService {
     return this.pools.get(key)!;
   }
 
-  acquire(type: Entity['type'], subType?: Entity['subType']): Entity {
+  acquire(type: Entity['type'], subType?: Entity['subType'], inheritZoneId?: string): Entity {
     const entity = this.getPool(type, subType).acquire();
     entity.id = this.idGenerator.generateNumericId();
+    if (inheritZoneId) entity.zoneId = inheritZoneId;
     return entity;
   }
 

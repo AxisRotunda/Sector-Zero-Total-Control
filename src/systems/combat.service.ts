@@ -44,7 +44,8 @@ export class CombatService {
     
     if (target.armor > 0) {
         const attackerArmorPen = (hitbox.source === 'PLAYER' || hitbox.source === 'PSIONIC') ? playerStats.armorPen : 0;
-        const effectiveArmor = Math.max(0, (target.armor * armorMultiplier) - attackerArmorPen);
+        const netArmor = Math.max(0, target.armor * armorMultiplier);
+        const effectiveArmor = Math.max(0, netArmor - attackerArmorPen); // Fix: Prevent negative armor increasing damage
         dmg *= (100 / (100 + effectiveArmor));
     }
 
@@ -83,13 +84,29 @@ export class CombatService {
 
     const applyStatus = (type: 'stun'|'slow'|'burn'|'poison'|'weakness', effect: any) => {
         const res = target.resistances?.[type] || 1.0;
-        if (res <= 0) return;
-        if (type === 'stun' && hitbox.status.stun > 0) target.status.stun = Math.max(target.status.stun, hitbox.status.stun * res);
-        else if (type === 'slow' && hitbox.status.slow > 0) target.status.slow = Math.max(target.status.slow, hitbox.status.slow * res);
-        else if (typeof effect === 'object' && effect) {
-            const modEffect = JSON.parse(JSON.stringify(effect));
-            if (modEffect.duration) modEffect.duration *= res; if (modEffect.timer) modEffect.timer *= res;
-            (target.status as any)[type] = modEffect;
+        if (res <= 0 || !effect) return;
+
+        // Apply simple duration multipliers
+        if (type === 'stun' && hitbox.status.stun > 0) {
+            target.status.stun = Math.max(target.status.stun, hitbox.status.stun * res);
+        }
+        else if (type === 'slow' && hitbox.status.slow > 0) {
+            target.status.slow = Math.max(target.status.slow, hitbox.status.slow * res);
+        }
+        else if (typeof effect === 'object') {
+            // Fix: Use object spread instead of JSON cloning
+            const newDuration = effect.duration * res;
+            const newTimer = effect.timer ? effect.timer * res : undefined;
+            
+            // Fix: Check priority (duration) before overwriting existing status
+            const existing = (target.status as any)[type];
+            if (!existing || newDuration > existing.duration) {
+                (target.status as any)[type] = { 
+                    ...effect, 
+                    duration: newDuration,
+                    timer: newTimer ?? newDuration
+                };
+            }
         }
     };
     applyStatus('stun', null); applyStatus('slow', null); applyStatus('weakness', hitbox.status.weakness); applyStatus('burn', hitbox.status.burn); applyStatus('poison', hitbox.status.poison);
@@ -217,7 +234,7 @@ export class CombatService {
               x: e.x, y: e.y, z: 10, color: '#ef4444', count: 30, speed: 8, size: 4, type: 'square',
               emitsLight: true // Added light emission
           });
-          const explosion = this.entityPool.acquire('HITBOX');
+          const explosion = this.entityPool.acquire('HITBOX', undefined, e.zoneId);
           explosion.source = 'ENVIRONMENT'; explosion.x = e.x; explosion.y = e.y; explosion.radius = BALANCE.ENVIRONMENT.BARREL_EXPLOSION_RADIUS; explosion.hp = BALANCE.ENVIRONMENT.BARREL_EXPLOSION_DMG;
           explosion.color = '#f87171'; explosion.state = 'ATTACK'; explosion.timer = 5; explosion.status.stun = BALANCE.ENVIRONMENT.BARREL_EXPLOSION_STUN;
           this.world.entities.push(explosion);

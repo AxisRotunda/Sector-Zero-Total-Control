@@ -51,15 +51,13 @@ export class SpawnerService {
       if (subType === 'BOSS') { stats = { hp: 400 * difficulty, speed: 4.5, radius: 30, color: '#dc2626', xpValue: 300 * difficulty, armor: 30 * difficulty }; aggro = 500; equipmentChance = 1.0; resistances = { stun: 0.2, burn: 0.5 }; }
       if (subType === 'GRUNT') { stats = { hp: 40 * difficulty, speed: 2.0, radius: 18, color: '#a1a1aa', xpValue: 20 * difficulty }; }
 
-      const enemy = this.entityPool.acquire('ENEMY', subType);
+      // CRITICAL: Inherit zone ID from spawner
+      const enemy = this.entityPool.acquire('ENEMY', subType, spawner.zoneId);
       Object.assign(enemy, stats);
       const angle = Math.random() * Math.PI * 2; const dist = Math.random() * 50;
       enemy.x = spawner.x + Math.cos(angle) * dist; enemy.y = spawner.y + Math.sin(angle) * dist; enemy.homeX = spawner.x; enemy.homeY = spawner.y;
       enemy.aggroRadius = aggro; enemy.maxHp = stats.hp!; enemy.hp = stats.hp!; enemy.attackTimer = Math.random() * 100; enemy.resistances = resistances;
       
-      // CRITICAL: Inherit zone ID to ensure visibility in spatial hash queries
-      enemy.zoneId = spawner.zoneId;
-
       if (total > 1) {
           enemy.squadId = squadId; this.squadAi.registerMember(enemy);
           if (index === 0 && Math.random() > 0.7 && subType !== 'BOSS') { enemy.aiRole = 'SUPPORT'; enemy.color = '#34d399'; } else enemy.aiRole = 'ATTACKER';

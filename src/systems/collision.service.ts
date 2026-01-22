@@ -1,3 +1,4 @@
+
 import { Injectable, inject } from '@angular/core';
 import { Entity } from '../models/game.models';
 import { CombatService } from './combat.service';
@@ -28,9 +29,15 @@ export class CollisionService {
     } else if (hitbox.source === 'ENEMY') {
         const player = this.world.player;
         const dist = Math.hypot(player.x - hitbox.x, player.y - hitbox.y);
+        
+        // Player Hit Logic with Iframes
         if (dist < player.radius + hitbox.radius) {
-            this.playerService.stats.takeDamage(hitbox.hp);
-            hitbox.timer = 0; 
+            if (player.state !== 'DEAD' && !player.invulnerable) {
+                this.playerService.stats.takeDamage(hitbox.hp);
+                player.invulnerable = true;
+                setTimeout(() => player.invulnerable = false, 500); // 0.5s iframes
+                hitbox.timer = 0;
+            }
         }
     }
   }

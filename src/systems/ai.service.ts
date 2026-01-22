@@ -1,3 +1,4 @@
+
 import { Injectable, inject } from '@angular/core';
 import { Entity } from '../models/game.models';
 import { WorldService } from '../game/world/world.service';
@@ -140,7 +141,8 @@ export class AiService {
             enemy.timer = 0; this.sound.play('SHOOT');
             let damage = 40 * this.world.currentZone().difficultyMult;
             if (enemy.status.weakness) damage *= (1 - enemy.status.weakness.damageReduction);
-            const projectile = this.entityPool.acquire('HITBOX');
+            // Pass zoneId to projectile
+            const projectile = this.entityPool.acquire('HITBOX', undefined, enemy.zoneId);
             projectile.source = 'ENEMY'; projectile.x = enemy.x; projectile.y = enemy.y; projectile.z = 10;
             projectile.vx = Math.cos(angle) * 15; projectile.vy = Math.sin(angle) * 15;
             projectile.angle = angle; projectile.radius = 8; projectile.hp = damage; projectile.color = '#a855f7'; projectile.state = 'ATTACK'; projectile.timer = 60;

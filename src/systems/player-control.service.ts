@@ -224,8 +224,8 @@ export class PlayerControlService {
             color = '#ea580c';
         }
 
-        const hitbox = this.entityPool.acquire('HITBOX');
-        hitbox.zoneId = player.zoneId; // VISIBILITY FIX
+        // Pass zoneId to projectile
+        const hitbox = this.entityPool.acquire('HITBOX', undefined, player.zoneId);
         hitbox.source = 'PLAYER'; 
         hitbox.x = player.x + Math.cos(player.angle) * 30; 
         hitbox.y = player.y + Math.sin(player.angle) * 30; 
