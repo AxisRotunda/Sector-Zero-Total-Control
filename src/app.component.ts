@@ -16,6 +16,7 @@ import { HapticService } from './services/haptic.service';
 import { UiPanelService } from './services/ui-panel.service';
 import { InteractionService } from './services/interaction.service'; 
 import { Subscription } from 'rxjs';
+import { ZoneManagerService } from './game/world/zone-manager.service';
 
 import { HudComponent } from './components/hud.component';
 import { InventoryComponent } from './components/inventory.component';
@@ -29,11 +30,12 @@ import { AbilitiesPanelComponent } from './components/abilities-panel.component'
 import { DialogueOverlayComponent } from './components/dialogue-overlay.component';
 import { CodexComponent } from './components/codex.component';
 import { MissionJournalComponent } from './components/mission-journal.component';
+import { WorldMapModalComponent } from './components/world-map-modal.component';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, HudComponent, InventoryComponent, SkillTreeComponent, JoystickComponent, ItemTooltipComponent, ShopComponent, MapComponent, SettingsComponent, AbilitiesPanelComponent, DialogueOverlayComponent, CodexComponent, MissionJournalComponent],
+  imports: [CommonModule, HudComponent, InventoryComponent, SkillTreeComponent, JoystickComponent, ItemTooltipComponent, ShopComponent, MapComponent, SettingsComponent, AbilitiesPanelComponent, DialogueOverlayComponent, CodexComponent, MissionJournalComponent, WorldMapModalComponent],
   templateUrl: './app.component.html',
   host: {
     '(contextmenu)': 'onRightClick($event)',
@@ -56,6 +58,7 @@ export class AppComponent implements OnInit, OnDestroy {
   interactionService = inject(InteractionService);
   haptic = inject(HapticService);
   ui = inject(UiPanelService);
+  zoneManager = inject(ZoneManagerService);
 
   private lastTapTime = 0;
   private readonly DOUBLE_TAP_THRESHOLD = 300; 
@@ -85,7 +88,7 @@ export class AppComponent implements OnInit, OnDestroy {
           case 'TOGGLE_PSI': this.ui.openPanel('ABILITIES'); break;
           case 'TOGGLE_SHOP': if (this.ui.isOpen('SHOP')) this.ui.closeAll(); break;
           case 'MENU': 
-               if (this.ui.isOpen('INVENTORY') || this.ui.isOpen('SKILLS') || this.ui.isOpen('SHOP') || this.ui.isOpen('ABILITIES') || this.ui.isOpen('CODEX') || this.ui.isOpen('JOURNAL')) {
+               if (this.ui.isOpen('INVENTORY') || this.ui.isOpen('SKILLS') || this.ui.isOpen('SHOP') || this.ui.isOpen('ABILITIES') || this.ui.isOpen('CODEX') || this.ui.isOpen('JOURNAL') || this.ui.isOpen('WORLD_MAP')) {
                    this.ui.closeAll();
                }
                else if (this.mapService.isFullMapOpen()) this.mapService.toggleFullMap();
@@ -144,7 +147,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   handleGlobalTouch(event: TouchEvent) {
-    if (this.game.isInMenu() || this.ui.isOpen('SKILLS') || this.ui.isOpen('SHOP') || this.mapService.isFullMapOpen() || this.mapService.isSettingsOpen() || this.ui.isOpen('ABILITIES') || this.ui.isOpen('CODEX') || this.ui.isOpen('JOURNAL')) return;
+    if (this.game.isInMenu() || this.ui.isOpen('SKILLS') || this.ui.isOpen('SHOP') || this.mapService.isFullMapOpen() || this.mapService.isSettingsOpen() || this.ui.isOpen('ABILITIES') || this.ui.isOpen('CODEX') || this.ui.isOpen('JOURNAL') || this.ui.isOpen('WORLD_MAP')) return;
     
     if (this.ui.isOpen('INVENTORY') && (event.target as HTMLElement).closest('.app-inventory-container')) return;
 

@@ -19,7 +19,11 @@ export class EntityRendererService {
       if (['RUG', 'FLOOR_CRACK', 'GRAFFITI', 'TRASH'].includes(e.subType || '')) {
           this.structureRenderer.drawFloorDecoration(ctx, e);
       } else if (e.type === 'INTERACTABLE') {
-          this.drawInteractable(ctx, e);
+          if (e.subType === 'RIFTGATE' || e.subType === 'PORTAL') {
+              this.drawRiftgate(ctx, e);
+          } else {
+              this.drawInteractable(ctx, e);
+          }
       } else {
           // Use current zone from world service to ensure theme consistency
           this.structureRenderer.drawStructure(ctx, e, this.world.currentZone());
@@ -126,6 +130,58 @@ export class EntityRendererService {
   
   drawShrine(ctx: CanvasRenderingContext2D, e: Entity) {
       this.structureRenderer.drawStructure(ctx, e, this.world.currentZone());
+  }
+
+  // Draw Riftgate / Personal Rift
+  private drawRiftgate(ctx: CanvasRenderingContext2D, e: Entity) {
+      const pos = IsoUtils.toIso(e.x, e.y, 40);
+      const t = Date.now() * 0.002;
+      const isPersonal = e.subType === 'PORTAL';
+      const color = isPersonal ? '#a855f7' : '#06b6d4'; // Purple vs Cyan
+
+      ctx.save();
+      ctx.translate(pos.x, pos.y);
+      
+      // Floating motion
+      ctx.translate(0, Math.sin(t) * 5);
+
+      // Core Energy
+      ctx.globalCompositeOperation = 'screen';
+      ctx.shadowBlur = 20;
+      ctx.shadowColor = color;
+      
+      // Pulsing Ring
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      
+      // Wobbly circle
+      for(let i=0; i <= Math.PI*2; i+=0.1) {
+          const r = 20 + Math.sin(i * 5 + t*3) * 5;
+          const x = Math.cos(i) * r;
+          const y = Math.sin(i) * r * 0.5; // Flatten
+          if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+
+      // Inner Core
+      ctx.fillStyle = '#fff';
+      ctx.globalAlpha = 0.8;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 10, 5, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      // Vertical Beam
+      ctx.globalAlpha = 0.3;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(-10, 0);
+      ctx.lineTo(10, 0);
+      ctx.lineTo(0, -80 - Math.random() * 20);
+      ctx.fill();
+
+      ctx.restore();
   }
 
   // NEW: Render holographic interaction points (Doors, Keypads)

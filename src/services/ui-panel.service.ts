@@ -1,6 +1,7 @@
+
 import { Injectable, signal, computed } from '@angular/core';
 
-export type PanelType = 'INVENTORY' | 'SKILLS' | 'SHOP' | 'ABILITIES' | 'CODEX' | 'MAP' | 'SETTINGS' | 'JOURNAL';
+export type PanelType = 'INVENTORY' | 'SKILLS' | 'SHOP' | 'ABILITIES' | 'CODEX' | 'MAP' | 'SETTINGS' | 'JOURNAL' | 'WORLD_MAP';
 
 @Injectable({
   providedIn: 'root'
@@ -16,6 +17,7 @@ export class UiPanelService {
   isJournalOpen = computed(() => this.activePanel() === 'JOURNAL');
   isMapOpen = computed(() => this.activePanel() === 'MAP');
   isSettingsOpen = computed(() => this.activePanel() === 'SETTINGS');
+  isWorldMapOpen = computed(() => this.activePanel() === 'WORLD_MAP');
   
   openPanel(panel: PanelType) {
     if (this.activePanel() === panel) {

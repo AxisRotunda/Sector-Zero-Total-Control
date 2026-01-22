@@ -99,6 +99,7 @@ export interface ZoneTemplate {
     difficulty: number;
     isInstanced: boolean;
     playerStart: { x: number, y: number };
+    hasRiftgate?: boolean; // New: Does this zone have a static waypoint?
   };
 }
 

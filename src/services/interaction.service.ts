@@ -81,7 +81,7 @@ export class InteractionService {
           }
           
           // 2. Selectable Targets (NPCs, Terminals, Generic Interactables)
-          const isInteractiveType = e.type === 'NPC' || e.type === 'TERMINAL' || e.type === 'INTERACTABLE' || e.subType === 'STASH';
+          const isInteractiveType = e.type === 'NPC' || e.type === 'TERMINAL' || e.type === 'INTERACTABLE' || e.subType === 'STASH' || e.subType === 'RIFTGATE' || e.subType === 'PORTAL';
           const isActive = !e.accessed; // Terminals become inactive after access
 
           if (isInteractiveType && isActive) {
@@ -145,7 +145,7 @@ export class InteractionService {
       
       // 3. Filter for interactables
       const validTarget = targets.find(e => 
-          (e.type === 'NPC' || e.type === 'INTERACTABLE' || (e.type === 'TERMINAL' && !e.accessed) || e.subType === 'STASH') && 
+          (e.type === 'NPC' || e.type === 'INTERACTABLE' || (e.type === 'TERMINAL' && !e.accessed) || e.subType === 'STASH' || e.subType === 'RIFTGATE' || e.subType === 'PORTAL') && 
           e.state !== 'DEAD'
       );
       
@@ -184,6 +184,9 @@ export class InteractionService {
       } else if (target.subType === 'STASH') {
           this.ui.openPanel('INVENTORY');
           this.sound.play('UI');
+      } else if (target.subType === 'RIFTGATE' || target.subType === 'PORTAL') {
+          this.ui.openPanel('WORLD_MAP');
+          this.sound.play('UI');
       } else if (['HANDLER', 'CITIZEN', 'ECHO', 'GUARD', 'MEDIC'].includes(target.subType || '')) {
           if (target.subType) this.missionService.onTalk(target.subType);
           this.dialogueService.startDialogue(target.dialogueId || 'generic');
@@ -207,6 +210,8 @@ export class InteractionService {
           case 'CITIZEN': return 'CONVERSE';
           case 'ZONE_TRANSITION': return 'ENTER';
           case 'STASH': return 'ACCESS STORAGE';
+          case 'RIFTGATE': return 'ACCESS RIFT';
+          case 'PORTAL': return 'ENTER RIFT';
           default: return 'INTERACT';
       }
   }

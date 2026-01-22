@@ -87,6 +87,12 @@ export const HUB_ZONE: ZoneTemplate = {
           } 
       },
       
+      // RIFTGATE - The anchor point
+      {
+          type: 'INTERACTABLE', subType: 'RIFTGATE', x: 0, y: -200, 
+          data: { promptText: 'ACCESS RIFT NETWORK' }
+      },
+      
       // Flavor - Central Holo Map
       { type: 'DECORATION', subType: 'HOLO_TABLE', x: 0, y: 0, data: { color: '#06b6d4' } },
 
@@ -125,6 +131,7 @@ export const HUB_ZONE: ZoneTemplate = {
   metadata: {
     difficulty: 1.0,
     isInstanced: false,
-    playerStart: { x: 0, y: 150 } // Start in center plaza
+    playerStart: { x: 0, y: 150 },
+    hasRiftgate: true
   }
 };

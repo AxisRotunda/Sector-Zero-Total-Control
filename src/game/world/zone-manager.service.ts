@@ -16,6 +16,7 @@ import { ZoneTransitionState } from './models/zone-transition.types';
 import { SpatialHashService } from '../../systems/spatial-hash.service';
 import { ZoneHierarchyManagerService } from './zone-hierarchy-manager.service';
 import { Entity } from '../../models/game.models';
+import { WaypointService } from './waypoint.service';
 
 @Injectable({
   providedIn: 'root'
@@ -29,6 +30,7 @@ export class ZoneManagerService {
   private narrative = inject(NarrativeService);
   private spatialHash = inject(SpatialHashService);
   private hierarchy = inject(ZoneHierarchyManagerService);
+  private waypointService = inject(WaypointService);
 
   // Strategies
   private staticLoader = inject(StaticZoneLoader);
@@ -89,6 +91,12 @@ export class ZoneManagerService {
 
         // 6. Discovery & Events
         this.checkDiscovery(targetZoneId, targetConfig.displayName);
+        
+        // 7. Check Riftgate
+        if (targetConfig.template.metadata.hasRiftgate) {
+            this.waypointService.unlockWaypoint(targetZoneId);
+        }
+
         this.transitionState.set(ZoneTransitionState.COMPLETE);
         setTimeout(() => this.transitionState.set(ZoneTransitionState.IDLE), 500);
 
@@ -110,6 +118,10 @@ export class ZoneManagerService {
       
       await this.loadZoneStrategy(config.template);
       this.checkDiscovery(config.id, config.displayName);
+      
+      if (config.template.metadata.hasRiftgate) {
+          this.waypointService.unlockWaypoint(config.id);
+      }
   }
 
   clearZoneEntities(zoneId: string): void {

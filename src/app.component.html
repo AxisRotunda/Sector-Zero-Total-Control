@@ -1,6 +1,6 @@
 
 <div class="fixed inset-0 font-mono text-zinc-300 select-none overflow-hidden touch-none"
-     [class.cursor-none]="input.usingKeyboard() && !ui.isInventoryOpen() && !ui.isSkillsOpen() && !ui.isShopOpen() && !ui.isAbilitiesOpen() && !ui.isCodexOpen() && !ui.isJournalOpen() && !game.isInMenu() && !mapService.isFullMapOpen() && !mapService.isSettingsOpen()"
+     [class.cursor-none]="input.usingKeyboard() && !ui.isInventoryOpen() && !ui.isSkillsOpen() && !ui.isShopOpen() && !ui.isAbilitiesOpen() && !ui.isCodexOpen() && !ui.isJournalOpen() && !game.isInMenu() && !mapService.isFullMapOpen() && !mapService.isSettingsOpen() && !ui.isWorldMapOpen()"
      (touchstart)="handleGlobalTouch($event)">
   
   <canvas #gameCanvas class="absolute top-0 left-0 w-full h-full block bg-zinc-950"></canvas>
@@ -62,7 +62,7 @@
                (openJournal)="ui.openPanel('JOURNAL')"
                (openShop)="ui.openPanel('SHOP')"></app-hud>
 
-      @if (!ui.isSkillsOpen() && !ui.isShopOpen() && !ui.isAbilitiesOpen() && !ui.isCodexOpen() && !ui.isJournalOpen() && !mapService.isFullMapOpen() && !mapService.isSettingsOpen()) {
+      @if (!ui.isSkillsOpen() && !ui.isShopOpen() && !ui.isAbilitiesOpen() && !ui.isCodexOpen() && !ui.isJournalOpen() && !mapService.isFullMapOpen() && !mapService.isSettingsOpen() && !ui.isWorldMapOpen()) {
           
           <!-- DYNAMIC JOYSTICK ZONE (LEFT HALF) -->
           <div class="absolute top-20 bottom-0 left-0 w-1/2 z-10">
@@ -169,6 +169,18 @@
   @if (ui.isShopOpen()) { <app-shop (close)="ui.closeAll()"></app-shop> }
   @if (ui.isCodexOpen()) { <app-codex (close)="ui.closeAll()"></app-codex> }
   @if (ui.isJournalOpen()) { <app-mission-journal (close)="ui.closeAll()"></app-mission-journal> }
+  @if (ui.isWorldMapOpen()) { <app-world-map-modal (close)="ui.closeAll()"></app-world-map-modal> }
+
+  <!-- LOADING OVERLAY -->
+  @if (zoneManager.transitionState() !== 'IDLE' && zoneManager.transitionState() !== 'COMPLETE') {
+      <div class="absolute inset-0 z-[300] bg-black flex flex-col items-center justify-center animate-in fade-in">
+          <div class="text-3xl font-black text-white tracking-tighter mb-4 animate-pulse">LOADING SECTOR</div>
+          <div class="text-xs text-cyan-500 font-mono">{{ zoneManager.transitionState() }}...</div>
+          <div class="w-64 h-1 bg-zinc-800 mt-4 overflow-hidden">
+              <div class="h-full bg-cyan-500 animate-[loading_1s_ease-in-out_infinite] w-1/2"></div>
+          </div>
+      </div>
+  }
 
   <app-item-tooltip></app-item-tooltip>
   <app-dialogue-overlay></app-dialogue-overlay>
