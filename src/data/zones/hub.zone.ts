@@ -1,29 +1,49 @@
 
 import { ZoneTemplate } from "../../models/zone.models";
 
+// --- ARCHITECTURE STRATEGY: THE CROSS ---
+// A safe, enclosed central plaza with four cardinal extensions.
+// The layout emphasizes symmetry and defensibility.
+// Perimeter walls are thickened to prevent physics tunneling at high speeds.
+
+const WALL_THICKNESS = 200;
+const WALL_HEIGHT_OUTER = 400;
+const WALL_HEIGHT_INNER = 300;
+const PILLAR_HEIGHT = 380;
+
+const PLAZA_WIDTH = 1400; // X-axis span of north/south blocks
+const PLAZA_DEPTH = 1400; // Y-axis span of east/west blocks
+
+const PERIMETER_OFFSET_X = 800; // Distance from center to side walls
+const PERIMETER_OFFSET_Y = 900; // Distance from center to top/bottom corners
+
+const GATE_WIDTH = 200;
+const COLOR_PRIMARY = '#27272a';
+const COLOR_SECONDARY = '#18181b';
+
 // Procedural generation for symmetric structures
 const CORNER_BLOCKS = [
-  { x: 800, y: -900 },  // Top-Right
-  { x: 800, y: 900 },   // Bottom-Right
-  { x: -800, y: -900 }, // Top-Left
-  { x: -800, y: 900 }   // Bottom-Left
+  { x: PERIMETER_OFFSET_X, y: -PERIMETER_OFFSET_Y },  // Top-Right
+  { x: PERIMETER_OFFSET_X, y: PERIMETER_OFFSET_Y },   // Bottom-Right
+  { x: -PERIMETER_OFFSET_X, y: -PERIMETER_OFFSET_Y }, // Top-Left
+  { x: -PERIMETER_OFFSET_X, y: PERIMETER_OFFSET_Y }   // Bottom-Left
 ].map(pos => ({
   ...pos,
-  w: 200, 
+  w: WALL_THICKNESS, 
   h: 400, 
-  height: 400, 
-  color: '#27272a'
+  height: WALL_HEIGHT_OUTER, 
+  color: COLOR_PRIMARY
 }));
 
 const SIDE_WALLS = [
-  { x: 800, y: 0 },  // East
-  { x: -800, y: 0 }  // West
+  { x: PERIMETER_OFFSET_X, y: 0 },  // East
+  { x: -PERIMETER_OFFSET_X, y: 0 }  // West
 ].map(pos => ({
   ...pos,
-  w: 200, 
-  h: 1400, 
-  height: 300, 
-  color: '#27272a'
+  w: WALL_THICKNESS, 
+  h: PLAZA_DEPTH, 
+  height: WALL_HEIGHT_INNER, 
+  color: COLOR_PRIMARY
 }));
 
 export const HUB_ZONE: ZoneTemplate = {
@@ -38,7 +58,7 @@ export const HUB_ZONE: ZoneTemplate = {
   geometry: {
     walls: [
       // --- NORTH WALLS ---
-      { x: 0, y: -1000, w: 1400, h: 200, height: 400, color: '#27272a' },
+      { x: 0, y: -1000, w: PLAZA_WIDTH, h: WALL_THICKNESS, height: WALL_HEIGHT_OUTER, color: COLOR_PRIMARY },
       
       // --- PROCEDURAL PERIMETER ---
       ...CORNER_BLOCKS,
@@ -46,16 +66,16 @@ export const HUB_ZONE: ZoneTemplate = {
 
       // --- SOUTH WALLS & GATE ---
       // Left Flank
-      { x: -500, y: 1200, w: 800, h: 200, height: 350, color: '#18181b' },
+      { x: -500, y: 1200, w: 800, h: WALL_THICKNESS, height: 350, color: COLOR_SECONDARY },
       // Right Flank
-      { x: 500, y: 1200, w: 800, h: 200, height: 350, color: '#18181b' },
+      { x: 500, y: 1200, w: 800, h: WALL_THICKNESS, height: 350, color: COLOR_SECONDARY },
 
       // Gate Mechanism (Center Gap)
-      { x: 0, y: 1200, w: 200, h: 60, height: 300, color: '#3f3f46', type: 'GATE_SEGMENT', locked: true },
+      { x: 0, y: 1200, w: GATE_WIDTH, h: 60, height: 300, color: '#3f3f46', type: 'GATE_SEGMENT', locked: true },
 
       // Gate Pillars
-      { x: -120, y: 1200, w: 60, h: 220, height: 380, color: '#52525b', type: 'PILLAR' },
-      { x: 120, y: 1200, w: 60, h: 220, height: 380, color: '#52525b', type: 'PILLAR' },
+      { x: -120, y: 1200, w: 60, h: 220, height: PILLAR_HEIGHT, color: '#52525b', type: 'PILLAR' },
+      { x: 120, y: 1200, w: 60, h: 220, height: PILLAR_HEIGHT, color: '#52525b', type: 'PILLAR' },
 
       // --- INTERNAL STRUCTURES ---
       // The Spire

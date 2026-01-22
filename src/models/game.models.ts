@@ -3,7 +3,14 @@ import { Item } from "./item.models";
 
 export type SectorId = string;
 
-export interface Entity {
+// Standardized Interface for 3D Structures
+export interface Volumetric {
+    width?: number;  // X-axis span
+    depth?: number;  // Y-axis span (for top-down/iso collisions)
+    height?: number; // Z-axis span (visual height)
+}
+
+export interface Entity extends Volumetric {
   id: number;
   zoneId?: string; 
   chunkId?: string; // Spatial Partition ID
@@ -15,11 +22,6 @@ export interface Entity {
   x: number;
   y: number;
   z: number;
-  
-  // Dimensions (Volumetric)
-  width?: number;  // X-axis span
-  depth?: number;  // Y-axis span (previously often implied equal to width or height)
-  height?: number; // Z-axis span
   
   // Render Sorting
   isoDepth?: number; 

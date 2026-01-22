@@ -15,6 +15,7 @@ export class PhysicsService {
 
   // Optimization constants
   private readonly SPATIAL_BUFFER_RATIO = 1.5;
+  private readonly COLLISION_QUERY_RATIO = 1.5; // Proportional buffer for collision checks
   private readonly MIN_SEPARATION_FORCE = 0.01;
 
   public updateEntityPhysics(e: Entity, stats?: { speed: number }, inputVec?: { x: number, y: number }): boolean {
@@ -117,8 +118,11 @@ export class PhysicsService {
       const radius = e.radius || 20;
       const zoneId = this.world.currentZone().id;
       
+      // Optimization: Dynamic query buffer based on entity size
+      const queryRadius = radius * this.COLLISION_QUERY_RATIO;
+      
       // Check Dynamic Entities via Spatial Hash
-      const nearbyDynamic = this.spatialHash.query(e.x, e.y, radius + 50, zoneId); 
+      const nearbyDynamic = this.spatialHash.query(e.x, e.y, queryRadius, zoneId); 
       
       // Check Static Entities via Chunk Manager
       const nearbyStatic = this.chunkManager.getVisibleStaticEntities(
@@ -134,8 +138,9 @@ export class PhysicsService {
               if (obs.locked === false) continue; // Skip open doors
 
               // Dimensions: Priority to Depth (Y-axis in collision/render)
+              // Standardized Logic: Explicit Depth > Explicit Width > Default 40
               const colW = obs.width || 40;
-              const colD = obs.depth || obs.width || 40;
+              const colD = obs.depth ?? (obs.width || 40);
 
               // AABB vs Circle
               const halfW = colW / 2;
