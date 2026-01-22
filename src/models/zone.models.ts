@@ -39,6 +39,12 @@ export interface ZoneExit {
   locked?: boolean;
 }
 
+export interface RenderLayerConfig {
+  zIndex: number;
+  sortBy?: 'position' | 'y';
+  dynamic?: boolean;
+}
+
 export interface ZoneTemplate {
   id: string;
   name: string;
@@ -52,6 +58,14 @@ export interface ZoneTemplate {
   childZoneIds?: string[];
 
   geometry: ZoneGeometry;
+  
+  // Phase 2: Render Layer Metadata
+  renderLayers?: {
+    floor?: RenderLayerConfig;
+    walls?: RenderLayerConfig;
+    roofs?: RenderLayerConfig;
+    occluders?: RenderLayerConfig;
+  };
   
   entities: {
     static: ZoneEntityDef[]; // NPCs, Decorations (Hash-only)
