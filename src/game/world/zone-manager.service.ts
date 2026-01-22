@@ -166,8 +166,15 @@ export class ZoneManagerService {
 
       // Validate Configuration
       if (config.lifecycle === ZoneLifecycle.CHECKPOINT && isProcedural) {
-          console.warn(`[ZoneManager] Warning: Zone '${zoneId}' is configured as CHECKPOINT but is Procedural. Geometry layout may not persist correctly.`);
+          console.warn(
+            `[ZoneManager] CHECKPOINT lifecycle on procedural zone "${zoneId}" will not persist layout geometry. ` +
+            `Consider using INSTANCED or converting to static template.`
+          );
       }
+
+      // NOTE: Procedural zones cannot persist layout geometry.
+      // CHECKPOINT/PERSISTENT procedural zones will restore entities but regenerate walls.
+      // This is acceptable for INSTANCED dungeons; avoid CHECKPOINT on procedural.
 
       // Lifecycle Switch
       let shouldLoadFromSnapshot = false;
