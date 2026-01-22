@@ -158,41 +158,65 @@ export class RenderService {
 
   private prepareLighting(player: Entity, renderList: (Entity | Particle)[], cam: Camera, w: number, h: number) {
       this.lighting.clear();
+      const presets = RENDER_CONFIG.LIGHTING.PRESETS;
       
       // Player Dynamic Light
       this.lighting.registerLight({
           id: 'PLAYER_MAIN',
           x: player.x,
           y: player.y,
-          z: 40,
-          radius: 400,
-          intensity: 1.0,
-          color: '#ffffff',
-          type: 'DYNAMIC'
+          type: 'DYNAMIC',
+          ...presets.PLAYER_MAIN
       });
 
-      // Extract Lights from Render List (Entities that emit light)
-      // This includes dynamic projectiles and static decor that is visible
+      // Extract Lights from Render List
       const len = renderList.length;
       for (let i = 0; i < len; i++) {
-          const e = renderList[i];
-          if (!('type' in e)) continue; // Skip particles for now
-          const ent = e as Entity;
+          const obj = renderList[i];
+          
+          if ('life' in obj) {
+              // Particle Light
+              const p = obj as Particle;
+              if (p.emitsLight) {
+                  this.lighting.registerLight({
+                      id: `LP_${i}`,
+                      x: p.x, y: p.y, z: p.z || presets.PARTICLE.z,
+                      radius: p.sizeStart * presets.PARTICLE.radiusMultiplier,
+                      intensity: p.life, // Fade with life
+                      color: p.color,
+                      type: 'DYNAMIC'
+                  });
+              }
+              continue;
+          }
+
+          const ent = obj as Entity;
 
           if (ent.type === 'DECORATION') {
               if (ent.subType === 'STREET_LIGHT') {
-                  this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, z: 250, radius: 450, intensity: 0.8, color: '#fbbf24', type: 'STATIC' });
+                  this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, type: 'STATIC', ...presets.STREET_LIGHT });
               } else if (ent.subType === 'NEON') {
-                  this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, z: 50, radius: 250, intensity: 0.6, color: ent.color, type: 'STATIC' });
+                  this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, color: ent.color, type: 'STATIC', ...presets.NEON });
               } else if (ent.subType === 'DYNAMIC_GLOW') {
-                  this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, z: 10, radius: 200, intensity: 0.5, color: ent.color, type: 'PULSE', flickerSpeed: ent.data?.pulseSpeed });
+                  this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, color: ent.color, type: 'PULSE', flickerSpeed: ent.data?.pulseSpeed, ...presets.DYNAMIC_GLOW });
               }
           }
           else if (ent.type === 'HITBOX' && ent.source !== 'PLAYER') {
-              this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, z: 20, radius: ent.radius * 4, intensity: 0.7, color: ent.color, type: 'DYNAMIC' });
+              this.lighting.registerLight({ 
+                  id: `L_${ent.id}`, 
+                  x: ent.x, y: ent.y, 
+                  color: ent.color, 
+                  type: 'DYNAMIC',
+                  radius: ent.radius * presets.PROJECTILE.radiusMultiplier,
+                  intensity: presets.PROJECTILE.intensity,
+                  z: presets.PROJECTILE.z
+              });
           }
           else if (ent.type === 'EXIT' && !ent.locked) {
-              this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, z: 10, radius: 300, intensity: 0.5, color: ent.color, type: 'STATIC' });
+              this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, color: ent.color, type: 'STATIC', ...presets.EXIT });
+          }
+          else if (ent.type === 'ENEMY' && ent.subType === 'BOSS') {
+              this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, radius: 200, intensity: 0.6, color: '#ef4444', z: 30, type: 'DYNAMIC' });
           }
       }
 

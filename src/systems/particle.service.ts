@@ -1,3 +1,4 @@
+
 import { Injectable } from '@angular/core';
 import { Particle } from '../models/game.models';
 import { ObjectPool } from '../utils/object-pool';
@@ -6,6 +7,7 @@ import * as BALANCE from '../config/balance.config';
 export interface ParticleOptions {
     x: number; y: number; z: number; color: string; count: number; speed: number;
     life?: number; size?: number; type?: 'circle' | 'square' | 'star' | 'spark'; composite?: GlobalCompositeOperation;
+    emitsLight?: boolean;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -16,7 +18,12 @@ export class ParticleService {
   constructor() {
     this.particlePool = new ObjectPool<Particle>(
       () => ({ x:0, y:0, z:0, vx:0, vy:0, vz:0, color:'', life:0, sizeStart:0, sizeEnd:0, alphaStart:0, alphaEnd:0, shape:'circle', rotation:0, rotSpeed:0 }),
-      (p) => { p.life = 0; p.composite = undefined; return p; },
+      (p) => { 
+          p.life = 0; 
+          p.composite = undefined; 
+          p.emitsLight = false; 
+          return p; 
+      },
       300
     );
   }
@@ -34,6 +41,7 @@ export class ParticleService {
           p.sizeStart = opts.size || 2; p.sizeEnd = 0; p.alphaStart = 1; p.alphaEnd = 0;
           p.shape = opts.type || 'circle'; p.rotation = Math.random() * 360; p.rotSpeed = (Math.random() - 0.5) * 10;
           p.composite = opts.composite;
+          p.emitsLight = opts.emitsLight;
           this.particles.push(p);
       }
   }

@@ -156,6 +156,7 @@ export interface Particle {
   rotation: number;
   rotSpeed: number;
   composite?: GlobalCompositeOperation;
+  emitsLight?: boolean;
   
   // Render Sorting
   isoDepth?: number;

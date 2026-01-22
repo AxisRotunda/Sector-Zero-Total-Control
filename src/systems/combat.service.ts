@@ -157,7 +157,8 @@ export class CombatService {
       size: 3,
       type: 'square',
       life: 0.6,
-      composite: 'lighter'
+      composite: 'lighter',
+      emitsLight: true // Added light emission
     });
     // Secondary purple burst
     this.particleService.addParticles({
@@ -212,7 +213,10 @@ export class CombatService {
       e.state = 'DEAD';
       if (e.subType === 'BARREL') {
           this.sound.play('EXPLOSION'); this.player.addShake(BALANCE.SHAKE.EXPLOSION);
-          this.particleService.addParticles({x: e.x, y: e.y, z: 10, color: '#ef4444', count: 30, speed: 8, size: 4, type: 'square'});
+          this.particleService.addParticles({
+              x: e.x, y: e.y, z: 10, color: '#ef4444', count: 30, speed: 8, size: 4, type: 'square',
+              emitsLight: true // Added light emission
+          });
           const explosion = this.entityPool.acquire('HITBOX');
           explosion.source = 'ENVIRONMENT'; explosion.x = e.x; explosion.y = e.y; explosion.radius = BALANCE.ENVIRONMENT.BARREL_EXPLOSION_RADIUS; explosion.hp = BALANCE.ENVIRONMENT.BARREL_EXPLOSION_DMG;
           explosion.color = '#f87171'; explosion.state = 'ATTACK'; explosion.timer = 5; explosion.status.stun = BALANCE.ENVIRONMENT.BARREL_EXPLOSION_STUN;

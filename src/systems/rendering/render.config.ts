@@ -17,7 +17,16 @@ export const RENDER_CONFIG = {
     ENABLED: true,
     RESOLUTION_SCALE: 0.5,
     BLUR_QUALITY: 'medium',
-    BASE_AMBIENT: 'rgba(0, 0, 0, 0.7)'
+    BASE_AMBIENT: 'rgba(0, 0, 0, 0.7)',
+    PRESETS: {
+      PLAYER_MAIN: { radius: 400, intensity: 1.0, color: '#ffffff', z: 40 },
+      STREET_LIGHT: { radius: 450, intensity: 0.8, color: '#fbbf24', z: 250 },
+      NEON: { radius: 250, intensity: 0.6, z: 50 },
+      DYNAMIC_GLOW: { radius: 200, intensity: 0.5, z: 10 },
+      PROJECTILE: { radiusMultiplier: 4, intensity: 0.7, z: 20 },
+      EXIT: { radius: 300, intensity: 0.5, z: 10 },
+      PARTICLE: { radiusMultiplier: 3, intensityDivisor: 100, z: 10 }
+    }
   },
 
   CAMERA: {
