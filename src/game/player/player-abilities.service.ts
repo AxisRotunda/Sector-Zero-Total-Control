@@ -9,6 +9,8 @@ import { ParticleService } from '../../systems/particle.service';
 import { InventoryService } from '../inventory.service';
 import { EventBusService } from '../../core/events/event-bus.service';
 import { GameEvents } from '../../core/events/game-events';
+import { HapticService } from '../../services/haptic.service';
+import { Entity } from '../../models/game.models';
 
 @Injectable({ providedIn: 'root' })
 export class PlayerAbilitiesService {
@@ -19,6 +21,7 @@ export class PlayerAbilitiesService {
   private particleService = inject(ParticleService);
   private inventory = inject(InventoryService);
   private eventBus = inject(EventBusService);
+  private haptic = inject(HapticService);
 
   cooldowns = signal({ primary: 0, secondary: 0, dash: 0, utility: 0 });
   maxCooldowns = signal({ primary: BALANCE.COOLDOWNS.PRIMARY, secondary: BALANCE.COOLDOWNS.SECONDARY, dash: BALANCE.COOLDOWNS.DASH, utility: BALANCE.COOLDOWNS.UTILITY });
@@ -172,5 +175,51 @@ export class PlayerAbilitiesService {
         });
     }
   }
+
+  spawnPrimaryAttackHitbox(player: Entity) {
+      const stats = this.stats.playerStats();
+      let reach = BALANCE.ABILITIES.PRIMARY_REACH_BASE + (stats.damage * BALANCE.ABILITIES.PRIMARY_REACH_DMG_SCALE);
+      let dmgMult = 1.0;
+      let knockback = 5;
+      let color = '#f97316';
+      let stun = 0;
+
+      // Combo scaling
+      const combo = player.comboIndex || 0;
+      if (combo === 1) {
+          reach *= 1.2;
+          dmgMult = 1.2;
+          knockback = 10;
+          color = '#fb923c';
+      } else if (combo === 2) {
+          reach *= 1.5;
+          dmgMult = 2.0;
+          knockback = 25;
+          stun = 15;
+          color = '#ea580c';
+      }
+
+      // Pass zoneId to projectile
+      const hitbox = this.entityPool.acquire('HITBOX', undefined, player.zoneId);
+      hitbox.source = 'PLAYER'; 
+      hitbox.x = player.x + Math.cos(player.angle) * 30; 
+      hitbox.y = player.y + Math.sin(player.angle) * 30; 
+      hitbox.z = 10;
+      hitbox.vx = Math.cos(player.angle) * (2 + combo); 
+      hitbox.vy = Math.sin(player.angle) * (2 + combo);
+      hitbox.angle = player.angle; 
+      hitbox.radius = reach; 
+      hitbox.hp = stats.damage * dmgMult; 
+      hitbox.maxHp = hitbox.hp; 
+      hitbox.color = color; 
+      hitbox.state = 'ATTACK'; 
+      hitbox.timer = 8;
+      hitbox.knockbackForce = knockback;
+      hitbox.status.stun = stun;
+      
+      this.world.entities.push(hitbox);
+      this.haptic.impactMedium(); 
+  }
+
   reset() { this.cooldowns.set({ primary: 0, secondary: 0, dash: 0, utility: 0 }); this.currentCombo.set(0); }
 }

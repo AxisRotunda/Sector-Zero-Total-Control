@@ -183,7 +183,9 @@ export class PlayerControlService {
                     player.animFrameTimer = 0; player.animFrame++;
                     if (player.animFrame < ATTACK_STARTUP_FRAMES) player.animPhase = 'startup';
                     else if (player.animFrame < ATTACK_STARTUP_FRAMES + ATTACK_ACTIVE_FRAMES) {
-                        if (player.animPhase !== 'active') this.spawnPlayerPrimaryHitbox(player);
+                        if (player.animPhase !== 'active') {
+                            this.playerService.abilities.spawnPrimaryAttackHitbox(player);
+                        }
                         player.animPhase = 'active';
                     } else player.animPhase = 'recovery';
                     
@@ -199,50 +201,5 @@ export class PlayerControlService {
                 } 
                 break;
         }
-    }
-
-    private spawnPlayerPrimaryHitbox(player: Entity) {
-        const stats = this.playerService.playerStats();
-        let reach = BALANCE.ABILITIES.PRIMARY_REACH_BASE + (stats.damage * BALANCE.ABILITIES.PRIMARY_REACH_DMG_SCALE);
-        let dmgMult = 1.0;
-        let knockback = 5;
-        let color = '#f97316';
-        let stun = 0;
-
-        // Combo scaling
-        const combo = player.comboIndex || 0;
-        if (combo === 1) {
-            reach *= 1.2;
-            dmgMult = 1.2;
-            knockback = 10;
-            color = '#fb923c';
-        } else if (combo === 2) {
-            reach *= 1.5;
-            dmgMult = 2.0;
-            knockback = 25;
-            stun = 15;
-            color = '#ea580c';
-        }
-
-        // Pass zoneId to projectile
-        const hitbox = this.entityPool.acquire('HITBOX', undefined, player.zoneId);
-        hitbox.source = 'PLAYER'; 
-        hitbox.x = player.x + Math.cos(player.angle) * 30; 
-        hitbox.y = player.y + Math.sin(player.angle) * 30; 
-        hitbox.z = 10;
-        hitbox.vx = Math.cos(player.angle) * (2 + combo); 
-        hitbox.vy = Math.sin(player.angle) * (2 + combo);
-        hitbox.angle = player.angle; 
-        hitbox.radius = reach; 
-        hitbox.hp = stats.damage * dmgMult; 
-        hitbox.maxHp = hitbox.hp; 
-        hitbox.color = color; 
-        hitbox.state = 'ATTACK'; 
-        hitbox.timer = 8;
-        hitbox.knockbackForce = knockback;
-        hitbox.status.stun = stun;
-        
-        this.world.entities.push(hitbox);
-        this.haptic.impactMedium(); 
     }
 }

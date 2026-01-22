@@ -1,3 +1,4 @@
+
 import { Injectable, signal, inject, OnDestroy, computed } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { PlayerProgressionService } from './player-progression.service';
@@ -73,7 +74,9 @@ export class PlayerService implements OnDestroy {
           currentXp: this.progression.currentXp(), 
           credits: this.progression.credits(), 
           playerHp: this.stats.playerHp(), 
-          currentSectorId: this.currentSectorId() 
+          currentSectorId: this.currentSectorId(),
+          autoCombat: this.autoCombatEnabled(),
+          psiEnergy: this.stats.psionicEnergy()
       }; 
   }
 
@@ -85,6 +88,8 @@ export class PlayerService implements OnDestroy {
         this.stats.playerHp.set(data.playerHp || this.stats.playerStats().hpMax);
         this.currentSectorId.set(data.currentSectorId || 'HUB');
         this.currentFloor.set(data.currentSectorId === 'HUB' ? 0 : 1);
+        if (data.autoCombat !== undefined) this.autoCombatEnabled.set(data.autoCombat);
+        if (data.psiEnergy !== undefined) this.stats.psionicEnergy.set(data.psiEnergy);
     }
   }
 }
