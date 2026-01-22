@@ -13,6 +13,10 @@ export class PhysicsService {
   private chunkManager = inject(ChunkManagerService);
   private world = inject(WorldService);
 
+  // Optimization constants
+  private readonly SPATIAL_BUFFER_RATIO = 1.5;
+  private readonly MIN_SEPARATION_FORCE = 0.01;
+
   public updateEntityPhysics(e: Entity, stats?: { speed: number }, inputVec?: { x: number, y: number }): boolean {
     const ACCELERATION = 2.0; 
     const FRICTION = 0.80; 
@@ -36,7 +40,10 @@ export class PhysicsService {
     // 1.5 Separation / Steering Behaviors
     if ((e.type === 'ENEMY' || e.type === 'PLAYER') && e.state !== 'DEAD') {
         const zoneId = this.world.currentZone().id;
-        const neighbors = this.spatialHash.query(e.x, e.y, e.radius * 1.5, zoneId);
+        // Optimization: Use proportional buffer instead of hardcoded +20/+50
+        const queryRadius = e.radius * this.SPATIAL_BUFFER_RATIO;
+        const neighbors = this.spatialHash.query(e.x, e.y, queryRadius, zoneId);
+        
         for (const n of neighbors) {
             if (n.id === e.id || n.state === 'DEAD' || n.type === 'WALL' || n.type === 'DECORATION' || n.type === 'PICKUP') continue;
             
@@ -51,6 +58,9 @@ export class PhysicsService {
                 const px = (e.x - n.x) * pushStrength * force;
                 const py = (e.y - n.y) * pushStrength * force;
                 
+                // Optimization: Early exit for negligible forces
+                if (Math.abs(px) < this.MIN_SEPARATION_FORCE && Math.abs(py) < this.MIN_SEPARATION_FORCE) continue;
+
                 e.vx += px;
                 e.vy += py;
             }
@@ -111,17 +121,11 @@ export class PhysicsService {
       const nearbyDynamic = this.spatialHash.query(e.x, e.y, radius + 50, zoneId); 
       
       // Check Static Entities via Chunk Manager
-      // Note: We use a lightweight mock Camera to query the ChunkManager at the entity's position
-      // This reuses the spatial partitioning logic of the chunk system.
-      // Optimization: We ask for a small viewport around the entity.
       const nearbyStatic = this.chunkManager.getVisibleStaticEntities(
           { x: e.x, y: e.y, zoom: 1 } as any, 
           200, 200 // Small query window
       );
 
-      // Combine candidates
-      // Note: In high perf scenarios, iterate separately to avoid allocation of combined array
-      
       // 1. Static Check (Walls)
       const lenStatic = nearbyStatic.length;
       for (let i = 0; i < lenStatic; i++) {
@@ -129,9 +133,9 @@ export class PhysicsService {
           if (obs.type === 'WALL') {
               if (obs.locked === false) continue; // Skip open doors
 
-              // Dimensions: Prefer specific axes, fallback to width if uniform
+              // Dimensions: Priority to Depth (Y-axis in collision/render)
               const colW = obs.width || 40;
-              const colD = obs.depth || obs.width || 40; // Depth is Y-axis in collision
+              const colD = obs.depth || obs.width || 40;
 
               // AABB vs Circle
               const halfW = colW / 2;
