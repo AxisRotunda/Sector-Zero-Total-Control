@@ -1,5 +1,5 @@
 
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, computed } from '@angular/core';
 import { WorldService } from './world/world.service';
 import { PlayerService } from './player/player.service';
 import { InputService } from '../services/input.service';
@@ -13,23 +13,33 @@ export class CameraService {
 
   private targetZoom = RENDER_CONFIG.CAMERA.BASE_ZOOM;
 
+  // Signal for UI scaling based on zoom, useful for keeping UI elements consistent size
+  // or adapting them to the view depth.
+  uiScale = computed(() => {
+      const z = this.world.camera.zoom;
+      // Inverse scale clamped to sane limits
+      return Math.max(0.8, Math.min(1.2, 1 / z));
+  });
+
   constructor() {
       // Subscribe to Input Zoom events (Wheel / Pinch)
       this.input.zoomEvents.subscribe((delta) => {
           // Dynamic Sensitivity: Scale sensitivity based on current zoom level
-          // When Zoomed IN (High Value), we want higher sensitivity.
-          // When Zoomed OUT (Low Value), we want lower sensitivity for fine tuning.
+          // When Zoomed IN (High Value), we want higher sensitivity for twitch adjustments.
+          // When Zoomed OUT (Low Value), we want lower sensitivity for broad tactical framing.
           const config = RENDER_CONFIG.CAMERA;
           const range = config.MAX_ZOOM - config.MIN_ZOOM;
-          const zoomProgress = (this.targetZoom - config.MIN_ZOOM) / range; // 0 to 1
           
-          // Lerp between Min and Max sensitivity
+          // 0.0 (Zoomed out completely) to 1.0 (Zoomed in completely)
+          const zoomProgress = (this.targetZoom - config.MIN_ZOOM) / range; 
+          
+          // Interpolate sensitivity
           const sensitivity = config.MIN_ZOOM_SENSITIVITY + 
               (config.MAX_ZOOM_SENSITIVITY - config.MIN_ZOOM_SENSITIVITY) * zoomProgress;
 
           this.targetZoom -= delta * sensitivity;
           
-          // Clamp
+          // Hard Clamp
           this.targetZoom = Math.max(config.MIN_ZOOM, Math.min(config.MAX_ZOOM, this.targetZoom));
       });
   }
@@ -40,27 +50,33 @@ export class CameraService {
     const config = RENDER_CONFIG.CAMERA;
     
     // --- 1. Zoom-Responsive Look-Ahead ---
-    // Look ahead more when zoomed out (Tactical view) to see off-screen threats
-    const zoomFactor = 1 / Math.max(0.1, camera.zoom); 
+    // The "Eye of the Operator" projects focus forward based on velocity.
+    // This projection scales inversely with zoom: when zoomed out (Tactical), we look further ahead.
+    // Formula: Gentler curve than pure inverse.
+    const zoomFactor = 1.0 + (1.0 - camera.zoom) * 0.5;
+    
     const lookAheadX = player.vx * config.LOOK_AHEAD_DIST * zoomFactor;
     const lookAheadY = player.vy * config.LOOK_AHEAD_DIST * zoomFactor;
     
-    const targetX = player.x + lookAheadX;
-    const targetY = player.y + lookAheadY;
+    const rawTargetX = player.x + lookAheadX;
+    const rawTargetY = player.y + lookAheadY;
     
-    // --- 2. World Bounds Checking ---
+    // --- 2. Soft-Clamp Bounds ---
+    // We clamp the TARGET, not the camera position directly. 
+    // This allows the damping (lerp) to naturally decelerate the camera as it approaches the "wall"
+    // created by the bounds, acting as a soft cushion rather than a hard stop.
     const bounds = this.world.mapBounds;
-    // Clamp the target position to the world edges
-    // We add a margin so the player doesn't have to hug the wall to see it
-    const margin = 100;
-    const clampedX = Math.max(bounds.minX + margin, Math.min(bounds.maxX - margin, targetX));
-    const clampedY = Math.max(bounds.minY + margin, Math.min(bounds.maxY - margin, targetY));
+    const margin = config.BOUNDS_MARGIN;
+    
+    const clampedTargetX = Math.max(bounds.minX + margin, Math.min(bounds.maxX - margin, rawTargetX));
+    const clampedTargetY = Math.max(bounds.minY + margin, Math.min(bounds.maxY - margin, rawTargetY));
 
-    // --- 3. Smooth Damping for Position ---
-    camera.x += (clampedX - camera.x) * config.POSITION_DAMPING;
-    camera.y += (clampedY - camera.y) * config.POSITION_DAMPING;
+    // --- 3. Smooth Damping (Lerp) ---
+    // Interpolate current position towards the clamped target.
+    camera.x += (clampedTargetX - camera.x) * config.POSITION_DAMPING;
+    camera.y += (clampedTargetY - camera.y) * config.POSITION_DAMPING;
 
-    // --- 4. Smooth Damping for Zoom ---
+    // --- 4. Smooth Zoom Damping ---
     if (Math.abs(camera.zoom - this.targetZoom) > 0.001) {
         camera.zoom += (this.targetZoom - camera.zoom) * config.SMOOTH_FACTOR;
     }

@@ -1,8 +1,9 @@
+
 # Feature Breakdown
 
 **META**
 - **ID**: `feature-breakdown`
-- **LAST_UPDATED**: `2026-01-26T10:00:00Z`
+- **LAST_UPDATED**: `2026-01-29T12:00:00Z`
 - **DESCRIPTION**: A human-oriented guide mapping major game features to the responsible codebase aspects. This helps in quickly locating code relevant to a specific feature.
 
 ---
@@ -29,7 +30,7 @@
 | **Floor State Persistence**| `world-state.service.ts`, `game-engine.service.ts`                                  | Caches the state of visited sectors in memory so they are not reset upon returning.                             |
 | **Game Save/Load**         | `persistence.service.ts`, `game-engine.service.ts`                                  | Serializes and deserializes the entire game state (player progress, inventory, maps) to/from `localStorage`.    |
 | **Time Management**        | `time.service.ts`, `game-engine.service.ts`                                         | Handles the game clock, delta time accumulation, slow-motion effects, and hit-stop pauses.                      |
-| **Camera & Rendering**     | `render.service.ts`, `floor-renderer.service.ts`, `sprite-cache.service.ts`         | Renders all game objects in an isometric view. Uses **Sprite Caching** and **Off-screen Canvas** optimization.  |
+| **Camera & Rendering**     | `render.service.ts`, `camera.service.ts`, `floor-renderer.service.ts`               | **Dynamic Camera**: Handles smooth follow, zoom-based look-ahead, and soft bounds. **Rendering**: Isometric projection pipeline. |
 | **Interactive Map**        | `map.service.ts`, `map.component.ts`, `settings.component.ts`                       | Manages map discovery ("fog of war"), markers, and displays a mini-map and full-screen tactical map.            |
 
 ### Combat & AI

@@ -26,8 +26,9 @@ export const RENDER_CONFIG = {
     MAX_ZOOM: 1.4,
     ZOOM_SPEED: 0.05, // Speed of interpolation
     SMOOTH_FACTOR: 0.1,
-    POSITION_DAMPING: 0.08, // Tighter tracking (up from 0.05)
+    POSITION_DAMPING: 0.08, // Tighter tracking
     LOOK_AHEAD_DIST: 20,
+    BOUNDS_MARGIN: 100, // Cushion against map edges
     
     // Dynamic Sensitivity Curve
     MIN_ZOOM_SENSITIVITY: 0.0005, // Slower when zoomed out (Tactical)
