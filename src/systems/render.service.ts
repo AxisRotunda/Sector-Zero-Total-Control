@@ -1,6 +1,6 @@
 
 import { Injectable, inject, signal } from '@angular/core';
-import { Entity, Zone, FloatingText, Camera, Particle } from '../../models/game.models';
+import { Entity, Zone, FloatingText, Camera, Particle } from '../models/game.models';
 import { WorldService } from '../game/world/world.service';
 import { FloorRendererService } from './rendering/floor-renderer.service';
 import { StructureRendererService } from './rendering/structure-renderer.service';
@@ -14,7 +14,7 @@ import { PlayerService } from '../game/player/player.service';
 import { EntitySorterService } from './rendering/entity-sorter.service';
 import { RENDER_CONFIG } from './rendering/render.config';
 import { InputService } from '../services/input.service';
-import { SpatialHashService } from '../spatial-hash.service';
+import { SpatialHashService } from './spatial-hash.service';
 import { InteractionService } from '../services/interaction.service';
 import { ChunkManagerService } from '../game/world/chunk-manager.service';
 import { LightingService } from './rendering/lighting.service';
