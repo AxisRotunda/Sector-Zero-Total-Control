@@ -14,6 +14,7 @@ import { WorldStateService } from './world/world-state.service';
 import { TimeService } from './time.service';
 import { MapService } from '../services/map.service';
 import { ZoneManagerService } from './world/zone-manager.service';
+import { LightingService } from '../systems/rendering/lighting.service';
 
 @Injectable({
   providedIn: 'root'
@@ -35,6 +36,7 @@ export class GameEngineService {
   private timeService = inject(TimeService);
   private mapService = inject(MapService);
   private zoneManager = inject(ZoneManagerService);
+  private lighting = inject(LightingService);
 
   isInMenu = signal(true);
 
@@ -67,7 +69,6 @@ export class GameEngineService {
               this.mapService.setSector('HUB');
               setTimeout(() => this.tutorial.trigger('START'), 1000);
           } else {
-              // Load the current sector tracked in player service
               this.zoneManager.initWorld(this.player.currentSectorId() || 'HUB');
               this.mapService.setSector(this.player.currentSectorId() || 'HUB');
           }
@@ -76,7 +77,6 @@ export class GameEngineService {
   }
 
   changeFloor(targetZoneId: string) {
-      // Delegate completely to ZoneManager
       this.zoneManager.transitionToZone(targetZoneId);
       this.mapService.setSector(targetZoneId);
       this.persistence.saveGame();
@@ -114,21 +114,21 @@ export class GameEngineService {
     if (this.world.player.hp <= 0) return;
 
     this.player.updatePerFrame();
-    
-    // CRITICAL FIX: Player Input/Physics Update was missing
     this.playerControl.update(this.timeService.globalTime);
-    
     this.entityUpdater.update(this.timeService.globalTime);
     this.worldEffects.update();
+    
+    // Lighting Update
+    this.lighting.update(1, this.timeService.globalTime);
+    this.lighting.updateGlobalIllumination(this.world.currentZone()); // Check if zone changed
     
     // Check floor changes
     const request = this.playerControl.requestedFloorChange();
     if (request) {
         if (request === 'UP' || request === 'DOWN') {
-             console.warn('Generic direction exit triggered. Mapping to default sectors.');
-             // Fallback for generic exits if any remain
-             if (this.player.currentSectorId() === 'HUB' && request === 'DOWN') this.changeFloor('SECTOR_9');
-             else if (this.player.currentSectorId() === 'SECTOR_9' && request === 'UP') this.changeFloor('HUB');
+             // Fallback
+             if (this.player.currentSectorId() === 'HUB' && request === 'DOWN') this.changeFloor('SECTOR_9_N');
+             else if (this.player.currentSectorId() === 'SECTOR_9_N' && request === 'UP') this.changeFloor('HUB');
         } else {
              this.changeFloor(request);
         }

@@ -14,9 +14,10 @@ import { PlayerService } from '../game/player/player.service';
 import { EntitySorterService } from './rendering/entity-sorter.service';
 import { RENDER_CONFIG } from './rendering/render.config';
 import { InputService } from '../services/input.service';
-import { SpatialHashService } from './spatial-hash.service';
+import { SpatialHashService } from '../spatial-hash.service';
 import { InteractionService } from '../services/interaction.service';
 import { ChunkManagerService } from '../game/world/chunk-manager.service';
+import { LightingService } from './rendering/lighting.service';
 
 @Injectable({
   providedIn: 'root'
@@ -32,6 +33,7 @@ export class RenderService {
   private spatialHash = inject(SpatialHashService);
   private chunkManager = inject(ChunkManagerService);
   private interaction = inject(InteractionService);
+  private lighting = inject(LightingService);
   
   // Renderers
   private floorRenderer = inject(FloorRendererService);
@@ -48,16 +50,14 @@ export class RenderService {
   private isHighEnd = true;
   private camCenter = { x: 0, y: 0 };
 
-  // Optimization: Reusable render list to prevent GC pressure
   private renderList: (Entity | Particle)[] = [];
-  private staticEntities: Entity[] = []; // Reused for reference
+  private staticEntities: Entity[] = []; 
 
   init(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d', { alpha: false });
     this.inputService.setCanvas(canvas);
     
-    // Performance Check
     this.isHighEnd = navigator.hardwareConcurrency > 4 && !/Mobile|Android/.test(navigator.userAgent);
     
     this.resize();
@@ -112,48 +112,92 @@ export class RenderService {
     const w = this.canvas.width;
     const h = this.canvas.height;
     
-    // 1. Setup Frame
+    // 1. Prepare Scene (Logic Phase)
+    // Gather renderable entities and sort them
+    this.prepareRenderList(cam, zone, entities, player, particles, w, h);
+    
+    // Prepare Lights (Culling & Extraction)
+    this.prepareLighting(player, this.renderList, cam, w, h);
+
+    // 2. Draw Frame
     this.ctx.fillStyle = '#000000';
     this.ctx.fillRect(0, 0, w, h);
     this.ctx.save();
     
-    // 2. Camera Transform
+    // Camera Transform
     this.applyCameraTransform(cam, w, h, shake);
 
-    // 3. Prepare Render Lists (Culling & Sorting)
-    // Mutates this.renderList in place to avoid allocations
-    this.prepareRenderList(cam, zone, entities, player, particles, w, h);
-
-    // 4. Background Pass
+    // 3. Background Pass
     this.floorRenderer.drawFloor(this.ctx, cam, zone, this.world.mapBounds, w, h);
 
-    // 5. Shadow Pass (High End Only)
+    // 4. Shadow Pass (High End Only)
     if (this.isHighEnd) {
         this.drawShadows(this.renderList);
     }
 
-    // 6. Main Geometry Pass
+    // 5. Main Geometry Pass (Sorted)
     this.drawGeometry(this.renderList, zone);
 
-    // 7. Occlusion / X-Ray Pass
-    // Uses this.staticEntities which was updated in prepareRenderList
+    // 6. Occlusion / X-Ray Pass
     this.drawOcclusion(player, this.staticEntities);
 
-    // 8. Visual Effects (Particles, Weather)
-    // Note: renderList is typed as (Entity | Particle)[], casting for effect renderer safety if needed
+    // 7. Visual Effects
     this.effectRenderer.drawGlobalEffects(this.ctx, this.renderList as Entity[], player, zone, rainDrops);
     
-    // 9. World Space UI (Text, Indicators)
+    // 8. World UI
     this.drawWorldUI(texts, cam);
 
-    // End World Transform
     this.ctx.restore();
     
-    // 10. Atmospheric Lighting Pass (Overlay)
+    // 9. Lighting & Atmosphere Pass (Screen Space Overlay)
     this.lightingRenderer.drawLighting(this.ctx, this.renderList as Entity[], player, cam, zone, w, h);
 
-    // 11. Post-Processing (Vignette)
+    // 10. Post-Processing
     this.applyPostEffects(w, h);
+  }
+
+  private prepareLighting(player: Entity, renderList: (Entity | Particle)[], cam: Camera, w: number, h: number) {
+      this.lighting.clear();
+      
+      // Player Dynamic Light
+      this.lighting.registerLight({
+          id: 'PLAYER_MAIN',
+          x: player.x,
+          y: player.y,
+          z: 40,
+          radius: 400,
+          intensity: 1.0,
+          color: '#ffffff',
+          type: 'DYNAMIC'
+      });
+
+      // Extract Lights from Render List (Entities that emit light)
+      // This includes dynamic projectiles and static decor that is visible
+      const len = renderList.length;
+      for (let i = 0; i < len; i++) {
+          const e = renderList[i];
+          if (!('type' in e)) continue; // Skip particles for now
+          const ent = e as Entity;
+
+          if (ent.type === 'DECORATION') {
+              if (ent.subType === 'STREET_LIGHT') {
+                  this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, z: 250, radius: 450, intensity: 0.8, color: '#fbbf24', type: 'STATIC' });
+              } else if (ent.subType === 'NEON') {
+                  this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, z: 50, radius: 250, intensity: 0.6, color: ent.color, type: 'STATIC' });
+              } else if (ent.subType === 'DYNAMIC_GLOW') {
+                  this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, z: 10, radius: 200, intensity: 0.5, color: ent.color, type: 'PULSE', flickerSpeed: ent.data?.pulseSpeed });
+              }
+          }
+          else if (ent.type === 'HITBOX' && ent.source !== 'PLAYER') {
+              this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, z: 20, radius: ent.radius * 4, intensity: 0.7, color: ent.color, type: 'DYNAMIC' });
+          }
+          else if (ent.type === 'EXIT' && !ent.locked) {
+              this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, z: 10, radius: 300, intensity: 0.5, color: ent.color, type: 'STATIC' });
+          }
+      }
+
+      // Perform Culling
+      this.lighting.cullLights(cam, w, h);
   }
 
   private applyCameraTransform(cam: Camera, w: number, h: number, shake: {intensity: number, x: number, y: number}) {
@@ -176,44 +220,33 @@ export class RenderService {
   private prepareRenderList(cam: Camera, zone: Zone, dynamicEntities: Entity[], player: Entity, particles: Particle[], w: number, h: number) {
       const frustum = this.calculateFrustum(cam, w, h);
       
-      // 1. Reset Arrays (No Allocation)
       this.renderList.length = 0;
       
-      // 2. Collect Static Entities (Chunks)
-      // ChunkManager optimizes internally via cache
       this.staticEntities = this.chunkManager.getVisibleStaticEntities(cam, w, h);
       const sLen = this.staticEntities.length;
       for (let i = 0; i < sLen; i++) {
           this.renderList.push(this.staticEntities[i]);
       }
       
-      // 3. Collect Dynamic Entities (Spatial Hash)
       const visibleDynamic = this.spatialHash.queryRect(frustum.minX, frustum.minY, frustum.maxX, frustum.maxY, zone.id);
       const dLen = visibleDynamic.length;
       for (let i = 0; i < dLen; i++) {
           const e = visibleDynamic[i];
-          // Exclude walls (handled by chunks) and floor decor (handled by floor renderer)
-          // Exception: GATE_SEGMENT walls are dynamic
           if (e.type === 'WALL' && e.subType !== 'GATE_SEGMENT') continue;
           if (e.type === 'DECORATION' && (e.subType === 'RUG' || e.subType === 'FLOOR_CRACK' || e.subType === 'GRAFFITI')) continue;
-          
           this.renderList.push(e);
       }
       
-      // 4. Add Player
       this.renderList.push(player);
 
-      // 5. Add Particles
       const pLen = particles.length;
       for (let i = 0; i < pLen; i++) {
           const p = particles[i];
-          // Basic frustum cull for particles
           if (p.x >= frustum.minX && p.x <= frustum.maxX && p.y >= frustum.minY && p.y <= frustum.maxY) {
               this.renderList.push(p);
           }
       }
 
-      // 6. Sort In-Place
       this.sorter.sortForRender(this.renderList, player);
   }
 
@@ -222,7 +255,6 @@ export class RenderService {
       const len = renderList.length;
       for (let i = 0; i < len; i++) {
           const e = renderList[i];
-          // Particles don't cast shadows
           if (!('type' in e)) continue;
           
           const ent = e as Entity;
@@ -242,8 +274,6 @@ export class RenderService {
       
       for (let i = 0; i < len; i++) {
           const obj = renderList[i];
-          
-          // Check if Particle
           if ('life' in obj) {
               this.effectRenderer.drawParticleIso(this.ctx, obj as Particle);
               continue;
@@ -306,13 +336,12 @@ export class RenderService {
       const py = player.y;
       const pDepth = px + py;
 
-      // Iterating cached array is fast
       const len = staticEntities.length;
       for (let i = 0; i < len; i++) {
           const e = staticEntities[i];
           if ((e.type === 'WALL' || (e.type === 'DECORATION' && (e.height || 0) > 80))) {
               const eDepth = e.x + e.y;
-              if (eDepth <= pDepth) continue; // Behind player
+              if (eDepth <= pDepth) continue; 
 
               const w = e.width || 40;
               const d = e.depth || 40;
@@ -345,7 +374,6 @@ export class RenderService {
   private applyPostEffects(w: number, h: number) {
       if (!this.ctx) return;
       
-      // Vignette
       const grad = this.ctx.createRadialGradient(w/2, h/2, h/2, w/2, h/2, h);
       grad.addColorStop(0, 'transparent');
       grad.addColorStop(1, 'rgba(0,0,0,0.85)');
@@ -353,7 +381,6 @@ export class RenderService {
       this.ctx.globalCompositeOperation = 'source-over';
       this.ctx.fillRect(0, 0, w, h);
 
-      // Low Health / Glitch
       const integrity = this.player.stats.playerHp() / this.player.stats.playerStats().hpMax;
       if (integrity < 0.3 && Math.random() < 0.1) {
           const offset = Math.random() * 10;
