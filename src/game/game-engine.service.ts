@@ -125,16 +125,27 @@ export class GameEngineService {
     // Check floor changes
     const request = this.playerControl.requestedFloorChange();
     if (request) {
-        let targetId = request.id;
+        // SAFETY: Handle both string (legacy) and object (new) formats
+        const isLegacyString = typeof request === 'string';
+        const targetId = isLegacyString ? (request as unknown as string) : request.id;
+        const spawn = isLegacyString ? undefined : request.spawn;
+        
+        let finalTargetId = targetId;
         
         // Fallback for legacy 'UP'/'DOWN' commands
         if (targetId === 'UP' || targetId === 'DOWN') {
-             if (this.player.currentSectorId() === 'HUB' && targetId === 'DOWN') targetId = 'SECTOR_9_N';
-             else if (this.player.currentSectorId() === 'SECTOR_9_N' && targetId === 'UP') targetId = 'HUB';
+             const currentZone = this.player.currentSectorId();
+             if (currentZone === 'HUB' && targetId === 'DOWN') finalTargetId = 'SECTOR_9_N';
+             else if (currentZone === 'SECTOR_9_N' && targetId === 'UP') finalTargetId = 'HUB';
+             else {
+                 console.warn(`[GameEngine] Invalid legacy transition: ${targetId} from ${currentZone}`);
+                 this.playerControl.requestedFloorChange.set(null);
+                 return;
+             }
         }
         
-        if (targetId !== 'UP' && targetId !== 'DOWN') {
-             this.changeFloor(targetId, request.spawn);
+        if (finalTargetId && finalTargetId !== 'UP' && finalTargetId !== 'DOWN') {
+             this.changeFloor(finalTargetId, spawn);
         }
         
         this.playerControl.requestedFloorChange.set(null);
