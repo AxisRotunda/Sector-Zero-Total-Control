@@ -127,9 +127,21 @@ export class GameEngineService {
     if (request) {
         // SAFETY: Handle both string (legacy) and object (new) formats
         const isLegacyString = typeof request === 'string';
-        const targetId = isLegacyString ? (request as unknown as string) : request.id;
+        
+        // FIX: Ensure targetId is a safe string, fallback to empty to catch in null check
+        const targetId = isLegacyString 
+          ? (request as unknown as string) 
+          : (request.id || ''); 
+        
         const spawn = isLegacyString ? undefined : request.spawn;
         
+        // NULL CHECK: Prevent crash if target is undefined
+        if (!targetId || targetId.length === 0) {
+            console.warn('[GameEngine] Empty targetId in floor change request:', request);
+            this.playerControl.requestedFloorChange.set(null);
+            return;
+        }
+
         let finalTargetId = targetId;
         
         // Fallback for legacy 'UP'/'DOWN' commands

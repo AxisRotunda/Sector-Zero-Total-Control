@@ -64,7 +64,8 @@ export class InteractionService {
           if (e.type === 'EXIT') {
                if (dist < combinedRadius + 20) {
                     if (!e.locked) {
-                        const targetId = (e as any).targetSector || e.exitType || 'DOWN';
+                        // FIX: Read from targetZoneId (Zone system standard) instead of legacy targetSector
+                        const targetId = (e as any).targetZoneId || e.exitType || 'DOWN';
                         this.requestedFloorChange.set({ 
                             id: targetId,
                             spawn: e.spawnOverride 
@@ -174,9 +175,10 @@ export class InteractionService {
       this.haptic.impactLight();
 
       if (target.subType === 'ZONE_TRANSITION') {
-          const dest = target.data?.targetZone;
+          // FIX: Check targetZoneId on entity root first, then data
+          const dest = (target as any).targetZoneId || target.data?.targetZone;
           if (dest) {
-              this.requestedFloorChange.set({ id: dest });
+              this.requestedFloorChange.set({ id: dest, spawn: target.spawnOverride });
               this.sound.play('UI');
           }
       } else if (target.subType === 'TRADER') {
