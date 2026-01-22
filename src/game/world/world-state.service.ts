@@ -13,6 +13,7 @@ interface EntitySnapshot {
     factionId?: string;
     zoneId?: string;
     shopInventory?: Item[]; // Saved stock
+    persistenceTag?: 'PERSISTENT' | 'SESSION' | 'TEMPORARY';
 }
 
 interface ZoneState { 
@@ -31,6 +32,11 @@ export class WorldStateService {
   saveSector(id: string, entities: Entity[], path: string[] = []) {
       const snapshot: EntitySnapshot[] = entities
         .filter(e => {
+            // Priority 1: Explicit Tags
+            if (e.persistenceTag === 'PERSISTENT' || e.persistenceTag === 'SESSION') return true;
+            if (e.persistenceTag === 'TEMPORARY') return false;
+
+            // Priority 2: Legacy/Default Logic
             // Filter out transient entities
             if (e.type === 'HITBOX' || e.type === 'DECORATION' || (e.type === 'DESTRUCTIBLE' && e.hp <= 0)) return false;
             if (e.type === 'WALL') return false; // Walls loaded from template
@@ -51,7 +57,8 @@ export class WorldStateService {
             equipment: e.equipment,
             factionId: e.factionId,
             zoneId: e.zoneId,
-            shopInventory: e.shopInventory
+            shopInventory: e.shopInventory,
+            persistenceTag: e.persistenceTag
         }));
       
       this.zones.set(id, { 
@@ -73,6 +80,7 @@ export class WorldStateService {
           e.maxHp = s.hp; // Assume saved HP is current max
           e.hp = s.hp;
           e.status = { stun: 0, slow: 0, poison: null, burn: null, weakness: null, bleed: null };
+          e.persistenceTag = s.persistenceTag;
           
           return e;
       });

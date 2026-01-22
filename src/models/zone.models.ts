@@ -1,6 +1,13 @@
 
 import { ZoneTheme } from "./game.models";
 
+export enum ZoneLifecycle {
+  PERSISTENT = 'PERSISTENT',      // Hub: never resets
+  CHECKPOINT = 'CHECKPOINT',       // Sector: resets on death/logout
+  INSTANCED = 'INSTANCED',         // Dungeon: fresh on entry
+  BOSS_ARENA = 'BOSS_ARENA'        // Special: resets on exit
+}
+
 export interface ZoneBounds {
   minX: number;
   maxX: number;
@@ -107,9 +114,7 @@ export interface WorldZoneConfig {
   id: string;
   displayName: string;
   template: ZoneTemplate;
-  adjacentZones?: string[]; // Deprecated, use parent/child
-  persistence: 'persistent' | 'transient' | 'instanced';
-  maxInstances?: number;
+  lifecycle: ZoneLifecycle;
   parentZoneId?: string;
   childZoneIds?: string[];
 }

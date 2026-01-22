@@ -1,5 +1,5 @@
 
-import { WorldGraph } from "../../models/zone.models";
+import { WorldGraph, ZoneLifecycle } from "../../models/zone.models";
 import { HUB_ZONE } from "../zones/hub.zone";
 import { HUB_TRAINING_ZONE } from "../zones/hub_training.zone";
 import { SECTOR_9_N_ZONE } from "../zones/sector-9-segments/sector-9-north.zone";
@@ -15,21 +15,21 @@ export const WORLD_GRAPH: WorldGraph = {
       id: 'HUB',
       displayName: 'Safe Haven',
       template: HUB_ZONE,
-      persistence: 'persistent',
+      lifecycle: ZoneLifecycle.PERSISTENT,
       childZoneIds: ['SECTOR_9_N', 'HUB_TRAINING']
     },
     'HUB_TRAINING': {
         id: 'HUB_TRAINING',
         displayName: 'Sim Chamber',
         template: HUB_TRAINING_ZONE,
-        persistence: 'persistent', // Keep it persistent to maintain state if re-entered
+        lifecycle: ZoneLifecycle.PERSISTENT,
         parentZoneId: 'HUB'
     },
     'SECTOR_9_N': {
       id: 'SECTOR_9_N',
       displayName: 'Sector 9: North',
       template: SECTOR_9_N_ZONE,
-      persistence: 'persistent',
+      lifecycle: ZoneLifecycle.PERSISTENT,
       parentZoneId: 'HUB',
       childZoneIds: ['SECTOR_9_E', 'SECTOR_9_W', 'SECTOR_9_S']
     },
@@ -37,21 +37,21 @@ export const WORLD_GRAPH: WorldGraph = {
       id: 'SECTOR_9_E',
       displayName: 'Sector 9: East',
       template: SECTOR_9_E_ZONE,
-      persistence: 'persistent',
+      lifecycle: ZoneLifecycle.PERSISTENT,
       parentZoneId: 'SECTOR_9_N' 
     },
     'SECTOR_9_W': {
       id: 'SECTOR_9_W',
       displayName: 'Sector 9: West',
       template: SECTOR_9_W_ZONE,
-      persistence: 'persistent',
+      lifecycle: ZoneLifecycle.PERSISTENT,
       parentZoneId: 'SECTOR_9_N'
     },
     'SECTOR_9_S': {
       id: 'SECTOR_9_S',
       displayName: 'Sector 9: South',
       template: SECTOR_9_S_ZONE,
-      persistence: 'persistent',
+      lifecycle: ZoneLifecycle.PERSISTENT,
       parentZoneId: 'SECTOR_9_N',
       childZoneIds: ['SECTOR_8']
     },
@@ -59,7 +59,7 @@ export const WORLD_GRAPH: WorldGraph = {
       id: 'SECTOR_8', 
       displayName: 'The Arteries', 
       template: SECTOR_8_ZONE,
-      persistence: 'instanced',
+      lifecycle: ZoneLifecycle.INSTANCED,
       parentZoneId: 'SECTOR_9_S'
     }
   }

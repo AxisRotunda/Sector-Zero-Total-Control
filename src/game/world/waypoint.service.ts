@@ -68,6 +68,10 @@ export class WaypointService {
       rift.y = p.y;
       rift.zoneId = zoneId;
       rift.data = { isPersonal: true };
+      
+      // Tag for persistence across zone loads
+      rift.persistenceTag = 'SESSION';
+      
       this.world.entities.push(rift);
       
       this.eventBus.dispatch({ 

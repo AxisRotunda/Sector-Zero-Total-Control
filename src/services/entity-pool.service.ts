@@ -51,7 +51,8 @@ export class EntityPoolService {
           e.equipment = undefined;
           e.squadId = undefined;
           e.aiRole = undefined;
-          e.zoneId = undefined; // CRITICAL FIX: Reset zoneId to prevent rendering culling issues
+          e.zoneId = undefined; 
+          e.persistenceTag = undefined; // Reset Tag
         },
         100 
       ));

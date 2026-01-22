@@ -23,6 +23,9 @@ export interface Entity extends Volumetric {
   y: number;
   z: number;
   
+  // Persistence Lifecycle
+  persistenceTag?: 'PERSISTENT' | 'SESSION' | 'TEMPORARY';
+
   // Render Sorting
   isoDepth?: number; 
 

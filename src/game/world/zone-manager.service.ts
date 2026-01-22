@@ -3,7 +3,7 @@ import { Injectable, inject, signal, effect } from '@angular/core';
 import { WorldService } from './world.service';
 import { WorldStateService } from './world-state.service';
 import { WORLD_GRAPH } from '../../data/world/world-graph.config';
-import { ZoneTemplate } from '../../models/zone.models';
+import { ZoneTemplate, ZoneLifecycle } from '../../models/zone.models';
 import { PlayerService } from '../player/player.service';
 import { SoundService } from '../../services/sound.service';
 import { EventBusService } from '../../core/events/event-bus.service';
@@ -84,7 +84,7 @@ export class ZoneManagerService {
 
         // 4. Load New Zone
         this.transitionState.set(ZoneTransitionState.LOADING_NEW);
-        await this.loadZoneStrategy(targetConfig.template, currentId, spawnOverride);
+        await this.loadZoneStrategy(targetZoneId, currentId, spawnOverride);
         
         // 5. Update State
         this.currentZoneId.set(targetZoneId);
@@ -97,17 +97,6 @@ export class ZoneManagerService {
         // 7. Check Riftgate Unlock
         if (targetConfig.template.metadata.hasRiftgate) {
             this.waypointService.unlockWaypoint(targetZoneId);
-        }
-
-        // 8. Respawn Personal Rift Visual (Persistence Fix)
-        const rift = this.waypointService.personalRift();
-        if (rift && rift.active && rift.sourceZoneId === targetZoneId) {
-            const portal = this.entityPool.acquire('INTERACTABLE', 'PORTAL');
-            portal.x = rift.x;
-            portal.y = rift.y;
-            portal.zoneId = targetZoneId;
-            portal.data = { isPersonal: true };
-            this.world.entities.push(portal);
         }
 
         this.transitionState.set(ZoneTransitionState.COMPLETE);
@@ -129,7 +118,7 @@ export class ZoneManagerService {
       this.world.staticDecorations = [];
       this.spatialHash.clearAll();
       
-      await this.loadZoneStrategy(config.template);
+      await this.loadZoneStrategy(config.id);
       this.checkDiscovery(config.id, config.displayName);
       
       if (config.template.metadata.hasRiftgate) {
@@ -166,11 +155,42 @@ export class ZoneManagerService {
     });
   }
 
-  private async loadZoneStrategy(template: ZoneTemplate, previousZoneId?: string, spawnOverride?: {x: number, y: number}) {
+  private async loadZoneStrategy(zoneId: string, previousZoneId?: string, spawnOverride?: {x: number, y: number}) {
+      const config = this.graph.zones[zoneId];
+      const template = config.template;
       const isProcedural = (!template.geometry.walls || template.geometry.walls.length === 0) && template.metadata.isInstanced;
+      
       const loader = isProcedural ? this.proceduralLoader : this.staticLoader;
 
-      await loader.load(this.world, { template, previousZoneId });
+      // Lifecycle Switch
+      let shouldLoadFromSnapshot = false;
+      
+      switch(config.lifecycle) {
+          case ZoneLifecycle.PERSISTENT:
+          case ZoneLifecycle.CHECKPOINT:
+              shouldLoadFromSnapshot = this.worldState.hasSector(zoneId);
+              break;
+          case ZoneLifecycle.BOSS_ARENA:
+              shouldLoadFromSnapshot = false; // Always reset arenas on exit/re-entry?
+              break;
+          case ZoneLifecycle.INSTANCED:
+              shouldLoadFromSnapshot = false; // Always fresh
+              break;
+      }
+
+      // If we are loading from snapshot, we do load entities from state
+      // But we still need geometry. The static loader handles both geometry + entity restoration if snapshot exists.
+      // However, procedural loader might regenerate geometry every time if INSTANCED.
+      
+      if (isProcedural && !shouldLoadFromSnapshot) {
+          // Fresh Procedural
+          await loader.load(this.world, { template, previousZoneId });
+      } else {
+          // Static or Persisted Procedural (if we supported saving procedural layout, which we don't fully yet)
+          // For now, procedural is always re-gen geometry, but we could restore entities on top?
+          // Simplification: procedural ignores snapshot for layout, but static respects it.
+          await loader.load(this.world, { template, previousZoneId });
+      }
       
       this.handleSpawnPoint(template, previousZoneId, spawnOverride);
       

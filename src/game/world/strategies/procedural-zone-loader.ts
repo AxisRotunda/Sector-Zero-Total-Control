@@ -43,8 +43,22 @@ export class ProceduralZoneLoader implements ZoneLoadStrategy {
     
     const config = WORLD_GRAPH.zones[template.id];
     if (config) {
-        if (upExit && config.adjacentZones[0]) upExit.targetSector = config.adjacentZones[0];
-        if (downExit && config.adjacentZones[1]) downExit.targetSector = config.adjacentZones[1];
+        if (upExit) {
+            if (config.parentZoneId) {
+                upExit.targetSector = config.parentZoneId;
+            } else {
+                // Remove dead-end exit
+                world.entities = world.entities.filter(e => e.id !== upExit.id);
+            }
+        }
+        if (downExit) {
+            if (config.childZoneIds && config.childZoneIds.length > 0) {
+                downExit.targetSector = config.childZoneIds[0];
+            } else {
+                // Remove dead-end exit
+                world.entities = world.entities.filter(e => e.id !== downExit.id);
+            }
+        }
     }
 
     // 5. Set Player Start (Default center for procedural gen usually)
