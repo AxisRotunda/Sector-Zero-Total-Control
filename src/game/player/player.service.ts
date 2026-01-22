@@ -88,8 +88,10 @@ export class PlayerService implements OnDestroy {
         this.stats.playerHp.set(data.playerHp || this.stats.playerStats().hpMax);
         this.currentSectorId.set(data.currentSectorId || 'HUB');
         this.currentFloor.set(data.currentSectorId === 'HUB' ? 0 : 1);
-        if (data.autoCombat !== undefined) this.autoCombatEnabled.set(data.autoCombat);
-        if (data.psiEnergy !== undefined) this.stats.psionicEnergy.set(data.psiEnergy);
+        
+        // Defensive type checking to prevent undefined values in signals
+        if (typeof data.autoCombat === 'boolean') this.autoCombatEnabled.set(data.autoCombat);
+        if (typeof data.psiEnergy === 'number') this.stats.psionicEnergy.set(data.psiEnergy);
     }
   }
 }

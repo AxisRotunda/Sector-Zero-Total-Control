@@ -51,6 +51,9 @@ export class EntityUpdateService {
       const e = entities[i];
       if (e.state === 'DEAD') continue;
 
+      // CRITICAL: Decrement hit flash timer
+      if (e.hitFlash > 0) e.hitFlash--;
+
       this.status.processStatusEffects(e, globalTime);
 
       if (e.hitStopFrames && e.hitStopFrames > 0) {
