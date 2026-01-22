@@ -19,14 +19,16 @@ export interface ZoneGeometry {
     type?: string;
     locked?: boolean;
     depth?: number;
+    data?: any;
   }>;
 }
 
 export interface ZoneEntityDef {
-  type: 'NPC' | 'ENEMY' | 'DECORATION' | 'SPAWNER' | 'DESTRUCTIBLE' | 'TERMINAL';
+  type: 'NPC' | 'ENEMY' | 'DECORATION' | 'SPAWNER' | 'DESTRUCTIBLE' | 'TERMINAL' | 'INTERACTABLE';
   subType?: string;
   x: number;
   y: number;
+  z?: number;
   data?: any; // Extra props like dialogueId, loot, spawn info
 }
 
@@ -51,6 +53,9 @@ export interface ZoneTemplate {
   theme: ZoneTheme;
   bounds: ZoneBounds;
   
+  // NEW: Training zone flag
+  isTrainingZone?: boolean;
+
   // Hierarchy Metadata
   regionType?: 'hub' | 'segment' | 'dungeon' | 'poi';
   cardinalDirection?: 'N' | 'E' | 'S' | 'W';
@@ -65,6 +70,10 @@ export interface ZoneTemplate {
     walls?: RenderLayerConfig;
     roofs?: RenderLayerConfig;
     occluders?: RenderLayerConfig;
+    gridOverlay?: RenderLayerConfig;
+    entities?: RenderLayerConfig;
+    effects?: RenderLayerConfig;
+    ui?: RenderLayerConfig;
   };
   
   entities: {
@@ -83,6 +92,7 @@ export interface ZoneTemplate {
       wall: string;
       detail: string;
     };
+    ambientColor?: string;
   };
 
   metadata: {

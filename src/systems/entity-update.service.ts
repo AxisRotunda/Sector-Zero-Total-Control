@@ -1,111 +1,61 @@
 
 import { Injectable, inject } from '@angular/core';
 import { WorldService } from '../game/world/world.service';
-import { isDestructible, isEnemy } from '../utils/type-guards';
-import { SpatialHashService } from './spatial-hash.service';
-import { AiService } from './ai.service';
-import { CombatService } from './combat.service';
-import { StatusEffectService } from './status-effect.service';
-import { CollisionService } from './collision.service';
 import { PhysicsService } from './physics.service';
-import { PlayerControlService } from './player-control.service';
-import { EntityPoolService } from '../services/entity-pool.service';
-import { Entity } from '../models/game.models';
+import { AiService } from './ai.service';
+import { CollisionService } from './collision.service';
 import { SpawnerService } from './spawner.service';
+import { StatusEffectService } from './status-effect.service';
 import { NpcUpdateService } from './npc-update.service';
+import { CombatService } from './combat.service';
 
 @Injectable({ providedIn: 'root' })
 export class EntityUpdateService {
-  world = inject(WorldService);
-  spatialHash = inject(SpatialHashService);
-  entityPool = inject(EntityPoolService);
-  ai = inject(AiService);
-  combat = inject(CombatService);
-  statusEffect = inject(StatusEffectService);
-  collision = inject(CollisionService); 
-  physics = inject(PhysicsService);
-  playerControl = inject(PlayerControlService);
-  spawnerService = inject(SpawnerService);
-  npcService = inject(NpcUpdateService);
-  
+  private world = inject(WorldService);
+  private physics = inject(PhysicsService);
+  private ai = inject(AiService);
+  private collision = inject(CollisionService);
+  private spawner = inject(SpawnerService);
+  private status = inject(StatusEffectService);
+  private npc = inject(NpcUpdateService);
+  private combat = inject(CombatService);
+
   update(globalTime: number) {
-    if (this.world.player.hp <= 0) return;
-    
-    // Only clear dynamic entities for the current zone. Static walls persist.
-    const currentZoneId = this.world.currentZone().id;
-    this.spatialHash.clearDynamic(currentZoneId);
-    
-    // Insert dynamic entities
-    this.spatialHash.insert(this.world.player, false);
-    
-    this.world.entities.forEach(e => { 
-        if (e.state !== 'DEAD' && e.type !== 'SPAWNER' && e.type !== 'WALL') {
-            this.spatialHash.insert(e, false); 
-        }
-    });
+    const player = this.world.player;
+    const entities = this.world.entities;
 
-    this.playerControl.update(globalTime);
-    this.updateEntities(globalTime);
-  }
+    for (let i = 0; i < entities.length; i++) {
+      const e = entities[i];
+      if (e.state === 'DEAD') continue;
 
-  private updateEntities(globalTime: number) {
-    const spawners: Entity[] = [];
-    this.world.entities.forEach(e => {
-        if (e.state === 'DEAD') return; 
-        
-        if (e.type === 'WALL') return;
+      this.status.processStatusEffects(e, globalTime);
 
-        if (e.hitStopFrames && e.hitStopFrames > 0) {
-            e.hitStopFrames--; if (e.hitStopFrames <= 0) e.isHitStunned = false; return;
-        }
-        if (e.type === 'SPAWNER') { spawners.push(e); return; }
+      if (e.type === 'ENEMY') {
+        this.ai.updateEnemy(e, player);
+        this.physics.updateEntityPhysics(e, { speed: e.speed });
+      } else if (e.type === 'HITBOX') {
+        e.x += e.vx; e.y += e.vy;
+        e.timer--;
+        this.collision.checkHitboxCollisions(e);
+      } else if (e.type === 'PICKUP') {
+        this.combat.updatePickup(e);
+        this.physics.updateEntityPhysics(e);
+      } else if (e.type === 'SPAWNER') {
+        this.spawner.updateSpawner(e);
+      } else if (e.type === 'NPC') {
+        if (e.subType === 'TURRET') this.npc.updateTurret(e);
+        else if (e.subType === 'GUARD') this.npc.updateGuard(e);
+        else if (e.subType === 'CITIZEN') this.npc.updateCitizen(e);
+        else this.npc.updateGenericNpc(e);
         
-        if (e.type === 'NPC') {
-            if (e.subType === 'TURRET') this.npcService.updateTurret(e);
-            else if (e.subType === 'GUARD') this.npcService.updateGuard(e);
-            else if (e.subType === 'CITIZEN') this.npcService.updateCitizen(e);
-            else this.npcService.updateGenericNpc(e); 
-            
-            // Physics for moving NPCs
-            if (e.vx !== 0 || e.vy !== 0) {
-                this.physics.updateEntityPhysics(e);
-            }
-        }
-        
-        if (e.type === 'HITBOX' && e.subType === 'VENT') {
-            this.npcService.updateSteamVent(e);
-            if (e.state === 'ACTIVE') this.collision.checkHitboxCollisions(e);
-            return;
-        }
-        if (e.type === 'HITBOX' && e.subType === 'SLUDGE') {
-            this.npcService.updateSludge(e, globalTime); this.collision.checkHitboxCollisions(e); return;
-        }
-        
-        this.statusEffect.processStatusEffects(e, globalTime);
-        
-        if (e.hp <= 0 && e.type !== 'EXIT' && e.type !== 'NPC' && e.type !== 'SHRINE' && e.type !== 'HITBOX') {
-            if (isEnemy(e)) this.combat.killEnemy(e);
-            if (isDestructible(e)) this.combat.destroyObject(e);
-            return;
-        }
-        
-        if (e.status.stun > 0) {
-            e.status.stun--; e.vx *= 0.9; e.vy *= 0.9; this.physics.updateEntityPhysics(e); return;
-        }
-        if (e.hitFlash > 0) e.hitFlash--;
-        
-        // Physics update for non-NPCs handled above
-        if (e.type !== 'HITBOX' && e.type !== 'PICKUP' && e.type !== 'EXIT' && e.type !== 'NPC' && e.type !== 'DECORATION' && e.type !== 'SHRINE') {
-            this.physics.updateEntityPhysics(e);
-        } else if (e.type === 'HITBOX') { e.x += e.vx; e.y += e.vy;
-        } else if (e.type === 'PICKUP') { e.x += e.vx * 0.9; e.y += e.vy * 0.9; }
-
-        switch (e.type) {
-            case 'HITBOX': e.timer--; this.collision.checkHitboxCollisions(e); break;
-            case 'PICKUP': this.combat.updatePickup(e); break;
-            case 'ENEMY': this.ai.updateEnemy(e, this.world.player); break;
-        }
-    });
-    spawners.forEach(s => this.spawnerService.updateSpawner(s));
+        this.physics.updateEntityPhysics(e, { speed: e.speed || 1 });
+      } else if (e.type === 'DECORATION') {
+          if (e.subType === 'VENT') this.npc.updateSteamVent(e);
+          if (e.subType === 'SLUDGE') this.npc.updateSludge(e, globalTime);
+          if (e.subType === 'OVERSEER_EYE') this.npc.updateOverseerEye(e);
+      } else if (e.type === 'DESTRUCTIBLE') {
+          this.physics.updateEntityPhysics(e);
+      }
+    }
   }
 }

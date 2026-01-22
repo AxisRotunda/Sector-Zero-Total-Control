@@ -136,6 +136,34 @@ export class NpcUpdateService {
       }
   }
 
+  updateOverseerEye(eye: Entity) {
+      const player = this.world.player;
+      
+      // Floating motion
+      eye.z = (eye.data?.z || 150) + Math.sin(Date.now() * 0.002) * 10;
+
+      // Track player
+      if (eye.data?.trackPlayer) {
+          // Calculate angle to player
+          eye.angle = Math.atan2(player.y - eye.y, player.x - eye.x);
+      }
+
+      // Reactive Color Logic
+      const playerHP = player.hp / player.maxHp;
+      let targetColor = '#10b981'; // Green (Safe)
+
+      if (playerHP < 0.25) {
+          targetColor = '#ef4444'; // Red (Critical)
+          // Alarmed spin if player near death
+          eye.angle += (Date.now() % 1000) / 100; 
+      } else if (playerHP < 0.6) {
+          targetColor = '#f59e0b'; // Yellow (Warning)
+      }
+
+      // Very simple color lerp via hex is hard, just snapping for now or using property
+      eye.color = targetColor;
+  }
+
   // --- Helpers ---
 
   private checkPlayerAwareness(npc: Entity) {

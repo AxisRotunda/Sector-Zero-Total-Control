@@ -39,6 +39,13 @@ export const ZONE_LORE: Record<string, ZoneLore> = {
         dangerLevel: 'SAFE',
         factionControl: 'VANGUARD'
     },
+    'HUB_TRAINING': {
+        id: 'HUB_TRAINING',
+        name: 'Neural Simulation Chamber',
+        description: 'A white-box reality construct for combat protocol testing.',
+        dangerLevel: 'SAFE',
+        factionControl: 'VANGUARD'
+    },
     'SECTOR_9': {
         id: 'SECTOR_9',
         name: 'The Rust Sprawl',
@@ -182,6 +189,85 @@ export const DATA_LOGS: DataLog[] = [
 ];
 
 export const DIALOGUES: Record<string, DialogueNode> = {
+    'training_terminal': {
+        id: 'training_terminal',
+        speaker: 'SYSTEM',
+        factionId: 'VANGUARD',
+        mood: 'DIGITAL',
+        text: '>> NEURAL SIMULATION CHAMBER v4.12\n>> SELECT COMBAT PROTOCOL',
+        options: [
+          {
+            text: '[TRIAL_01: GRUNT SUPPRESSION]',
+            nextId: 'confirm_trial_01'
+          },
+          {
+            text: '[TRIAL_02: STALKER ENGAGEMENT]',
+            nextId: 'confirm_trial_02',
+            reqs: [{ type: 'FLAG', target: 'TRAINING_LVL1_COMPLETE', value: true }]
+          },
+          {
+            text: '[RESET SIMULATION]',
+            nextId: 'reset_confirm',
+            reqs: [{ type: 'FLAG', target: 'TRAINING_ACTIVE', value: true }]
+          },
+          {
+            text: '[EXIT]',
+            nextId: undefined
+          }
+        ]
+    },
+    'confirm_trial_01': {
+        id: 'confirm_trial_01', speaker: 'SYSTEM', mood: 'DIGITAL',
+        text: '>> INITIALIZING HOSTILE MEMORY ECHOES\n>> 6x GRUNT UNITS LOADING...',
+        options: [
+          {
+            text: '[COMMENCE]',
+            nextId: 'in_progress',
+            actions: [
+              { type: 'SET_FLAG', target: 'TRAINING_LVL1_ACTIVE', value: true },
+              { type: 'SET_FLAG', target: 'TRAINING_ACTIVE', value: true }
+            ]
+          },
+          { text: '[ABORT]', nextId: 'training_terminal' }
+        ]
+    },
+    'confirm_trial_02': {
+        id: 'confirm_trial_02', speaker: 'SYSTEM', mood: 'DIGITAL',
+        text: '>> INITIALIZING ADVANCED PROTOCOLS\n>> 2x STALKER UNITS LOADING...',
+        options: [
+          {
+            text: '[COMMENCE]',
+            nextId: 'in_progress',
+            actions: [
+              { type: 'SET_FLAG', target: 'TRAINING_LVL2_ACTIVE', value: true },
+              { type: 'SET_FLAG', target: 'TRAINING_ACTIVE', value: true }
+            ]
+          },
+          { text: '[ABORT]', nextId: 'training_terminal' }
+        ]
+    },
+    'reset_confirm': {
+        id: 'reset_confirm', speaker: 'SYSTEM', mood: 'DIGITAL',
+        text: '>> WARNING: RESETTING WILL PURGE ACTIVE ENTITIES\n>> CONFIRM ACTION?',
+        options: [
+          {
+            text: '[CONFIRM RESET]',
+            nextId: 'training_terminal',
+            actions: [
+              { type: 'SET_FLAG', target: 'TRAINING_ACTIVE', value: false },
+              { type: 'SET_FLAG', target: 'TRAINING_LVL1_ACTIVE', value: false },
+              { type: 'SET_FLAG', target: 'TRAINING_LVL2_ACTIVE', value: false },
+              { type: 'SET_FLAG', target: 'RESET_ZONE_ENTITIES', value: true } // Custom trigger for ZoneManager
+            ]
+          },
+          { text: '[CANCEL]', nextId: 'training_terminal' }
+        ]
+    },
+    'in_progress': {
+        id: 'in_progress', speaker: 'SYSTEM', mood: 'DIGITAL',
+        text: '>> SIMULATION RUNNING\n>> TERMINATE ALL HOSTILES TO PROCEED',
+        options: [{ text: '[ACKNOWLEDGE]', nextId: undefined }]
+    },
     'start_1': { 
         id: 'start_1', speaker: 'Handler', factionId: 'VANGUARD', mood: 'DIGITAL',
         text: "Operative 7421. Bio-signals fluctuating. Re-aligning neural matrix...", 

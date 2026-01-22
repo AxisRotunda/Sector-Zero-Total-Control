@@ -1,3 +1,4 @@
+
 import { Injectable, inject } from '@angular/core';
 import { Entity } from '../models/game.models';
 import { PlayerService } from '../game/player/player.service';
@@ -16,6 +17,7 @@ import { EventBusService } from '../core/events/event-bus.service';
 import { GameEvents } from '../core/events/game-events';
 import { TimeService } from '../game/time.service';
 import { HapticService } from '../services/haptic.service';
+import { UiPanelService } from '../services/ui-panel.service';
 
 @Injectable({ providedIn: 'root' })
 export class CombatService {
@@ -31,6 +33,7 @@ export class CombatService {
   private eventBus = inject(EventBusService);
   private timeService = inject(TimeService);
   private haptic = inject(HapticService);
+  private uiService = inject(UiPanelService); // Use UiPanelService or EventBus for notification
 
   public processHit(hitbox: Entity, target: Entity): void {
     if (target.hitFlash > 0 || target.isHitStunned) return;
@@ -110,20 +113,88 @@ export class CombatService {
 
   public killEnemy(e: Entity) {
       e.state = 'DEAD';
-      this.player.gainXp(e.xpValue);
-      this.mission.onEnemyKill(e.subType || '');
-      if (e.subType && this.narrative.discoverEntity(e.subType)) {
-          this.eventBus.dispatch({ type: GameEvents.FLOATING_TEXT_SPAWN, payload: { onPlayer: true, yOffset: -120, text: "DATABASE UPDATED", color: '#06b6d4', size: 20 } });
+      
+      const currentZone = this.world.currentZone();
+      const isTraining = currentZone.isTrainingZone;
+
+      // Handle Death Effects
+      if (isTraining) {
+          this.spawnDerezEffect(e.x, e.y);
+      } 
+
+      // Rewards (Skip in Training)
+      if (!isTraining) {
+          this.player.gainXp(e.xpValue);
+          this.mission.onEnemyKill(e.subType || '');
+          if (e.subType && this.narrative.discoverEntity(e.subType)) {
+              this.eventBus.dispatch({ type: GameEvents.FLOATING_TEXT_SPAWN, payload: { onPlayer: true, yOffset: -120, text: "DATABASE UPDATED", color: '#06b6d4', size: 20 } });
+          }
+          this.player.gainCredits(Math.floor(e.xpValue * 0.5 * (0.8 + Math.random() * 0.4)));
+          
+          const isBoss = e.subType === 'BOSS';
+          if (Math.random() < (isBoss ? 1.0 : CONFIG.LOOT_CHANCES.ENEMY_DROP)) {
+              for(let i=0; i<(isBoss?3:1); i++) this.spawnLoot(e.x, e.y, isBoss ? 'BOSS' : 'ENEMY');
+          }
+          if (e.equipment) {
+              if (e.equipment.weapon && Math.random() < 0.3) this.dropSpecificItem(e.x, e.y, e.equipment.weapon);
+              if (e.equipment.armor && Math.random() < 0.3) this.dropSpecificItem(e.x, e.y, e.equipment.armor);
+          }
       }
-      this.player.gainCredits(Math.floor(e.xpValue * 0.5 * (0.8 + Math.random() * 0.4)));
-      const isBoss = e.subType === 'BOSS';
-      if (Math.random() < (isBoss ? 1.0 : CONFIG.LOOT_CHANCES.ENEMY_DROP)) {
-          for(let i=0; i<(isBoss?3:1); i++) this.spawnLoot(e.x, e.y, isBoss ? 'BOSS' : 'ENEMY');
+
+      // Check for training completion
+      if (isTraining) {
+          this.checkTrainingWaveComplete();
       }
-      if (e.equipment) {
-          if (e.equipment.weapon && Math.random() < 0.3) this.dropSpecificItem(e.x, e.y, e.equipment.weapon);
-          if (e.equipment.armor && Math.random() < 0.3) this.dropSpecificItem(e.x, e.y, e.equipment.armor);
+  }
+
+  private spawnDerezEffect(x: number, y: number): void {
+    // Cyan -> Purple -> Transparent
+    this.particleService.addParticles({
+      x, y, z: 20,
+      count: 30,
+      color: '#06b6d4',
+      speed: 4,
+      size: 3,
+      type: 'square',
+      life: 0.6,
+      composite: 'lighter'
+    });
+    // Secondary purple burst
+    this.particleService.addParticles({
+      x, y, z: 20,
+      count: 15,
+      color: '#a855f7',
+      speed: 2,
+      size: 4,
+      type: 'square',
+      life: 0.8
+    });
+  }
+
+  private checkTrainingWaveComplete(): void {
+    const zoneId = this.world.currentZone().id;
+    // Check if any active enemies remain in the zone
+    const activeEnemies = this.world.entities.filter(e => e.type === 'ENEMY' && e.state !== 'DEAD');
+    
+    if (activeEnemies.length === 0) {
+      // Wave complete
+      this.narrative.setFlag('TRAINING_ACTIVE', false);
+      
+      // Unlock next trial if this was LVL1
+      if (this.narrative.getFlag('TRAINING_LVL1_ACTIVE')) {
+        this.narrative.setFlag('TRAINING_LVL1_COMPLETE', true);
+        this.narrative.setFlag('TRAINING_LVL1_ACTIVE', false);
       }
+      
+      // Clean up flags
+      this.narrative.setFlag('TRAINING_LVL2_ACTIVE', false);
+
+      // Show completion UI
+      this.eventBus.dispatch({ 
+          type: GameEvents.FLOATING_TEXT_SPAWN, 
+          payload: { onPlayer: true, yOffset: -100, text: "SIMULATION COMPLETE", color: '#06b6d4', size: 30 } 
+      });
+    }
   }
 
   private dropSpecificItem(x: number, y: number, item: any) {

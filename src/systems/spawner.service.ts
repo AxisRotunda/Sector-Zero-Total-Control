@@ -1,3 +1,4 @@
+
 import { Injectable, inject } from '@angular/core';
 import { Entity } from '../models/game.models';
 import { WorldService } from '../game/world/world.service';
@@ -5,6 +6,7 @@ import { EntityPoolService } from '../services/entity-pool.service';
 import { IdGeneratorService } from '../utils/id-generator.service';
 import { SquadAiService } from './squad-ai.service';
 import { ItemGeneratorService } from '../services/item-generator.service';
+import { NarrativeService } from '../game/narrative.service';
 
 @Injectable({ providedIn: 'root' })
 export class SpawnerService {
@@ -13,8 +15,14 @@ export class SpawnerService {
   private idGenerator = inject(IdGeneratorService);
   private squadAi = inject(SquadAiService);
   private itemGenerator = inject(ItemGeneratorService);
+  private narrative = inject(NarrativeService);
 
   updateSpawner(s: Entity) {
+      // Check Narrative Trigger (for training zones)
+      if (s.data?.triggerFlag && !this.narrative.getFlag(s.data.triggerFlag)) {
+          return;
+      }
+
       if (!s.spawnedIds) s.spawnedIds = [];
       s.spawnedIds = s.spawnedIds.filter(id => { const child = this.world.entities.find(e => e.id === id); return child && child.state !== 'DEAD'; });
       if (s.timer > 0) s.timer--;

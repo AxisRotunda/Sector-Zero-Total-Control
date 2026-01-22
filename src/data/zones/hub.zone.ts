@@ -48,6 +48,7 @@ const spire = BUILDING_PREFABS.spire(0, -500);
 const medBay = BUILDING_PREFABS.medBay(600, -200);
 const shop = BUILDING_PREFABS.shop(-600, 0);
 const southGate = BUILDING_PREFABS.gateAssembly(1200, true);
+const training = BUILDING_PREFABS.trainingChamber(-800, 800);
 
 export const HUB_ZONE: ZoneTemplate = {
   id: 'HUB',
@@ -56,9 +57,8 @@ export const HUB_ZONE: ZoneTemplate = {
   bounds: { minX: -1600, maxX: 1600, minY: -1600, maxY: 1800 },
   
   regionType: 'hub',
-  childZoneIds: ['SECTOR_9_N'],
+  childZoneIds: ['SECTOR_9_N', 'HUB_TRAINING'],
 
-  // Phase 2: Render Layer Metadata (Future-proofing)
   renderLayers: {
     floor: { zIndex: -1000 },
     walls: { zIndex: 0, sortBy: 'position' },
@@ -67,7 +67,6 @@ export const HUB_ZONE: ZoneTemplate = {
   },
 
   geometry: {
-    // Phase 2: Spatial Organization (Flattened for Engine compatibility)
     walls: [
       ...NORTH_WALL,
       ...CORNER_BLOCKS,
@@ -75,7 +74,8 @@ export const HUB_ZONE: ZoneTemplate = {
       ...southGate.walls,
       ...spire.walls,
       ...medBay.walls,
-      ...shop.walls
+      ...shop.walls,
+      ...training.walls
     ]
   },
 
@@ -86,6 +86,7 @@ export const HUB_ZONE: ZoneTemplate = {
       ...spire.entities,
       ...medBay.entities,
       ...shop.entities,
+      ...training.entities,
 
       // Unique Hub NPCs
       { type: 'NPC', subType: 'HANDLER', x: 0, y: -300, data: { dialogueId: 'start_1', color: '#3b82f6' } },
@@ -105,6 +106,13 @@ export const HUB_ZONE: ZoneTemplate = {
       targetZoneId: 'SECTOR_9_N', 
       transitionType: 'GATE', 
       locked: true,
+    },
+    // Exit definition for Training (Coordinates match door position in prefab)
+    {
+        x: -800,
+        y: 980,
+        targetZoneId: 'HUB_TRAINING',
+        transitionType: 'GATE'
     }
   ],
 

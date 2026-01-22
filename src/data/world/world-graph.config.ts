@@ -1,6 +1,7 @@
 
 import { WorldGraph } from "../../models/zone.models";
 import { HUB_ZONE } from "../zones/hub.zone";
+import { HUB_TRAINING_ZONE } from "../zones/hub_training.zone";
 import { SECTOR_9_N_ZONE } from "../zones/sector-9-segments/sector-9-north.zone";
 import { SECTOR_9_S_ZONE } from "../zones/sector-9-segments/sector-9-south.zone";
 import { SECTOR_9_E_ZONE } from "../zones/sector-9-segments/sector-9-east.zone";
@@ -15,7 +16,14 @@ export const WORLD_GRAPH: WorldGraph = {
       displayName: 'Safe Haven',
       template: HUB_ZONE,
       persistence: 'persistent',
-      childZoneIds: ['SECTOR_9_N'] // Primary exit leads to 9N
+      childZoneIds: ['SECTOR_9_N', 'HUB_TRAINING']
+    },
+    'HUB_TRAINING': {
+        id: 'HUB_TRAINING',
+        displayName: 'Sim Chamber',
+        template: HUB_TRAINING_ZONE,
+        persistence: 'persistent', // Keep it persistent to maintain state if re-entered
+        parentZoneId: 'HUB'
     },
     'SECTOR_9_N': {
       id: 'SECTOR_9_N',
@@ -30,7 +38,7 @@ export const WORLD_GRAPH: WorldGraph = {
       displayName: 'Sector 9: East',
       template: SECTOR_9_E_ZONE,
       persistence: 'persistent',
-      parentZoneId: 'SECTOR_9_N' // Hierarchically a neighbor, logically managed via N/S
+      parentZoneId: 'SECTOR_9_N' 
     },
     'SECTOR_9_W': {
       id: 'SECTOR_9_W',

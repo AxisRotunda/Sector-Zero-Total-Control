@@ -72,5 +72,55 @@ export const BUILDING_PREFABS = {
         ];
 
         return { walls, entities };
+    },
+
+    trainingChamber: (x: number, y: number): PrefabResult => {
+        return {
+            walls: [
+                // Main containment structure (brutalist block)
+                { 
+                    x, y, 
+                    w: 500, h: 400, depth: 400, 
+                    height: 350, 
+                    color: '#3f3f46', 
+                    type: 'TRAINING_EXTERIOR'
+                },
+                // Entrance alcove (recessed door frame)
+                { 
+                    x, y: y + 150, 
+                    w: 140, h: 100, depth: 100, 
+                    height: 320, 
+                    color: '#27272a' 
+                },
+                // Cyan neon accent strip (glows when player inside)
+                {
+                    x, y: y + 120,
+                    w: 500, h: 10, depth: 10,
+                    height: 340,
+                    color: '#06b6d4',
+                    type: 'DYNAMIC_GLOW',
+                    data: { 
+                        glowIntensity: 0.6,
+                        pulseSpeed: 2.0,
+                        activeColor: '#a855f7' // Changes when isPlayerInTraining = true
+                    }
+                }
+            ],
+            entities: [
+                // Zone transition door
+                {
+                    type: 'INTERACTABLE', // Custom type mapping to EXIT logic via data
+                    subType: 'ZONE_TRANSITION',
+                    x: x,
+                    y: y + 180,
+                    data: {
+                        targetZone: 'HUB_TRAINING',
+                        spawnPoint: 'chamber_entrance', // Handled via spawn point logic
+                        promptText: 'Access Neural Simulation',
+                        isTransition: true
+                    }
+                }
+            ]
+        };
     }
 };

@@ -1,5 +1,5 @@
 
-import { Injectable, inject, signal } from '@angular/core';
+import { Injectable, inject, signal, effect } from '@angular/core';
 import { WorldService } from './world.service';
 import { WorldStateService } from './world-state.service';
 import { WORLD_GRAPH } from '../../data/world/world-graph.config';
@@ -15,6 +15,7 @@ import { ProceduralZoneLoader } from './strategies/procedural-zone-loader';
 import { ZoneTransitionState } from './models/zone-transition.types';
 import { SpatialHashService } from '../../systems/spatial-hash.service';
 import { ZoneHierarchyManagerService } from './zone-hierarchy-manager.service';
+import { Entity } from '../../models/game.models';
 
 @Injectable({
   providedIn: 'root'
@@ -38,6 +39,16 @@ export class ZoneManagerService {
   currentZoneId = signal<string>('HUB');
   transitionState = signal<ZoneTransitionState>(ZoneTransitionState.IDLE);
 
+  constructor() {
+      // Listen for Reset Flag from Dialogue
+      effect(() => {
+          if (this.narrative.getFlag('RESET_ZONE_ENTITIES')) {
+              this.clearZoneEntities(this.currentZoneId());
+              this.narrative.setFlag('RESET_ZONE_ENTITIES', false); // Consume flag
+          }
+      });
+  }
+
   async transitionToZone(targetZoneId: string) {
     const targetConfig = this.graph.zones[targetZoneId];
     
@@ -51,22 +62,18 @@ export class ZoneManagerService {
 
     try {
         // 1. Save Current State
-        // Only save dynamic entities related to the current zone to avoid cross-contamination
         const path = this.hierarchy.getPathToRoot(currentId);
         this.worldState.saveSector(currentId, this.world.entities, path);
 
         // 2. Determine Transition Type (Visuals)
         const parentId = this.hierarchy.getParent(currentId);
         if (targetConfig.parentZoneId === currentId) {
-            // Downward (Parent -> Child)
             this.sound.play('ZONE_CHANGE');
         } else if (parentId === targetZoneId) {
-            // Upward (Child -> Parent)
             this.sound.play('ZONE_CHANGE');
         }
 
         // 3. Clean up old zone entities
-        // If HUB is persistent, we might keep it, but for simplicity in MVP we reload geometry to avoid dupes
         this.world.entities = this.world.entities.filter(e => e.type === 'PLAYER');
         this.world.staticDecorations = [];
         this.spatialHash.clearAll();
@@ -78,7 +85,7 @@ export class ZoneManagerService {
         // 5. Update State
         this.currentZoneId.set(targetZoneId);
         this.player.currentSectorId.set(targetZoneId);
-        this.world.player.zoneId = targetZoneId; // Track player zone on Entity
+        this.world.player.zoneId = targetZoneId;
 
         // 6. Discovery & Events
         this.checkDiscovery(targetZoneId, targetConfig.displayName);
@@ -105,6 +112,36 @@ export class ZoneManagerService {
       this.checkDiscovery(config.id, config.displayName);
   }
 
+  clearZoneEntities(zoneId: string): void {
+    if (zoneId !== this.currentZoneId()) return;
+
+    // Filter out Player, Walls, Interactables, Decor
+    const keepers = this.world.entities.filter(e => 
+        e.type === 'PLAYER' || 
+        e.type === 'WALL' || 
+        e.type === 'DECORATION' || 
+        e.type === 'TERMINAL' ||
+        (e.type === 'NPC' && e.subType !== 'GUARD') // Keep non-hostile NPCs
+    );
+    
+    // The ones to remove are implicitly dropped
+    this.world.entities = keepers;
+    this.spatialHash.clearDynamic(zoneId); // Rebuild next frame or now?
+    // EntityUpdateService rebuilds dynamic hash every frame, so just modifying array is enough
+
+    // Reset spawners
+    const spawners = this.world.entities.filter(e => e.type === 'SPAWNER');
+    spawners.forEach(s => {
+        s.spawnedIds = [];
+        s.timer = 0;
+    });
+
+    this.eventBus.dispatch({ 
+        type: GameEvents.FLOATING_TEXT_SPAWN, 
+        payload: { onPlayer: true, yOffset: -100, text: "SIMULATION RESET", color: '#fbbf24', size: 24 } 
+    });
+  }
+
   private async loadZoneStrategy(template: ZoneTemplate, previousZoneId?: string) {
       const isProcedural = (!template.geometry.walls || template.geometry.walls.length === 0) && template.metadata.isInstanced;
       const loader = isProcedural ? this.proceduralLoader : this.staticLoader;
@@ -113,7 +150,6 @@ export class ZoneManagerService {
       
       this.handleSpawnPoint(template, previousZoneId);
       
-      // Sync Camera
       this.world.camera.x = this.world.player.x;
       this.world.camera.y = this.world.player.y;
   }
@@ -121,18 +157,14 @@ export class ZoneManagerService {
   private handleSpawnPoint(template: ZoneTemplate, previousZoneId?: string) {
       if (!previousZoneId) return;
 
-      // Find the exit that points back to where we came from
-      // If I came from 'HUB', look for exit with targetZoneId='HUB'
       const entrance = this.world.entities.find(e => 
           e.type === 'EXIT' && (e as any).targetSector === previousZoneId
       );
 
       if (entrance) {
-          // Spawn 'in front' of the exit
           this.world.player.x = entrance.x;
           this.world.player.y = entrance.y + (entrance.exitType === 'DOWN' ? -100 : 100);
       } else {
-          // Fallback
           this.world.player.x = template.metadata.playerStart.x;
           this.world.player.y = template.metadata.playerStart.y;
       }

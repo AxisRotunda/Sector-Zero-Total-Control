@@ -3,6 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Entity, Zone, ZoneTheme } from '../../models/game.models';
 import { IsoUtils } from '../../utils/iso-utils';
 import { SpriteCacheService } from './sprite-cache.service';
+import { WorldService } from '../../game/world/world.service';
 
 interface ThemeVisuals {
     pattern: CanvasPattern | null;
@@ -16,6 +17,8 @@ interface ThemeVisuals {
 @Injectable({ providedIn: 'root' })
 export class StructureRendererService {
   private cache = inject(SpriteCacheService);
+  // Inject WorldService for checking player zone context
+  private world = inject(WorldService);
   
   // Patterns
   private patterns: Record<string, CanvasPattern | null> = {
@@ -116,19 +119,18 @@ export class StructureRendererService {
   drawStructure(ctx: CanvasRenderingContext2D, e: Entity, zone: Zone) {
       if (e.subType === 'BARRIER') { this.drawEnergyBarrier(ctx, e); return; }
       if (e.subType === 'CABLE') { this.drawCable(ctx, e); return; }
+      if (e.type === 'WALL' && (e as any).type === 'DYNAMIC_GLOW') { this.drawDynamicGlow(ctx, e); return; }
       
       const w = e.width || 40; 
-      // Use explicit depth if available, otherwise fallback to width (old logic)
-      // This ensures 2D maps with 'h' properties render correctly in 3D depth
       const d = e.depth || e.width || 40; 
       const h = e.height || 100;
       const theme = zone ? zone.theme : 'INDUSTRIAL';
+      const structureType = (e as any).type || e.subType || 'WALL';
       
-      // Cache Key: Includes zone theme to ensure visual variety per sector
-      const cacheKey = `STRUCT_${e.type}_${e.subType}_${w}_${d}_${h}_${e.color}_${theme}_${e.locked}`;
+      const cacheKey = `STRUCT_${e.type}_${structureType}_${w}_${d}_${h}_${e.color}_${theme}_${e.locked}`;
       
       const isoBounds = this.calculateIsoBounds(w, d, h);
-      const padding = 120; // Increased padding for gate sliding
+      const padding = 120;
       const canvasW = Math.ceil(isoBounds.maxX - isoBounds.minX + padding * 2);
       const canvasH = Math.ceil(isoBounds.maxY - isoBounds.minY + padding * 2);
       
@@ -140,14 +142,14 @@ export class StructureRendererService {
       const sprite = this.cache.getOrRender(cacheKey, canvasW, canvasH, (bufferCtx) => {
           const visuals = this.getThemeVisuals(theme, e.color);
           
-          switch (e.subType) {
-              case 'MONOLITH': this.renderMonolith(bufferCtx, e, w, d, h, anchorX, anchorY, visuals); break;
-              case 'GATE_SEGMENT': this.renderGate(bufferCtx, e, w, d, h, anchorX, anchorY, visuals); break;
-              case 'HOLO_TABLE': this.renderHoloTable(bufferCtx, e, w, d, h, anchorX, anchorY); break;
-              case 'VENDING_MACHINE': this.renderVendingMachine(bufferCtx, e, w, d, h, anchorX, anchorY); break;
-              case 'BENCH': this.renderBench(bufferCtx, e, w, d, h, anchorX, anchorY); break;
-              default: this.renderGenericWall(bufferCtx, e, w, d, h, anchorX, anchorY, visuals); break;
-          }
+          if (structureType === 'MONOLITH') this.renderMonolith(bufferCtx, e, w, d, h, anchorX, anchorY, visuals);
+          else if (structureType === 'GATE_SEGMENT') this.renderGate(bufferCtx, e, w, d, h, anchorX, anchorY, visuals);
+          else if (structureType === 'OBSERVATION_DECK') this.renderObservationDeck(bufferCtx, e, w, d, h, anchorX, anchorY, visuals);
+          else if (structureType === 'TRAINING_EXTERIOR') this.renderTrainingExterior(bufferCtx, e, w, d, h, anchorX, anchorY, visuals);
+          else if (e.subType === 'HOLO_TABLE') this.renderHoloTable(bufferCtx, e, w, d, h, anchorX, anchorY);
+          else if (e.subType === 'VENDING_MACHINE') this.renderVendingMachine(bufferCtx, e, w, d, h, anchorX, anchorY);
+          else if (e.subType === 'BENCH') this.renderBench(bufferCtx, e, w, d, h, anchorX, anchorY);
+          else this.renderGenericWall(bufferCtx, e, w, d, h, anchorX, anchorY, visuals);
       });
 
       const pos = IsoUtils.toIso(e.x, e.y, 0);
@@ -268,7 +270,6 @@ export class StructureRendererService {
       // Logic: Render two halves. If unlocked, slide them apart.
       
       const isOpen = !e.locked;
-      const slide = isOpen ? w * 0.4 : 0; // Slide distance
       const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
       
       // Recalculate centers
@@ -372,6 +373,70 @@ export class StructureRendererService {
 
   private renderBench(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number) {
       this.renderPrism(ctx, 80, 30, 20, ax, ay, '#3f3f46', this.getThemeVisuals('INDUSTRIAL'));
+  }
+
+  private renderTrainingExterior(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number, visuals: ThemeVisuals) {
+      // Solid block with minimal detailing (Brutalist)
+      this.renderPrism(ctx, w, d, h, ax, ay, e.color, visuals);
+  }
+
+  private renderObservationDeck(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number, visuals: ThemeVisuals) {
+      this.renderPrism(ctx, w, d, h, ax, ay, e.color, visuals);
+      
+      // Glass effect
+      ctx.save();
+      ctx.translate(ax, ay);
+      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
+      const front = p(0, d/2, h/2);
+      
+      ctx.globalCompositeOperation = 'screen';
+      ctx.fillStyle = '#bae6fd';
+      ctx.globalAlpha = 0.2;
+      ctx.beginPath();
+      ctx.arc(front.x, front.y, w/3, 0, Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+  }
+
+  private drawDynamicGlow(ctx: CanvasRenderingContext2D, e: Entity) {
+      const isPlayerInTraining = this.world.currentZone().id === 'HUB_TRAINING';
+      const glowColor = isPlayerInTraining ? 
+        (e.data?.activeColor || '#a855f7') : 
+        e.color;
+      
+      const pulseSpeed = e.data?.pulseSpeed || 2.0;
+      const baseIntensity = e.data?.glowIntensity || 0.6;
+      
+      // Pulsing effect
+      const pulsePhase = (Date.now() / 1000) * pulseSpeed;
+      const glowIntensity = baseIntensity * (0.7 + 0.3 * Math.sin(pulsePhase));
+      
+      const w = e.width || 500;
+      const d = e.depth || 10;
+      const h = e.height || 10;
+      
+      const pos = IsoUtils.toIso(e.x, e.y, e.z || 340);
+      
+      ctx.save();
+      ctx.translate(pos.x, pos.y);
+      
+      ctx.shadowBlur = 20 * glowIntensity;
+      ctx.shadowColor = glowColor;
+      ctx.fillStyle = glowColor;
+      
+      // Draw strip
+      const p = (lx: number, ly: number) => IsoUtils.toIso(lx, ly, 0);
+      const p1 = p(-w/2, 0);
+      const p2 = p(w/2, 0);
+      
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y - h/2);
+      ctx.lineTo(p2.x, p2.y - h/2);
+      ctx.lineTo(p2.x, p2.y + h/2);
+      ctx.lineTo(p1.x, p1.y + h/2);
+      ctx.fill();
+      
+      ctx.restore();
   }
 
   private calculateIsoBounds(width: number, length: number, height: number) {
