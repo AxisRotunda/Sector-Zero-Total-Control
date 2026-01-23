@@ -42,12 +42,8 @@ export class CombatService {
     
     // Diagnostic Log
     if (hitbox.source === 'PLAYER' && target.type === 'ENEMY') {
-        console.log('💥 PROCESS HIT:', {
-            hitboxId: hitbox.id,
-            enemyId: target.id,
-            damageValue: hitbox.damageValue,
-            enemyArmor: target.armor
-        });
+        // Debug logging can be disabled in production
+        // console.log('💥 PROCESS HIT:', { hitboxId: hitbox.id, enemyId: target.id, dmg: hitbox.damageValue });
     }
 
     if (target.hitFlash > 0 || target.isHitStunned) return;
@@ -70,43 +66,77 @@ export class CombatService {
   }
 
   /**
+   * Calculates if a hit is critical.
+   */
+  private rollCritical(source: Entity): boolean {
+      let critChance = source.critChance || 5; // Base 5%
+      
+      // If player is source, use player stats
+      if (source.source === 'PLAYER' || source.source === 'PSIONIC') {
+          critChance = this.stats.playerStats().crit;
+      }
+      
+      return Math.random() * 100 < critChance;
+  }
+
+  /**
+   * Calculates Armor Reduction using Diminishing Returns formula.
+   * DR = Armor / (Armor + 10 * Damage)
+   */
+  private calculateArmorReduction(armor: number, damage: number, armorPen: number): number {
+      const effectiveArmor = Math.max(0, armor - armorPen);
+      if (effectiveArmor <= 0) return 0;
+      
+      // POE-style formula: Prevents immunity at high armor, scales with hit size
+      return effectiveArmor / (effectiveArmor + (10 * damage));
+  }
+
+  /**
    * Unified damage calculation logic.
    */
   private calculateMitigatedDamage(source: Entity, target: Entity, incomingDamage: number): { damage: number, isCrit: boolean } {
-      const playerStats = this.stats.playerStats();
       let damage = incomingDamage;
       
-      // -- Armor Mitigation --
-      let armorMultiplier = 1;
-      if (target.status.weakness) armorMultiplier = 1 - target.status.weakness.armorReduction;
-      
+      // 1. Critical Strike Roll
+      const isCrit = this.rollCritical(source);
+      if (isCrit) {
+          damage *= BALANCE.COMBAT.CRIT_MULTIPLIER;
+      }
+
+      // 2. Weakness Status (Amplifies incoming damage before armor)
+      // Note: Weakness can also reduce target's armor, handled in next step
+      if (target.status.weakness) {
+          // e.g. 1.0 / (1 - 0.3) = 1.42x damage taken? Or just flat mult?
+          // Using damage reduction property inverted: damage = damage / (1 - reduction)
+          // Or just simple multiplier from config if available.
+          // For now, assume weakness.damageReduction is actually "Damage Taken Increase" or similar logic.
+          // Let's implement it as reducing the effectiveness of armor or boosting damage.
+          // Let's treat it as Damage Vulnerability:
+          damage = damage * (1 + target.status.weakness.damageReduction);
+      }
+
+      // 3. Armor Mitigation
       if (target.armor > 0) {
-          // Source AP: Player stats if player source, else Entity property
+          // Determine Attacker Armor Pen
           let attackerArmorPen = source.armorPen || 0;
           if (source.source === 'PLAYER' || source.source === 'PSIONIC') {
-              attackerArmorPen = playerStats.armorPen;
+              attackerArmorPen = this.stats.playerStats().armorPen;
           }
 
-          const netArmor = Math.max(0, target.armor * armorMultiplier);
-          // Effective Armor cannot be negative for calculation purposes (no bonus dmg from over-pen)
-          const effectiveArmor = Math.max(0, netArmor - attackerArmorPen); 
+          // Determine Target Effective Armor (Status effects apply here)
+          let targetArmor = target.armor;
+          if (target.status.weakness) {
+              targetArmor *= (1 - target.status.weakness.armorReduction);
+          }
+
+          const reduction = this.calculateArmorReduction(targetArmor, damage, attackerArmorPen);
+          // Cap reduction at 90%
+          const finalReduction = Math.min(0.9, reduction);
           
-          damage *= (100 / (100 + effectiveArmor));
+          damage = damage * (1 - finalReduction);
       }
 
-      // -- Critical Hit Check --
-      let isCrit = false;
-      if (source.source === 'PLAYER' || source.source === 'PSIONIC') {
-          isCrit = (Math.random() * 100 < playerStats.crit);
-      } else if (source.critChance) {
-          isCrit = (Math.random() * 100 < source.critChance);
-      }
-
-      if (isCrit) { 
-          damage *= BALANCE.COMBAT.CRIT_MULTIPLIER; 
-      }
-
-      return { damage, isCrit };
+      return { damage: Math.max(1, damage), isCrit };
   }
 
   /**
@@ -121,6 +151,9 @@ export class CombatService {
           this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: BALANCE.SHAKE.CRIT });
           this.timeService.triggerSlowMo(100, 0.2); 
           this.haptic.impactHeavy();
+          
+          // Visual: Critical Text
+          this.world.spawnFloatingText(target.x, target.y - 50, 'CRITICAL!', '#facc15', 10);
       } else {
           this.haptic.impactLight();
       }
@@ -128,8 +161,6 @@ export class CombatService {
       // 2. State Updates
       if (target.type === 'PLAYER') {
           this.stats.takeDamage(damage);
-          // Player I-Frames handled in takeDamage or separate logic? 
-          // Usually handled here for consistency if we want centralized logic.
           target.invulnerable = true;
           target.iframeTimer = 30;
       } else {
@@ -152,12 +183,11 @@ export class CombatService {
       this.timeService.triggerHitStop(stopDuration);
 
       // 6. Lifesteal (Player Only)
-      if (source.source === 'PLAYER' && playerStats.lifesteal > 0) {
-          this.stats.playerHp.update(h => Math.min(playerStats.hpMax, h + damage * (playerStats.lifesteal / 100)));
-      }
+      this.applyLifeSteal(source, damage);
 
       // 7. UI Feedback
-      this.world.spawnFloatingText(target.x, target.y - 40, Math.floor(damage).toString(), isCrit ? '#f97316' : '#fff', isCrit ? 30 : 20);
+      // Using Math.ceil for display to avoid decimals
+      this.world.spawnFloatingText(target.x, target.y - 40, Math.ceil(damage).toString(), isCrit ? '#f97316' : '#fff', isCrit ? 30 : 20);
       this.sound.play(isCrit ? 'CRIT' : 'HIT');
 
       // 8. Death Check
@@ -165,6 +195,19 @@ export class CombatService {
           this.haptic.impactMedium();
           if (isEnemy(target)) this.killEnemy(target);
           if (isDestructible(target)) this.destroyObject(target);
+      }
+  }
+
+  private applyLifeSteal(source: Entity, damageDealt: number) {
+      if (source.source !== 'PLAYER' && source.source !== 'PSIONIC') return;
+      
+      const stats = this.stats.playerStats();
+      if (stats.lifesteal > 0) {
+          const healing = damageDealt * (stats.lifesteal / 100);
+          if (healing >= 1) {
+              this.stats.playerHp.update(h => Math.min(stats.hpMax, h + healing));
+              this.world.spawnFloatingText(this.world.player.x, this.world.player.y - 60, `+${Math.floor(healing)}`, '#22c55e', 14);
+          }
       }
   }
 

@@ -3,6 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Entity } from '../models/game.models';
 import { ObjectPool } from '../utils/object-pool';
 import { IdGeneratorService } from '../utils/id-generator.service';
+import { NpcVisualGeneratorService } from './npc-visual-generator.service';
 
 const baseEntity: Omit<Entity, 'id' | 'type' | 'x' | 'y'> = {
     z: 0, vx: 0, vy: 0, angle: 0, radius: 20, hp: 1, maxHp: 1, armor: 0,
@@ -16,6 +17,7 @@ const baseEntity: Omit<Entity, 'id' | 'type' | 'x' | 'y'> = {
 })
 export class EntityPoolService {
   private idGenerator = inject(IdGeneratorService);
+  private visualGenerator = inject(NpcVisualGeneratorService);
   private pools = new Map<string, ObjectPool<Entity>>();
 
   private getPool(type: Entity['type'], subType?: Entity['subType']): ObjectPool<Entity> {
@@ -55,6 +57,7 @@ export class EntityPoolService {
           e.zoneId = undefined; 
           e.persistenceTag = undefined; // Reset Tag
           e.data = undefined; // CRITICAL: Clear custom data bag
+          e.visuals = undefined; // Clear visuals to be regenerated
           if (e.hitIds) e.hitIds.clear(); // Reset Hit Memory
         },
         100 
@@ -67,6 +70,18 @@ export class EntityPoolService {
     const entity = this.getPool(type, subType).acquire();
     entity.id = this.idGenerator.generateNumericId();
     if (inheritZoneId) entity.zoneId = inheritZoneId;
+    
+    // Generate new visuals for Units (NPCs, Enemies, Player)
+    if (type === 'NPC' || type === 'ENEMY' || type === 'PLAYER') {
+        // Basic Faction Guess (Can be overwritten by Spawner later)
+        let factionId = undefined;
+        if (subType === 'SNIPER' || subType === 'HEAVY') factionId = 'VANGUARD';
+        if (subType === 'STALKER' || subType === 'MEDIC') factionId = 'REMNANT';
+        if (subType === 'STEALTH') factionId = 'RESONANT';
+        
+        entity.visuals = this.visualGenerator.generate(type, subType, factionId);
+    }
+
     return entity;
   }
 

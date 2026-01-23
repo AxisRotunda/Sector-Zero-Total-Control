@@ -6,6 +6,7 @@ import { EntityPoolService } from '../services/entity-pool.service';
 import { SpatialHashService } from './spatial-hash.service';
 import { ParticleService } from './particle.service';
 import { isEnemy } from '../utils/type-guards';
+import { GUARD_BARKS } from '../config/narrative.config';
 
 @Injectable({ providedIn: 'root' })
 export class NpcUpdateService {
@@ -43,6 +44,22 @@ export class NpcUpdateService {
 
   updateGuard(g: Entity) {
       this.checkPlayerAwareness(g);
+      
+      // Initialize Bark Timer if missing
+      if (!g.data) g.data = {};
+      if (g.data.nextBarkTime === undefined) {
+          g.data.nextBarkTime = Date.now() + 5000 + Math.random() * 15000;
+      }
+
+      // Bark Logic
+      if (Date.now() > g.data.nextBarkTime) {
+          const text = GUARD_BARKS[Math.floor(Math.random() * GUARD_BARKS.length)];
+          // Only bark if player is roughly nearby (culling)
+          if (Math.hypot(this.world.player.x - g.x, this.world.player.y - g.y) < 600) {
+              this.world.spawnFloatingText(g.x, g.y - 60, text, '#a5f3fc', 12);
+          }
+          g.data.nextBarkTime = Date.now() + 15000 + Math.random() * 30000; // Reset timer
+      }
 
       if (!g.patrolPoints || g.patrolPoints.length === 0) {
           this.animateIdle(g);
@@ -59,7 +76,7 @@ export class NpcUpdateService {
       if (dist < 10) { 
           g.patrolIndex = (g.patrolIndex + 1) % g.patrolPoints.length; 
           // Pause briefly at patrol point
-          g.timer = 60; 
+          g.timer = 120 + Math.floor(Math.random() * 60); 
           g.state = 'IDLE';
           return; 
       }
@@ -74,10 +91,14 @@ export class NpcUpdateService {
       const angle = Math.atan2(dy, dx);
       // Smooth turn
       const angleDiff = angle - g.angle;
-      g.angle += angleDiff * 0.1;
+      let d = angleDiff;
+      while (d < -Math.PI) d += Math.PI * 2;
+      while (d > Math.PI) d -= Math.PI * 2;
+      g.angle += d * 0.1;
       
-      g.vx += Math.cos(angle) * 0.5; 
-      g.vy += Math.sin(angle) * 0.5;
+      const speed = 1.0;
+      g.vx += Math.cos(angle) * speed; 
+      g.vy += Math.sin(angle) * speed;
       
       this.animateMove(g);
   }

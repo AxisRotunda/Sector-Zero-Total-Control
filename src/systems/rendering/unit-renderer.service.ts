@@ -1,6 +1,6 @@
 
 import { Injectable, inject } from '@angular/core';
-import { Entity } from '../../models/game.models';
+import { Entity, VisualProfile } from '../../models/game.models';
 import { Item } from '../../models/item.models';
 import { InventoryService } from '../../game/inventory.service';
 import { IsoUtils } from '../../utils/iso-utils';
@@ -52,6 +52,8 @@ export class UnitRendererService {
       const isCitizen = e.subType === 'CITIZEN'; 
       const isHit = e.hitFlash > 0;
       const isStunned = e.status.stun > 0;
+      
+      // Fallback colors if no visual profile
       const primaryColor = isHit ? '#ffffff' : (isGuard ? '#3b82f6' : e.color);
       
       // Use cached trig
@@ -168,8 +170,41 @@ export class UnitRendererService {
           ctx.restore();
       }
 
-      // --- BATCH 1: LEGS ---
-      const legLen = 18;
+      // --- PAPER DOLL RENDERER ---
+      const vis = e.visuals || {
+          headType: 'NONE', bodyType: 'STANDARD', clothingType: 'UNIFORM', 
+          accessoryType: 'NONE', faceType: 'NONE', 
+          colors: { primary: primaryColor, secondary: '#333', skin: '#d4d4d8', hair: '#18181b', accent: '#06b6d4' },
+          scaleHeight: 1, scaleWidth: 1
+      } as VisualProfile;
+
+      const scaleW = vis.scaleWidth || 1;
+      const scaleH = vis.scaleHeight || 1;
+
+      // 1. Back Accessories (Cape, Backpack) - Draw BEHIND body
+      const pWaist = transformToIso(0, 0, 18, this._isoBody);
+      if (!isHit && vis.accessoryType === 'CAPE') {
+          const pShoulders = transformToIso(0, 0, 38 * scaleH, this._iso);
+          const capeEnd = transformToIso(-20 * Math.sin(legCycle), 0, 5, this._isoLeg); // Sway
+          ctx.fillStyle = vis.colors.primary;
+          ctx.beginPath();
+          ctx.moveTo(pShoulders.x - 10 * scaleW, pShoulders.y);
+          ctx.lineTo(pShoulders.x + 10 * scaleW, pShoulders.y);
+          ctx.lineTo(capeEnd.x + 15 * scaleW, capeEnd.y);
+          ctx.lineTo(capeEnd.x - 15 * scaleW, capeEnd.y);
+          ctx.fill();
+      } else if (!isHit && vis.accessoryType === 'BACKPACK') {
+          const packCenter = transformToIso(0, -8, 30 * scaleH, this._iso);
+          ctx.fillStyle = vis.colors.secondary;
+          ctx.beginPath();
+          // Simple iso rect for backpack
+          ctx.rect(packCenter.x - 10 * scaleW, packCenter.y - 12 * scaleH, 20 * scaleW, 24 * scaleH);
+          ctx.fill();
+          ctx.lineWidth = 1; ctx.strokeStyle = '#000'; ctx.stroke();
+      }
+
+      // 2. Legs
+      const legLen = 18 * scaleH;
       // Leg transform doesn't twist with body
       const legTransform = (wx: number, wy: number, wz: number, target: {x:number, y:number}) => {
           const rx = wx * this._cos - wy * this._sin; 
@@ -178,71 +213,122 @@ export class UnitRendererService {
           return target;
       };
 
-      ctx.lineWidth = 6; ctx.lineCap = 'round'; 
-      ctx.strokeStyle = isGuard || isNPC ? '#1e293b' : '#27272a';
+      ctx.lineWidth = 6 * scaleW; ctx.lineCap = 'round'; 
+      // Pant color
+      ctx.strokeStyle = isHit ? '#fff' : (vis.clothingType === 'RAGS' ? vis.colors.secondary : vis.colors.primary);
       
       const hips = legTransform(0, 0, legLen, this._iso); 
       const lExt = Math.sin(legCycle) * 10;
       
-      const pFootL = legTransform(5, lExt, 0, this._isoLeg);
-      
-      ctx.beginPath(); 
-      ctx.moveTo(hips.x, hips.y); ctx.lineTo(pFootL.x, pFootL.y); 
-      ctx.stroke();
+      const pFootL = legTransform(5 * scaleW, lExt, 0, this._isoLeg);
+      ctx.beginPath(); ctx.moveTo(hips.x, hips.y); ctx.lineTo(pFootL.x, pFootL.y); ctx.stroke();
 
-      const pFootR = legTransform(-5, -lExt, 0, this._isoLeg);
-      ctx.beginPath();
-      ctx.moveTo(hips.x, hips.y); ctx.lineTo(pFootR.x, pFootR.y); 
-      ctx.stroke();
+      const pFootR = legTransform(-5 * scaleW, -lExt, 0, this._isoLeg);
+      ctx.beginPath(); ctx.moveTo(hips.x, hips.y); ctx.lineTo(pFootR.x, pFootR.y); ctx.stroke();
 
-      // --- BATCH 2: BODY ---
-      const torsoH = 20; const shoulderZ = legLen + torsoH;
-      const pWaist = transformToIso(0, 0, legLen, this._isoBody); 
+      // Coat Tail (Behind Body, Front of Legs)
+      if (!isHit && (vis.clothingType === 'COAT' || vis.clothingType === 'ROBE')) {
+          const pCoatL = legTransform(8 * scaleW, lExt * 0.5, 5, this._isoLeg);
+          const pCoatR = legTransform(-8 * scaleW, -lExt * 0.5, 5, this._isoBody); // Reuse var
+          ctx.fillStyle = vis.colors.primary;
+          ctx.beginPath();
+          ctx.moveTo(hips.x - 8 * scaleW, hips.y - 5); // Waist left
+          ctx.lineTo(hips.x + 8 * scaleW, hips.y - 5); // Waist right
+          ctx.lineTo(pCoatR.x, pCoatR.y);
+          ctx.lineTo(pCoatL.x, pCoatL.y);
+          ctx.fill();
+      }
+
+      // 3. Torso
+      const torsoH = 20 * scaleH; const shoulderZ = legLen + torsoH;
       const pNeck = transformToIso(0, 0, shoulderZ, this._iso); // Reuse _iso for neck
       
       // Store shoulders for arms
-      const pLShoulder = { x: 0, y: 0 }; transformToIso(10, 0, shoulderZ - 2, pLShoulder);
-      const pRShoulder = { x: 0, y: 0 }; transformToIso(-10, 0, shoulderZ - 2, pRShoulder);
+      const pLShoulder = { x: 0, y: 0 }; transformToIso(10 * scaleW, 0, shoulderZ - 2, pLShoulder);
+      const pRShoulder = { x: 0, y: 0 }; transformToIso(-10 * scaleW, 0, shoulderZ - 2, pRShoulder);
 
-      if (equippedArmor && !isHit) {
-          ctx.fillStyle = equippedArmor.color; ctx.strokeStyle = '#18181b'; ctx.lineWidth = 1;
-          ctx.beginPath(); 
-          ctx.moveTo(pNeck.x, pNeck.y); 
-          ctx.lineTo(pRShoulder.x, pRShoulder.y); 
-          ctx.lineTo(pWaist.x - 5, pWaist.y); 
-          ctx.lineTo(pWaist.x + 5, pWaist.y); 
-          ctx.lineTo(pLShoulder.x, pLShoulder.y); 
-          ctx.closePath(); 
-          ctx.fill(); ctx.stroke();
-          
-          // Shoulders
-          ctx.beginPath(); ctx.arc(pLShoulder.x, pLShoulder.y, 6, 0, Math.PI*2); ctx.fill(); ctx.stroke();
-          ctx.beginPath(); ctx.arc(pRShoulder.x, pRShoulder.y, 6, 0, Math.PI*2); ctx.fill(); ctx.stroke();
-      } else { 
-          ctx.strokeStyle = primaryColor; ctx.lineWidth = 14; 
+      if (isHit) {
+          ctx.strokeStyle = '#fff'; ctx.lineWidth = 14 * scaleW; 
           ctx.beginPath(); ctx.moveTo(pWaist.x, pWaist.y); ctx.lineTo(pNeck.x, pNeck.y); ctx.stroke(); 
+      } else {
+          // Clothing Body
+          ctx.fillStyle = vis.colors.primary;
+          
+          if (vis.clothingType === 'VEST' || vis.clothingType === 'RAGS') {
+              ctx.fillStyle = vis.colors.skin; // Undershirt/Skin
+          }
+
+          // Base Body Shape
+          ctx.beginPath();
+          // Trapezoid body
+          ctx.moveTo(pNeck.x - 5 * scaleW, pNeck.y); 
+          ctx.lineTo(pNeck.x + 5 * scaleW, pNeck.y);
+          ctx.lineTo(pWaist.x + 4 * scaleW, pWaist.y);
+          ctx.lineTo(pWaist.x - 4 * scaleW, pWaist.y);
+          ctx.fill();
+
+          // Overlay VEST or ARMOR
+          if (vis.clothingType === 'VEST' || vis.clothingType === 'ARMOR') {
+              ctx.fillStyle = vis.clothingType === 'VEST' ? vis.colors.secondary : vis.colors.primary;
+              ctx.fillRect(pNeck.x - 6 * scaleW, pNeck.y, 12 * scaleW, 15 * scaleH);
+          }
       }
 
-      // --- BATCH 3: HEAD ---
+      // 4. Head
       const pHead = transformToIso(0, 0, shoulderZ + 8 + headZ, this._iso);
-      ctx.fillStyle = isHit ? '#fff' : (e.type === 'PLAYER' ? '#0ea5e9' : (isGuard ? '#93c5fd' : (isNPC ? '#e4e4e7' : '#b91c1c'))); 
-      if (isCitizen) ctx.fillStyle = '#a1a1aa';
+      const headSize = 7 * scaleW;
       
-      if (isStunned && Math.random() > 0.7) {
-          ctx.fillStyle = Math.random() > 0.5 ? '#f0f' : '#0ff';
+      if (isHit) {
+          ctx.fillStyle = '#fff';
+          ctx.beginPath(); ctx.arc(pHead.x, pHead.y - 4, headSize, 0, Math.PI*2); ctx.fill();
+      } else {
+          // Skin
+          ctx.fillStyle = vis.colors.skin;
+          ctx.beginPath(); ctx.arc(pHead.x, pHead.y - 4, headSize, 0, Math.PI*2); ctx.fill();
+
+          // Hair / Hat
+          if (vis.headType === 'HELMET') {
+              ctx.fillStyle = vis.colors.primary;
+              ctx.beginPath(); ctx.arc(pHead.x, pHead.y - 6, headSize + 1, 0, Math.PI*2); ctx.fill();
+              // Visor line
+              ctx.strokeStyle = vis.colors.accent; ctx.lineWidth = 2;
+              ctx.beginPath(); ctx.moveTo(pHead.x - 4, pHead.y - 4); ctx.lineTo(pHead.x + 4, pHead.y - 4); ctx.stroke();
+          } else if (vis.headType === 'HOOD') {
+              ctx.fillStyle = vis.colors.primary;
+              ctx.beginPath(); ctx.arc(pHead.x, pHead.y - 6, headSize + 2, Math.PI, Math.PI*2); ctx.fill();
+              // Hood sides
+              ctx.beginPath(); ctx.moveTo(pHead.x - 8, pHead.y - 6); ctx.lineTo(pHead.x - 6, pHead.y + 2); ctx.stroke();
+          } else if (vis.headType === 'CAP') {
+              ctx.fillStyle = vis.colors.primary;
+              ctx.beginPath(); ctx.arc(pHead.x, pHead.y - 8, headSize, Math.PI, 0); ctx.fill();
+              ctx.fillRect(pHead.x - headSize, pHead.y - 8, headSize * 2, 4);
+          } else if (vis.headType === 'SPIKEY_HAIR') {
+              ctx.fillStyle = vis.colors.hair;
+              ctx.beginPath(); ctx.moveTo(pHead.x - 5, pHead.y - 8); ctx.lineTo(pHead.x, pHead.y - 15); ctx.lineTo(pHead.x + 5, pHead.y - 8); ctx.fill();
+          }
+
+          // Face Accessories
+          if (vis.faceType === 'VISOR' || vis.faceType === 'GOGGLES') {
+              ctx.fillStyle = vis.colors.accent;
+              ctx.fillRect(pHead.x - 6, pHead.y - 6, 12, 4);
+          } else if (vis.faceType === 'MASK') {
+              ctx.fillStyle = '#333';
+              ctx.beginPath(); ctx.arc(pHead.x, pHead.y - 2, 5, 0, Math.PI); ctx.fill();
+          }
       }
-      ctx.beginPath(); ctx.arc(pHead.x, pHead.y - 4, 7, 0, Math.PI*2); ctx.fill();
       
-      // --- BATCH 4: ARMS ---
-      ctx.lineWidth = 5; ctx.strokeStyle = isHit ? '#fff' : (equippedArmor ? '#3f3f46' : primaryColor);
+      // 5. Arms
+      ctx.lineWidth = 5 * scaleW; 
+      // Arm color (Skin or Cloth)
+      ctx.strokeStyle = isHit ? '#fff' : (vis.clothingType === 'VEST' || vis.clothingType === 'RAGS' ? vis.colors.skin : vis.colors.primary);
       
       // Left Arm
-      const pHandL = transformToIso(10 + Math.cos(lArmAngle)*10, 10 + Math.sin(lArmAngle)*10, shoulderZ - 12, this._iso);
+      const pHandL = transformToIso(10 * scaleW + Math.cos(lArmAngle)*10, 10 + Math.sin(lArmAngle)*10, shoulderZ - 12, this._iso);
       ctx.beginPath(); ctx.moveTo(pLShoulder.x, pLShoulder.y); ctx.lineTo(pHandL.x, pHandL.y); ctx.stroke();
       
       // Right Arm
       const reach = 12 + rHandReach;
-      const pHandR = transformToIso(-8 + Math.sin(rArmAngle)*10, 5 + Math.cos(rArmAngle)*reach, shoulderZ - 10, this._iso);
+      const pHandR = transformToIso(-8 * scaleW + Math.sin(rArmAngle)*10, 5 + Math.cos(rArmAngle)*reach, shoulderZ - 10, this._iso);
       ctx.beginPath(); ctx.moveTo(pRShoulder.x, pRShoulder.y); ctx.lineTo(pHandR.x, pHandR.y); ctx.stroke();
 
       if (!isNPC) { 
@@ -267,14 +353,6 @@ export class UnitRendererService {
   }
 
   drawNPC(ctx: CanvasRenderingContext2D, e: Entity) {
-      if (e.subType === 'TRADER' || e.subType === 'MEDIC') {
-          IsoUtils.toIso(e.x + 20, e.y + 20, 0, this._iso);
-          ctx.save(); ctx.translate(this._iso.x, this._iso.y); 
-          ctx.fillStyle = '#27272a'; ctx.fillRect(-20, -20, 40, 30); 
-          ctx.fillStyle = '#3f3f46'; ctx.beginPath(); ctx.moveTo(-20, -20); ctx.lineTo(0, -30); ctx.lineTo(20, -20); ctx.lineTo(0, -10); ctx.fill(); 
-          ctx.restore();
-      }
-      
       this.drawHumanoid(ctx, e);
       
       if (e.subType === 'CITIZEN') return;

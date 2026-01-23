@@ -10,6 +10,23 @@ export interface Volumetric {
     height?: number; // Z-axis span (visual height)
 }
 
+export interface VisualProfile {
+    headType: 'NONE' | 'HELMET' | 'HOOD' | 'CAP' | 'BALD' | 'SPIKEY_HAIR' | 'BUN_HAIR';
+    bodyType: 'STANDARD' | 'BULKY' | 'SLENDER';
+    clothingType: 'UNIFORM' | 'RAGS' | 'ARMOR' | 'COAT' | 'ROBE' | 'VEST';
+    accessoryType: 'NONE' | 'BACKPACK' | 'CAPE' | 'POUCHES' | 'RADIO';
+    faceType: 'NONE' | 'VISOR' | 'MASK' | 'GOGGLES' | 'EYEPATCH';
+    colors: {
+        primary: string;   // Main cloth/armor
+        secondary: string; // Detail/Trim
+        skin: string;      // Exposed skin
+        hair: string;      // Hair/Helmet detail
+        accent: string;    // Glows/Visors
+    };
+    scaleHeight?: number; // Variance in height
+    scaleWidth?: number;  // Variance in width
+}
+
 export interface Entity extends Volumetric {
   id: number;
   zoneId?: string; 
@@ -121,6 +138,9 @@ export interface Entity extends Volumetric {
   
   lastQueryId?: number;
   
+  // Visual Customization
+  visuals?: VisualProfile;
+
   // Generic data bag for zone-specific properties
   data?: any;
 }

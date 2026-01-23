@@ -73,6 +73,46 @@ export const HUB_ZONE: ZoneTemplate = {
       ...shop.entities,
       ...training.entities,
 
+      // --- PATROL GUARDS (Vanguard Security) ---
+      // Patrol 1: Shop Security (East Wing)
+      { 
+          type: 'NPC', subType: 'GUARD', x: 250, y: 300, 
+          data: { 
+              color: '#3b82f6',
+              dialogueId: 'generic_guard',
+              patrolPoints: [
+                  { x: 250, y: 300 },
+                  { x: 400, y: 100 },
+                  { x: 250, y: -100 }
+              ]
+          } 
+      },
+      // Patrol 2: MedBay Security (West Wing)
+      { 
+          type: 'NPC', subType: 'GUARD', x: -250, y: -100, 
+          data: { 
+              color: '#3b82f6',
+              dialogueId: 'generic_guard',
+              patrolPoints: [
+                  { x: -250, y: -100 },
+                  { x: -400, y: 100 },
+                  { x: -250, y: 300 }
+              ]
+          } 
+      },
+      // Patrol 3: Spire Perimeter (Rear)
+      { 
+          type: 'NPC', subType: 'GUARD', x: 0, y: -450, 
+          data: { 
+              color: '#3b82f6',
+              dialogueId: 'generic_guard',
+              patrolPoints: [
+                  { x: 150, y: -450 },
+                  { x: -150, y: -450 }
+              ]
+          } 
+      },
+
       // --- SERVICE CLUSTER ---
       // Quest Giver (Handler) - Top Center near Spire
       { type: 'NPC', subType: 'HANDLER', x: -50, y: -300, data: { dialogueId: 'start_1', color: '#3b82f6' } },

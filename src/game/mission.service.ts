@@ -55,6 +55,13 @@ export class MissionService implements OnDestroy {
       return `[${m.category}] ${m.title}: ${obj.description} (${obj.currentAmount}/${obj.targetAmount})`;
   });
 
+  // Returns the active objective for the tracked mission
+  activeObjective = computed(() => {
+      const m = this.trackedMission();
+      if (!m) return null;
+      return m.objectives.find(o => o.currentAmount < o.targetAmount) || null;
+  });
+
   constructor() { 
       if (this.activeMissions().length === 0 && this.completedMissionIds().size === 0) this.startQuest('MQ_01_ARRIVAL'); 
       
@@ -103,15 +110,32 @@ export class MissionService implements OnDestroy {
       this.mapService.setObjectiveMarkers(markers);
   }
 
+  // UPDATED COORDINATES TO MATCH HUB_ZONE (src/data/zones/hub.zone.ts)
   private questDb: Record<string, Omit<Mission, 'state'>> = {
       'MQ_01_ARRIVAL': { 
           id: 'MQ_01_ARRIVAL', title: 'The Arrival', description: 'Contact surface handler.', category: 'MAIN', 
-          objectives: [{ type: 'TALK', targetId: 'HANDLER', targetAmount: 1, currentAmount: 0, description: 'Report to Mission Handler', targetZoneId: 'HUB', targetLocation: {x: 0, y: -400} }], 
+          objectives: [{ 
+              type: 'TALK', 
+              targetId: 'HANDLER', 
+              targetAmount: 1, 
+              currentAmount: 0, 
+              description: 'Report to Mission Handler', 
+              targetZoneId: 'HUB', 
+              targetLocation: {x: -50, y: -300} // Matches HUB_ZONE static entity
+          }], 
           rewardXp: 100, rewardCredits: 50, unlocksFlag: 'ACT_I_STARTED' 
       },
       'MQ_02_DESCEND': { 
           id: 'MQ_02_DESCEND', title: 'Into the Depths', description: 'The gate is locked. Prove your worth or find a clearance key.', category: 'MAIN', 
-          objectives: [{ type: 'INTERACT', targetId: 'GATE', targetAmount: 1, currentAmount: 0, description: 'Unlock Sector Gate', targetZoneId: 'HUB', targetLocation: {x: 0, y: 1380} }], 
+          objectives: [{ 
+              type: 'INTERACT', 
+              targetId: 'GATE', 
+              targetAmount: 1, 
+              currentAmount: 0, 
+              description: 'Unlock Sector Gate', 
+              targetZoneId: 'HUB', 
+              targetLocation: {x: 0, y: 1050} // Matches HUB_ZONE exit location
+          }], 
           rewardXp: 200, rewardCredits: 100, prereqMissionId: 'MQ_01_ARRIVAL' 
       }
   };
@@ -158,14 +182,12 @@ export class MissionService implements OnDestroy {
                       return { ...obj, currentAmount: obj.currentAmount + 1 };
                   } return obj;
               });
-              // Note: We don't auto-complete quests here for all types. TALK objectives often complete via dialogue action.
-              // But for KILL/COLLECT, we could.
-              // For now, we rely on manual 'completeQuest' call for story beats, or simple auto-complete for radiant.
+              
               const allComplete = updatedObjectives.every(o => o.currentAmount >= o.targetAmount);
               
-              // Auto-complete Radiant or Collect missions
-              if (allComplete && (m.category === 'RADIANT' || type === 'KILL')) { 
-                  // Use setTimeout to avoid update loop issues if called from render/update cycle
+              // Auto-complete Radiant or Kill/Collect missions
+              // Story missions (TALK/INTERACT) are usually completed via Dialogue Actions explicitly
+              if (allComplete && (m.category === 'RADIANT' || type === 'KILL' || type === 'COLLECT')) { 
                   setTimeout(() => this.completeQuest(m.id), 0);
                   return { ...m, objectives: updatedObjectives, state: 'COMPLETE' }; 
               }

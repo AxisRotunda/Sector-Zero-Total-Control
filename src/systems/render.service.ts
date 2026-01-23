@@ -19,6 +19,7 @@ import { InteractionService } from '../services/interaction.service';
 import { ChunkManagerService } from '../game/world/chunk-manager.service';
 import { LightingService } from './rendering/lighting.service';
 import { TimeService } from '../game/time.service';
+import { MissionService } from '../game/mission.service';
 
 @Injectable({
   providedIn: 'root'
@@ -36,6 +37,7 @@ export class RenderService {
   private interaction = inject(InteractionService);
   private lighting = inject(LightingService);
   private timeService = inject(TimeService);
+  private mission = inject(MissionService);
   
   // Renderers
   private floorRenderer = inject(FloorRendererService);
@@ -152,7 +154,7 @@ export class RenderService {
     // 7. Visual Effects
     this.effectRenderer.drawGlobalEffects(this.ctx, this.renderList as Entity[], player, zone, rainDrops);
     
-    // 8. World UI
+    // 8. World UI (In-World)
     this.drawWorldUI(texts, cam);
 
     this.ctx.restore();
@@ -160,8 +162,18 @@ export class RenderService {
     // 9. Lighting & Atmosphere Pass (Screen Space Overlay)
     this.lightingRenderer.drawLighting(this.ctx, this.renderList as Entity[], player, cam, zone, w, h);
 
-    // 10. Post-Processing
+    // 10. Post-Processing & HUD Overlays
     this.applyPostEffects(w, h);
+    
+    // 11. Guidance Overlay (Always on top)
+    this.effectRenderer.drawGuidanceOverlay(
+        this.ctx, 
+        this.mission.activeObjective(), 
+        player, 
+        cam, 
+        w, h, 
+        zone.id
+    );
   }
 
   private prepareLighting(

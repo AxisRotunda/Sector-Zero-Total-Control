@@ -43,9 +43,28 @@ export class CollisionService {
         
         if (dist < player.radius + hitbox.radius) {
             if (player.state !== 'DEAD' && !player.invulnerable) {
+                // Fallback Damage Logic:
+                // If damageValue is undefined (e.g. direct enemy body contact), derive it from equipment or defaults.
+                let damage = hitbox.damageValue || 0;
+                
+                if (damage === 0) {
+                    // Try to get damage from weapon
+                    if (hitbox.equipment?.weapon?.stats['dmg']) {
+                        damage = hitbox.equipment.weapon.stats['dmg'];
+                    } else {
+                        // Hard fallback based on difficulty
+                        damage = 5 * this.world.currentZone().difficultyMult;
+                    }
+                }
+
                 // Unified damage application
-                this.combat.applyDirectDamage(hitbox, player, hitbox.damageValue || 0);
-                hitbox.timer = 0;
+                this.combat.applyDirectDamage(hitbox, player, damage);
+                
+                // If it's a projectile (has timer), destroy it. 
+                // If it's the enemy body, apply a cooldown or bounce (handled by physics/ai usually, but combat handles hit response)
+                if (hitbox.timer !== undefined) {
+                    hitbox.timer = 0;
+                }
             }
         }
     }

@@ -2,6 +2,7 @@
 import { Injectable } from '@angular/core';
 import { Entity, Particle, FloatingText, Camera, Zone } from '../../models/game.models';
 import { IsoUtils } from '../../utils/iso-utils';
+import { MissionObjective } from '../../game/mission.service';
 
 @Injectable({ providedIn: 'root' })
 export class EffectRendererService {
@@ -164,6 +165,112 @@ export class EffectRendererService {
       ctx.font = '10px monospace';
       ctx.fillStyle = '#4ade80';
       ctx.fillText('[F] / TAP', 0, h + 15);
+      
+      ctx.restore();
+  }
+
+  // Draw On-Screen Waypoint / Off-Screen Arrow
+  drawGuidanceOverlay(ctx: CanvasRenderingContext2D, activeObjective: MissionObjective | null, player: Entity, cam: Camera, canvasWidth: number, canvasHeight: number, currentZoneId: string) {
+      if (!activeObjective || !activeObjective.targetLocation) return;
+      
+      // If target is in another zone, we currently don't draw vector (TODO: Pathfind to exit)
+      // We only draw if activeObjective.targetZoneId matches current
+      if (activeObjective.targetZoneId !== currentZoneId) return;
+
+      const target = activeObjective.targetLocation;
+      
+      // 1. Calculate Target Screen Position
+      // Reuse logic from RenderService.getScreenToWorld essentially but inverted
+      // World -> Screen transform manually because we don't have the context transform applied at this stage (this runs in overlay pass)
+      
+      // Camera Transform Re-calc
+      // Center of screen
+      const cx = canvasWidth / 2;
+      const cy = canvasHeight / 2;
+      
+      // World delta
+      const wx = target.x - player.x;
+      const wy = target.y - player.y;
+      
+      // Iso Projection of delta
+      const isoX = (wx - wy);
+      const isoY = (wx + wy) * 0.5;
+      
+      // Apply Zoom
+      const screenX = cx + (isoX * cam.zoom);
+      const screenY = cy + (isoY * cam.zoom);
+      
+      // 2. Check Bounds
+      const padding = 40;
+      const minX = padding;
+      const maxX = canvasWidth - padding;
+      const minY = padding;
+      const maxY = canvasHeight - padding;
+      
+      const isOffScreen = screenX < minX || screenX > maxX || screenY < minY || screenY > maxY;
+      
+      ctx.save();
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = '#fbbf24';
+      ctx.fillStyle = '#fbbf24';
+      ctx.strokeStyle = '#fbbf24';
+      
+      if (isOffScreen) {
+          // Clamp to edge
+          // Vector from center
+          const dx = screenX - cx;
+          const dy = screenY - cy;
+          const angle = Math.atan2(dy, dx);
+          
+          // Simple clamping logic (intersects box)
+          // Use absolute ratio to find which edge is hit first
+          const absDx = Math.abs(dx);
+          const absDy = Math.abs(dy);
+          const ratioX = (canvasWidth / 2 - padding) / absDx;
+          const ratioY = (canvasHeight / 2 - padding) / absDy;
+          const scale = Math.min(ratioX, ratioY);
+          
+          const clampX = cx + dx * scale;
+          const clampY = cy + dy * scale;
+          
+          // Draw Arrow
+          ctx.translate(clampX, clampY);
+          ctx.rotate(angle);
+          
+          ctx.beginPath();
+          ctx.moveTo(10, 0);
+          ctx.lineTo(-10, 10);
+          ctx.lineTo(-10, -10);
+          ctx.closePath();
+          ctx.fill();
+          
+          // Pulse effect
+          const pulse = (Math.sin(Date.now() * 0.01) + 1) * 0.5;
+          ctx.globalAlpha = 0.5 + pulse * 0.5;
+          ctx.beginPath();
+          ctx.arc(0, 0, 20, 0, Math.PI*2);
+          ctx.stroke();
+          
+      } else {
+          // On Screen Reticle
+          ctx.translate(screenX, screenY - 60); // Float above head
+          
+          const bounce = Math.sin(Date.now() * 0.008) * 5;
+          ctx.translate(0, bounce);
+          
+          // Down Arrow / Chevron
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(-10, -10);
+          ctx.lineTo(0, 10);
+          ctx.lineTo(10, -10);
+          ctx.stroke();
+          
+          // Label
+          ctx.font = 'bold 10px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText("OBJECTIVE", 0, -20);
+      }
       
       ctx.restore();
   }

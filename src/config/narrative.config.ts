@@ -149,6 +149,19 @@ export const ENTITY_LORE: Record<string, EntityLore> = {
     'CONSOLE': { id: 'CONSOLE', name: 'Data Terminal', type: 'OBJECT', description: 'Access point for the sector-wide intranet.' }
 };
 
+export const GUARD_BARKS = [
+    "Sector secure.",
+    "Watching you, Operative.",
+    "Bio-scans clear.",
+    "Maintain distance.",
+    "Report anomalies.",
+    "The Core is stable.",
+    "No loitering.",
+    "Checking protocols...",
+    "Vanguard protects.",
+    "Compliance mandatory."
+];
+
 export const DATA_LOGS: DataLog[] = [
   {
     id: 'LOG_001_COLLAPSE',
