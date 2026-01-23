@@ -26,7 +26,7 @@ export class PlayerAbilitiesService {
   private eventBus = inject(EventBusService);
   private haptic = inject(HapticService);
   private progression = inject(PlayerProgressionService);
-  private collisionService = inject(CollisionService); // Inject CollisionService
+  private collisionService = inject(CollisionService);
 
   cooldowns = signal({ primary: 0, secondary: 0, dash: 0, utility: 0 });
   maxCooldowns = signal({ primary: BALANCE.COOLDOWNS.PRIMARY, secondary: BALANCE.COOLDOWNS.SECONDARY, dash: BALANCE.COOLDOWNS.DASH, utility: BALANCE.COOLDOWNS.UTILITY });
@@ -200,51 +200,108 @@ export class PlayerAbilitiesService {
   spawnPrimaryAttackHitbox(player: Entity) {
       const stats = this.stats.playerStats();
       const equippedWeapon = this.inventory.equipped().weapon;
-      const isUnarmed = !equippedWeapon;
+      const combo = player.comboIndex || 0;
+
+      // BRANCH 1: UNARMED PATH (Clean, no weapon dependency)
+      if (!equippedWeapon) {
+          console.log('[Combat] Spawning UNARMED Hitbox');
+          
+          const level = this.progression.level() || 1;
+          const baseDamage = 5;
+          const scaledDamage = baseDamage + (level * 1.5) + (stats.damage * 0.2);
+          const comboMultiplier = 1.0 + (combo * 0.15);
+          const finalDamage = scaledDamage * comboMultiplier;
+
+          const baseKb = 8;
+          const kbMult = 4;
+          const knockback = baseKb + (combo * kbMult);
+          
+          let color = '#fbbf24'; // Gold
+          let stun = 0;
+          let reach = 30; // Short reach for fists
+
+          if (combo === 1) {
+              reach = 35;
+              color = '#fcd34d';
+          } else if (combo === 2) {
+              reach = 40;
+              stun = 25;
+              color = '#f59e0b';
+          }
+
+          // Spawn unarmed hitbox
+          const hitbox = this.entityPool.acquire('HITBOX', undefined, player.zoneId);
+          hitbox.type = 'HITBOX';
+          hitbox.source = 'PLAYER';
+          // Offset slightly forward
+          hitbox.x = player.x + Math.cos(player.angle) * 25;
+          hitbox.y = player.y + Math.sin(player.angle) * 25;
+          hitbox.z = 10;
+          hitbox.vx = Math.cos(player.angle) * (2 + combo);
+          hitbox.vy = Math.sin(player.angle) * (2 + combo);
+          hitbox.angle = player.angle;
+          hitbox.radius = reach;
+          hitbox.timer = 10;
+          
+          // CRITICAL: Set damage properties explicitly on the instance
+          hitbox.hp = finalDamage; 
+          (hitbox as any).damage = finalDamage; 
+          (hitbox as any).attackPower = finalDamage;
+
+          hitbox.color = color;
+          hitbox.state = 'ATTACK';
+          hitbox.knockbackForce = knockback;
+          hitbox.status.stun = stun;
+          hitbox.hitIds = new Set(); // Reset hit memory
+
+          console.log('👊 UNARMED HITBOX SPAWNED:', {
+              finalDamage,
+              reach,
+              combo,
+              position: { x: hitbox.x, y: hitbox.y },
+              zoneId: hitbox.zoneId
+          });
+
+          // Immediate collision check
+          this.collisionService.checkHitboxCollisions(hitbox);
+          
+          this.world.entities.push(hitbox);
+          this.haptic.impactLight();
+          
+          // Cycle combo
+          player.comboIndex = (combo + 1) % this.MAX_COMBO;
+          this.currentCombo.set(player.comboIndex);
+          return;
+      }
+
+      // BRANCH 2: ARMED PATH (Original Logic)
+      const weapon = equippedWeapon;
       
-      // Select Effective Weapon (Real or Virtual Fist)
-      const weapon = isUnarmed ? UNARMED_WEAPON : equippedWeapon;
-      
-      // Calculate Reach based on Item Stats
-      const baseReach = weapon?.stats?.['reach'] || 60; 
-      const reachScale = weapon?.shape === 'psiBlade' ? 1.2 : 1.0;
+      const baseReach = weapon.stats?.['reach'] || 60; 
+      const reachScale = weapon.shape === 'psiBlade' ? 1.2 : 1.0;
       let reach = (baseReach + (stats.damage * 0.3)) * reachScale;
 
-      let damage = 5;
-      if (weapon && weapon.stats) {
-          damage = weapon.stats['dmg'] || 5;
-      }
-      
-      // Dynamic Scaling for Unarmed
-      if (isUnarmed) {
-          const level = this.progression.level() || 1;
-          const scalingBonus = (level * 1.5) + (stats.damage * 0.2);
-          damage += scalingBonus;
-      } else {
-          damage += stats.damage; 
-      }
+      let damage = weapon.stats['dmg'] || 5;
+      damage += stats.damage; 
 
       let dmgMult = 1.0;
       const baseKb = 8;
       const kbMult = 4;
-      let color = isUnarmed ? '#fbbf24' : '#f97316'; 
+      let color = '#f97316'; 
       let stun = 0;
 
       // Combo scaling
-      const combo = player.comboIndex || 0;
       const knockback = baseKb + (combo * kbMult);
 
       if (combo === 1) {
           reach *= 1.2;
           dmgMult = 1.2;
-          if (isUnarmed) color = '#fcd34d'; 
-          else color = '#fb923c';
+          color = '#fb923c';
       } else if (combo === 2) {
           reach *= 1.5;
           dmgMult = 2.0;
-          stun = isUnarmed ? 25 : 15; 
-          if (isUnarmed) color = '#f59e0b'; 
-          else color = '#ea580c';
+          stun = 15; 
+          color = '#ea580c';
       }
 
       const finalDamage = damage * dmgMult;
@@ -259,7 +316,7 @@ export class PlayerAbilitiesService {
       hitbox.vx = Math.cos(player.angle) * (2 + combo); 
       hitbox.vy = Math.sin(player.angle) * (2 + combo);
       hitbox.angle = player.angle; 
-      hitbox.radius = isUnarmed ? 20 : reach; 
+      hitbox.radius = reach; 
       
       hitbox.hp = finalDamage; 
       (hitbox as any).damage = finalDamage;
@@ -273,18 +330,13 @@ export class PlayerAbilitiesService {
       hitbox.knockbackForce = knockback;
       hitbox.status.stun = stun;
       
-      // Initialize hit tracking
       hitbox.hitIds = new Set();
 
-      // --- INNOVATIVE SOLUTION: INSTANT HIT ---
-      // Perform immediate collision check on spawn to catch targets that might move
-      // or if frames skip. This essentially "raycasts" the hit at birth.
       this.collisionService.checkHitboxCollisions(hitbox);
 
       this.world.entities.push(hitbox);
       this.haptic.impactMedium();
       
-      // Increment Combo AFTER spawning, for the next attack
       player.comboIndex = (combo + 1) % this.MAX_COMBO;
       this.currentCombo.set(player.comboIndex);
   }

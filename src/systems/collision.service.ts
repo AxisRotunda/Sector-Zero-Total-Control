@@ -15,25 +15,27 @@ export class CollisionService {
   private world = inject(WorldService);
   
   public checkHitboxCollisions(hitbox: Entity): void {
-    // CRITICAL FIX: Use the hitbox's zoneId (inherited from source) or fallback to current world zone
     const zoneId = hitbox.zoneId || this.world.currentZone().id;
 
     if (hitbox.source === 'PLAYER' || hitbox.source === 'ENVIRONMENT' || hitbox.source === 'PSIONIC' || hitbox.source === 'DEFENSE') {
         const potentialTargets = this.spatialHash.query(hitbox.x, hitbox.y, hitbox.radius, zoneId);
         
-        // Initialize hit tracking if missing (safety net)
         if (!hitbox.hitIds) hitbox.hitIds = new Set();
 
         potentialTargets.forEach(target => {
-            // Idempotency Check: Don't hit the same enemy twice with the same swing
             if (hitbox.hitIds!.has(target.id)) return;
 
             if (target.state !== 'DEAD' && (isEnemy(target) || isDestructible(target))) {
                  const dist = Math.hypot(target.x - hitbox.x, target.y - hitbox.y);
                  if (dist < target.radius + hitbox.radius) {
+                    
+                    // --- DIAGNOSTIC LOG ---
+                    console.log(`[CollisionService] Hit Detected! Source: ${hitbox.source} -> Target: ${target.type} (${target.subType})`);
+                    console.log(`  Hitbox Damage Props: hp=${hitbox.hp}, damage=${(hitbox as any).damage}`);
+                    // ---------------------
+
                     this.combat.processHit(hitbox, target);
                     
-                    // Mark as hit
                     hitbox.hitIds!.add(target.id);
 
                     if (hitbox.source === 'DEFENSE') hitbox.timer = 0;
@@ -44,7 +46,6 @@ export class CollisionService {
         const player = this.world.player;
         const dist = Math.hypot(player.x - hitbox.x, player.y - hitbox.y);
         
-        // Player Hit Logic with Iframes
         if (dist < player.radius + hitbox.radius) {
             if (player.state !== 'DEAD' && !player.invulnerable) {
                 this.playerStats.takeDamage(hitbox.hp);
