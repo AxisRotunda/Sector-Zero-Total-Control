@@ -12,7 +12,7 @@ import { LightingRendererService } from './rendering/lighting-renderer.service';
 import { IsoUtils } from '../utils/iso-utils';
 import { PlayerService } from '../game/player/player.service';
 import { EntitySorterService } from './rendering/entity-sorter.service';
-import { RENDER_CONFIG } from './rendering/render.config';
+import { RENDER_CONFIG, RENDER_STATE, QUALITY_TIERS } from './rendering/render.config';
 import { InputService } from '../services/input.service';
 import { SpatialHashService } from './spatial-hash.service';
 import { InteractionService } from '../services/interaction.service';
@@ -63,6 +63,12 @@ export class RenderService {
   private _fp4 = { x: 0, y: 0 };
   private _frustum = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
 
+  // Performance Monitoring
+  private lastFrameTime = 0;
+  private frameCount = 0;
+  private fpsAccumulator = 0;
+  private qualityStableFrames = 0;
+
   init(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d', { alpha: false });
@@ -70,6 +76,9 @@ export class RenderService {
     
     this.isHighEnd = navigator.hardwareConcurrency > 4 && !/Mobile|Android/.test(navigator.userAgent);
     
+    // Initial Quality Set
+    this.applyQuality(this.isHighEnd ? 2 : 1); // High or Medium
+
     this.resize();
     this.resizeListener = () => this.resize();
     window.addEventListener('resize', this.resizeListener);
@@ -113,6 +122,69 @@ export class RenderService {
       return out;
   }
 
+  private monitorPerformance(now: number) {
+      const delta = now - this.lastFrameTime;
+      this.lastFrameTime = now;
+      
+      // Update FPS
+      const fps = 1000 / delta;
+      this.fpsAccumulator += fps;
+      this.frameCount++;
+
+      if (this.frameCount >= 30) {
+          const avgFps = this.fpsAccumulator / 30;
+          this.frameCount = 0;
+          this.fpsAccumulator = 0;
+          
+          this.adjustQuality(avgFps);
+      }
+  }
+
+  private adjustQuality(avgFps: number) {
+      // Adaptive Logic:
+      // FPS < 45: Downgrade
+      // FPS > 58: Upgrade (if not max)
+      // Hysteresis: Require consistent performance to switch
+      
+      if (avgFps < 45) {
+          this.qualityStableFrames--;
+          if (this.qualityStableFrames < -2) {
+              // Downgrade
+              const nextTier = Math.max(0, RENDER_STATE.currentTier - 1);
+              if (nextTier !== RENDER_STATE.currentTier) {
+                  console.log(`[RenderService] Performance Drop (${avgFps.toFixed(1)} FPS). Downgrading to ${QUALITY_TIERS[nextTier].name}`);
+                  this.applyQuality(nextTier);
+                  this.qualityStableFrames = 0;
+              }
+          }
+      } else if (avgFps > 58) {
+          this.qualityStableFrames++;
+          if (this.qualityStableFrames > 5) {
+              // Upgrade
+              const nextTier = Math.min(QUALITY_TIERS.length - 1, RENDER_STATE.currentTier + 1);
+              if (nextTier !== RENDER_STATE.currentTier) {
+                  console.log(`[RenderService] Performance Good (${avgFps.toFixed(1)} FPS). Upgrading to ${QUALITY_TIERS[nextTier].name}`);
+                  this.applyQuality(nextTier);
+                  this.qualityStableFrames = 0;
+              }
+          }
+      } else {
+          // Stable in middle, reset counter slowly
+          if (this.qualityStableFrames > 0) this.qualityStableFrames--;
+          if (this.qualityStableFrames < 0) this.qualityStableFrames++;
+      }
+  }
+
+  private applyQuality(tierIndex: number) {
+      const tier = QUALITY_TIERS[tierIndex];
+      RENDER_STATE.currentTier = tierIndex;
+      RENDER_STATE.shadowsEnabled = tier.shadow;
+      RENDER_STATE.lightingScale = tier.lightScale;
+      RENDER_STATE.particleLimit = tier.particleCap;
+      
+      this.lightingRenderer.setResolutionScale(tier.lightScale);
+  }
+
   render(
       entities: Entity[], 
       player: Entity, 
@@ -124,6 +196,9 @@ export class RenderService {
       shake: {intensity: number, x: number, y: number}
   ) {
     if (!this.ctx || !this.canvas) return;
+    const now = performance.now();
+    this.monitorPerformance(now);
+
     const w = this.canvas.width;
     const h = this.canvas.height;
     
@@ -154,8 +229,8 @@ export class RenderService {
     // 3. Background Pass
     this.floorRenderer.drawFloor(this.ctx, cam, zone, this.world.mapBounds, w, h);
 
-    // 4. Shadow Pass (High End Only)
-    if (this.isHighEnd) {
+    // 4. Shadow Pass (High End Only, Now Dynamic)
+    if (RENDER_STATE.shadowsEnabled) {
         this.drawShadows(this.renderList);
     }
 
@@ -463,12 +538,15 @@ export class RenderService {
   private applyPostEffects(w: number, h: number) {
       if (!this.ctx) return;
       
-      const grad = this.ctx.createRadialGradient(w/2, h/2, h/2, w/2, h/2, h);
-      grad.addColorStop(0, 'transparent');
-      grad.addColorStop(1, 'rgba(0,0,0,0.85)');
-      this.ctx.fillStyle = grad;
-      this.ctx.globalCompositeOperation = 'source-over';
-      this.ctx.fillRect(0, 0, w, h);
+      // Skip expensive gradients on LOW quality
+      if (RENDER_STATE.currentTier > 0) {
+          const grad = this.ctx.createRadialGradient(w/2, h/2, h/2, w/2, h/2, h);
+          grad.addColorStop(0, 'transparent');
+          grad.addColorStop(1, 'rgba(0,0,0,0.85)');
+          this.ctx.fillStyle = grad;
+          this.ctx.globalCompositeOperation = 'source-over';
+          this.ctx.fillRect(0, 0, w, h);
+      }
 
       const integrity = this.player.stats.playerHp() / this.player.stats.playerStats().hpMax;
       if (integrity < 0.3 && Math.random() < 0.1) {

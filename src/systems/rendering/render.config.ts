@@ -1,6 +1,6 @@
 
 export const RENDER_CONFIG = {
-  FRUSTUM_MARGIN: 500, // Reduced margin for tighter culling
+  FRUSTUM_MARGIN: 500,
   MAX_CACHE_SIZE: 500,
   FLOOR_CACHE_PADDING: 500,
   FLOOR_TILE_SIZE: 200,
@@ -34,21 +34,32 @@ export const RENDER_CONFIG = {
     BASE_ZOOM: 1.0,
     MIN_ZOOM: 0.6,
     MAX_ZOOM: 1.4,
-    ZOOM_SPEED: 0.05, // Speed of interpolation
+    ZOOM_SPEED: 0.05, 
     SMOOTH_FACTOR: 0.1,
-    POSITION_DAMPING: 0.08, // Tighter tracking
+    POSITION_DAMPING: 0.08,
     LOOK_AHEAD_DIST: 20,
-    BOUNDS_MARGIN: 100, // Cushion against map edges
+    BOUNDS_MARGIN: 100, 
     
-    // Dynamic Sensitivity Curve
-    MIN_ZOOM_SENSITIVITY: 0.0005, // Slower when zoomed out (Tactical)
-    MAX_ZOOM_SENSITIVITY: 0.002,  // Faster when zoomed in (Detail)
+    MIN_ZOOM_SENSITIVITY: 0.0005,
+    MAX_ZOOM_SENSITIVITY: 0.002,
     
     PINCH_SENSITIVITY: 0.005,
     WHEEL_SENSITIVITY: 0.001,
     
-    // Rotation Config
     ROTATION_SENSITIVITY: 1.5,
     ROTATION_SMOOTHING: 0.15
   }
+};
+
+export const QUALITY_TIERS = [
+  { name: 'LOW', shadow: false, lightScale: 0.25, particleCap: 100 },
+  { name: 'MEDIUM', shadow: false, lightScale: 0.5, particleCap: 300 },
+  { name: 'HIGH', shadow: true, lightScale: 0.5, particleCap: 600 }
+];
+
+export const RENDER_STATE = {
+  currentTier: 2, // Start at HIGH (index 2)
+  shadowsEnabled: true,
+  lightingScale: 0.5,
+  particleLimit: 600
 };

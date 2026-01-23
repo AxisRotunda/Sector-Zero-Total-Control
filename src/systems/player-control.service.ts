@@ -43,6 +43,9 @@ export class PlayerControlService {
 
     // Explicit Attack State Machine
     private attackState: 'IDLE' | 'STARTUP' | 'ACTIVE' | 'RECOVERY' = 'IDLE';
+    
+    // Pool for rotated input vector to avoid per-frame allocation
+    private _rotatedInput = { x: 0, y: 0 };
 
     update(globalTime: number) {
         const player = this.world.player;
@@ -79,15 +82,14 @@ export class PlayerControlService {
             
             // Rotate the input vector inversely to the camera rotation
             // WorldVec = Rotate(ScreenVec, -CameraAngle)
+            // Use reused vector to avoid garbage collection
             const cos = Math.cos(-camRot);
             const sin = Math.sin(-camRot);
             
-            const rotatedInput = {
-                x: input.x * cos - input.y * sin,
-                y: input.x * sin + input.y * cos
-            };
+            this._rotatedInput.x = input.x * cos - input.y * sin;
+            this._rotatedInput.y = input.x * sin + input.y * cos;
 
-            isMoving = this.physics.updateEntityPhysics(player, stats, rotatedInput);
+            isMoving = this.physics.updateEntityPhysics(player, stats, this._rotatedInput);
             
             // Haptic feedback for sudden stops (wall hits)
             if (Math.hypot(input.x, input.y) > 0.5) {

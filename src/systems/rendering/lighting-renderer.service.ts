@@ -2,7 +2,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Camera, Entity, Zone } from '../../models/game.models';
 import { IsoUtils } from '../../utils/iso-utils';
-import { RENDER_CONFIG } from './render.config';
+import { RENDER_CONFIG, RENDER_STATE } from './render.config';
 import { LightingService } from './lighting.service';
 
 @Injectable({ providedIn: 'root' })
@@ -20,27 +20,53 @@ export class LightingRendererService {
   // Cache for rgba strings to avoid allocation
   private colorCache = new Map<string, string>();
 
+  private currentScale = RENDER_CONFIG.LIGHTING.RESOLUTION_SCALE;
+  private currentWidth = 0;
+  private currentHeight = 0;
+
   init(width: number, height: number) {
-    const scale = RENDER_CONFIG.LIGHTING.RESOLUTION_SCALE;
-    const w = Math.floor(width * scale);
-    const h = Math.floor(height * scale);
+    this.currentWidth = width;
+    this.currentHeight = height;
+    this.updateCanvasDimensions();
+    
+    // Pre-render the Light Sprite
+    this.renderLightSprite();
+  }
+
+  private updateCanvasDimensions() {
+    // Use dynamic scale from RenderState if available, fallback to config
+    const scale = RENDER_STATE.lightingScale;
+    const w = Math.floor(this.currentWidth * scale);
+    const h = Math.floor(this.currentHeight * scale);
+
+    // Only recreate if dimensions changed
+    if (this.canvas && this.canvas.width === w && this.canvas.height === h) return;
 
     if (typeof OffscreenCanvas !== 'undefined') {
       this.canvas = new OffscreenCanvas(w, h);
-      this.lightSprite = new OffscreenCanvas(256, 256);
+      if (!this.lightSprite) this.lightSprite = new OffscreenCanvas(256, 256);
     } else {
       this.canvas = document.createElement('canvas');
       this.canvas.width = w;
       this.canvas.height = h;
-      this.lightSprite = document.createElement('canvas');
-      this.lightSprite.width = 256;
-      this.lightSprite.height = 256;
+      if (!this.lightSprite) {
+          this.lightSprite = document.createElement('canvas');
+          this.lightSprite.width = 256;
+          this.lightSprite.height = 256;
+      }
     }
     
-    this.ctx = this.canvas.getContext('2d') as any;
+    this.ctx = this.canvas.getContext('2d', { alpha: true }) as any;
+    this.currentScale = scale;
     
-    // Pre-render the Light Sprite
+    // Re-render sprite if canvas changed to ensure validity
     this.renderLightSprite();
+  }
+
+  setResolutionScale(scale: number) {
+      if (Math.abs(this.currentScale - scale) > 0.01) {
+          this.updateCanvasDimensions();
+      }
   }
 
   private renderLightSprite() {
@@ -52,24 +78,25 @@ export class LightingRendererService {
       const cy = h/2;
       const radius = w/2;
 
-      // Draw standard white falloff
+      ctx.clearRect(0, 0, w, h);
+
+      // Draw standard falloff
+      // CRITICAL FIX: Use BLACK instead of WHITE.
+      // 'destination-out' uses Alpha to cut holes. Color doesn't matter.
+      // But if blending fails, Black is invisible on the dark overlay, White creates fog.
       const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
-      grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
-      grad.addColorStop(0.2, 'rgba(255, 255, 255, 0.8)');
-      grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      grad.addColorStop(0, 'rgba(0, 0, 0, 1)');
+      grad.addColorStop(0.2, 'rgba(0, 0, 0, 0.8)');
+      grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
       
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, w, h);
   }
 
   resize(width: number, height: number) {
-    if (!this.canvas) {
-        this.init(width, height);
-        return;
-    }
-    const scale = RENDER_CONFIG.LIGHTING.RESOLUTION_SCALE;
-    this.canvas.width = Math.floor(width * scale);
-    this.canvas.height = Math.floor(height * scale);
+    this.currentWidth = width;
+    this.currentHeight = height;
+    this.updateCanvasDimensions();
   }
 
   drawLighting(
@@ -83,11 +110,19 @@ export class LightingRendererService {
   ) {
     if (!RENDER_CONFIG.LIGHTING.ENABLED || !this.ctx || !this.canvas) return;
 
-    const scale = RENDER_CONFIG.LIGHTING.RESOLUTION_SCALE;
+    // Ensure scale matches current state
+    if (this.currentScale !== RENDER_STATE.lightingScale) {
+        this.updateCanvasDimensions();
+    }
+
+    const scale = this.currentScale;
     const w = this.canvas.width;
     const h = this.canvas.height;
     const ctx = this.ctx;
     const gi = this.lightingService.globalAmbient();
+
+    // --- CLEAR BUFFER ---
+    ctx.clearRect(0, 0, w, h);
 
     // --- PASS 1: AMBIENT OCCLUSION (Darkness) ---
     ctx.globalCompositeOperation = 'source-over';
@@ -99,16 +134,13 @@ export class LightingRendererService {
     ctx.save();
     
     // Calculate center relative to camera
-    // Note: IsoUtils handles rotation now, so we just translate/scale
     IsoUtils.toIso(cam.x, cam.y, 0, this._iso);
     
     ctx.translate(w/2, h/2);
-    // REMOVED: ctx.rotate(cam.rotation); -> Handled in IsoUtils
     ctx.scale(cam.zoom * scale, cam.zoom * scale);
     ctx.translate(-this._iso.x, -this._iso.y);
 
     // CUTOUTS - Use destination-out to punch through darkness
-    // Optimization: Use Sprite for cutouts (much faster than gradients)
     ctx.globalCompositeOperation = 'destination-out';
 
     // Player cutout
@@ -126,6 +158,7 @@ export class LightingRendererService {
 
     for (let i = 0; i < len; i++) {
         const light = visibleLights[i];
+        // Skip white/black lights in emissive pass to avoid blowing out the scene
         if (light.color === '#ffffff' || light.color === '#000000') continue; 
         
         this.drawColoredLight(ctx, light.x, light.y, light.z || 0, light.radius * 0.8, light.intensity * 0.6, light.color);
@@ -158,9 +191,6 @@ export class LightingRendererService {
   private drawColoredLight(ctx: any, x: number, y: number, z: number, radius: number, intensity: number, color: string) {
       IsoUtils.toIso(x, y, z, this._iso);
       
-      // Optimization: Check bounds before creating gradient (Simple Culling)
-      // Though Service culls, transform might move it off screen? Service culling accounts for that.
-      
       const grad = ctx.createRadialGradient(this._iso.x, this._iso.y, radius * 0.1, this._iso.x, this._iso.y, radius);
       
       const c = this.hexToRgba(color, intensity);
@@ -176,8 +206,6 @@ export class LightingRendererService {
   }
 
   private hexToRgba(hex: string, alpha: number): string {
-      // Create cache key based on color and alpha
-      // Alpha is rounded to 2 decimals to improve cache hit rate
       const alphaFixed = alpha.toFixed(2);
       const key = hex + '_' + alphaFixed;
       
@@ -198,7 +226,6 @@ export class LightingRendererService {
       
       const val = `rgba(${r},${g},${b},${alphaFixed})`;
       
-      // Limit cache size to prevent memory leak over long sessions
       if (this.colorCache.size > 200) {
           this.colorCache.clear();
       }
