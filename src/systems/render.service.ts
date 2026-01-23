@@ -1,7 +1,7 @@
 
 import { Injectable, inject, signal } from '@angular/core';
-import { Entity, Zone, FloatingText, Camera, Particle } from '../models/game.models';
-import { WorldService } from '../game/world/world.service';
+import { Entity, Zone, FloatingText, Camera, Particle } from '../../models/game.models';
+import { WorldService } from '../../game/world/world.service';
 import { FloorRendererService } from './rendering/floor-renderer.service';
 import { StructureRendererService } from './rendering/structure-renderer.service';
 import { UnitRendererService } from './rendering/unit-renderer.service';
@@ -9,17 +9,18 @@ import { ShadowRendererService } from './rendering/shadow-renderer.service';
 import { EffectRendererService } from './rendering/effect-renderer.service';
 import { EntityRendererService } from './rendering/entity-renderer.service'; 
 import { LightingRendererService } from './rendering/lighting-renderer.service';
-import { IsoUtils } from '../utils/iso-utils';
-import { PlayerService } from '../game/player/player.service';
+import { IsoUtils } from '../../utils/iso-utils';
+import { PlayerService } from '../../game/player/player.service';
 import { EntitySorterService } from './rendering/entity-sorter.service';
-import { RENDER_CONFIG, RENDER_STATE, QUALITY_TIERS } from './rendering/render.config';
-import { InputService } from '../services/input.service';
-import { SpatialHashService } from './spatial-hash.service';
-import { InteractionService } from '../services/interaction.service';
-import { ChunkManagerService } from '../game/world/chunk-manager.service';
+import { RENDER_CONFIG } from './rendering/render.config';
+import { InputService } from '../../services/input.service';
+import { SpatialHashService } from '../spatial-hash.service';
+import { InteractionService } from '../../services/interaction.service';
+import { ChunkManagerService } from '../../game/world/chunk-manager.service';
 import { LightingService } from './rendering/lighting.service';
-import { TimeService } from '../game/time.service';
-import { MissionService } from '../game/mission.service';
+import { TimeService } from '../../game/time.service';
+import { MissionService } from '../../game/mission.service';
+import { PerformanceManagerService } from '../../game/performance-manager.service';
 
 @Injectable({
   providedIn: 'root'
@@ -38,6 +39,7 @@ export class RenderService {
   private lighting = inject(LightingService);
   private timeService = inject(TimeService);
   private mission = inject(MissionService);
+  private performanceManager = inject(PerformanceManagerService);
   
   // Renderers
   private floorRenderer = inject(FloorRendererService);
@@ -51,7 +53,6 @@ export class RenderService {
   private player = inject(PlayerService);
   
   debugMode = signal(false);
-  private isHighEnd = true;
   private camCenter = { x: 0, y: 0 };
 
   private renderList: (Entity | Particle)[] = [];
@@ -65,19 +66,14 @@ export class RenderService {
 
   // Performance Monitoring
   private lastFrameTime = 0;
-  private frameCount = 0;
-  private fpsAccumulator = 0;
-  private qualityStableFrames = 0;
 
   init(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d', { alpha: false });
     this.inputService.setCanvas(canvas);
     
-    this.isHighEnd = navigator.hardwareConcurrency > 4 && !/Mobile|Android/.test(navigator.userAgent);
-    
-    // Initial Quality Set
-    this.applyQuality(this.isHighEnd ? 2 : 1); // High or Medium
+    // Initialize frame time to avoid giant delta on first frame
+    this.lastFrameTime = performance.now();
 
     this.resize();
     this.resizeListener = () => this.resize();
@@ -122,69 +118,6 @@ export class RenderService {
       return out;
   }
 
-  private monitorPerformance(now: number) {
-      const delta = now - this.lastFrameTime;
-      this.lastFrameTime = now;
-      
-      // Update FPS
-      const fps = 1000 / delta;
-      this.fpsAccumulator += fps;
-      this.frameCount++;
-
-      if (this.frameCount >= 30) {
-          const avgFps = this.fpsAccumulator / 30;
-          this.frameCount = 0;
-          this.fpsAccumulator = 0;
-          
-          this.adjustQuality(avgFps);
-      }
-  }
-
-  private adjustQuality(avgFps: number) {
-      // Adaptive Logic:
-      // FPS < 45: Downgrade
-      // FPS > 58: Upgrade (if not max)
-      // Hysteresis: Require consistent performance to switch
-      
-      if (avgFps < 45) {
-          this.qualityStableFrames--;
-          if (this.qualityStableFrames < -2) {
-              // Downgrade
-              const nextTier = Math.max(0, RENDER_STATE.currentTier - 1);
-              if (nextTier !== RENDER_STATE.currentTier) {
-                  console.log(`[RenderService] Performance Drop (${avgFps.toFixed(1)} FPS). Downgrading to ${QUALITY_TIERS[nextTier].name}`);
-                  this.applyQuality(nextTier);
-                  this.qualityStableFrames = 0;
-              }
-          }
-      } else if (avgFps > 58) {
-          this.qualityStableFrames++;
-          if (this.qualityStableFrames > 5) {
-              // Upgrade
-              const nextTier = Math.min(QUALITY_TIERS.length - 1, RENDER_STATE.currentTier + 1);
-              if (nextTier !== RENDER_STATE.currentTier) {
-                  console.log(`[RenderService] Performance Good (${avgFps.toFixed(1)} FPS). Upgrading to ${QUALITY_TIERS[nextTier].name}`);
-                  this.applyQuality(nextTier);
-                  this.qualityStableFrames = 0;
-              }
-          }
-      } else {
-          // Stable in middle, reset counter slowly
-          if (this.qualityStableFrames > 0) this.qualityStableFrames--;
-          if (this.qualityStableFrames < 0) this.qualityStableFrames++;
-      }
-  }
-
-  private applyQuality(tierIndex: number) {
-      const tier = QUALITY_TIERS[tierIndex];
-      RENDER_STATE.currentTier = tierIndex;
-      RENDER_STATE.shadowsEnabled = tier.shadow;
-      RENDER_STATE.lightingScale = tier.lightScale;
-      RENDER_STATE.particleLimit = tier.particleCap;
-      
-      this.lightingRenderer.setResolutionScale(tier.lightScale);
-  }
-
   render(
       entities: Entity[], 
       player: Entity, 
@@ -196,8 +129,15 @@ export class RenderService {
       shake: {intensity: number, x: number, y: number}
   ) {
     if (!this.ctx || !this.canvas) return;
+    
+    // Performance Monitoring
     const now = performance.now();
-    this.monitorPerformance(now);
+    const delta = now - this.lastFrameTime;
+    this.lastFrameTime = now;
+    this.performanceManager.monitorFrame(delta);
+
+    // Apply quality settings
+    this.lightingRenderer.setResolutionScale(this.performanceManager.lightingScale());
 
     const w = this.canvas.width;
     const h = this.canvas.height;
@@ -230,7 +170,7 @@ export class RenderService {
     this.floorRenderer.drawFloor(this.ctx, cam, zone, this.world.mapBounds, w, h);
 
     // 4. Shadow Pass (High End Only, Now Dynamic)
-    if (RENDER_STATE.shadowsEnabled) {
+    if (this.performanceManager.shadowsEnabled()) {
         this.drawShadows(this.renderList);
     }
 
@@ -404,11 +344,17 @@ export class RenderService {
       
       this.renderList.push(player);
 
+      // Particle Culling and Limiting based on Performance Tier
       const pLen = particles.length;
+      const pLimit = this.performanceManager.particleLimit();
+      let pCount = 0;
+
       for (let i = 0; i < pLen; i++) {
+          if (pCount >= pLimit) break; // Hard cap
           const p = particles[i];
           if (p.x >= frustum.minX && p.x <= frustum.maxX && p.y >= frustum.minY && p.y <= frustum.maxY) {
               this.renderList.push(p);
+              pCount++;
           }
       }
 
@@ -539,7 +485,7 @@ export class RenderService {
       if (!this.ctx) return;
       
       // Skip expensive gradients on LOW quality
-      if (RENDER_STATE.currentTier > 0) {
+      if (this.performanceManager.currentTier().name !== 'LOW') {
           const grad = this.ctx.createRadialGradient(w/2, h/2, h/2, w/2, h/2, h);
           grad.addColorStop(0, 'transparent');
           grad.addColorStop(1, 'rgba(0,0,0,0.85)');

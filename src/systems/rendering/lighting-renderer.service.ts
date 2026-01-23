@@ -2,7 +2,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Camera, Entity, Zone } from '../../models/game.models';
 import { IsoUtils } from '../../utils/iso-utils';
-import { RENDER_CONFIG, RENDER_STATE } from './render.config';
+import { RENDER_CONFIG } from './render.config';
 import { LightingService } from './lighting.service';
 
 @Injectable({ providedIn: 'root' })
@@ -20,7 +20,7 @@ export class LightingRendererService {
   // Cache for rgba strings to avoid allocation
   private colorCache = new Map<string, string>();
 
-  private currentScale = RENDER_CONFIG.LIGHTING.RESOLUTION_SCALE;
+  private currentScale = 0.5; // Default, controlled by PerformanceManager
   private currentWidth = 0;
   private currentHeight = 0;
 
@@ -34,12 +34,11 @@ export class LightingRendererService {
   }
 
   private updateCanvasDimensions() {
-    // Use dynamic scale from RenderState if available, fallback to config
-    const scale = RENDER_STATE.lightingScale;
-    const w = Math.floor(this.currentWidth * scale);
-    const h = Math.floor(this.currentHeight * scale);
+    // Current Scale is updated via setResolutionScale()
+    const w = Math.floor(this.currentWidth * this.currentScale);
+    const h = Math.floor(this.currentHeight * this.currentScale);
 
-    // Only recreate if dimensions changed
+    // Only recreate if dimensions actually changed
     if (this.canvas && this.canvas.width === w && this.canvas.height === h) return;
 
     if (typeof OffscreenCanvas !== 'undefined') {
@@ -56,15 +55,15 @@ export class LightingRendererService {
       }
     }
     
-    this.ctx = this.canvas.getContext('2d', { alpha: true }) as any;
-    this.currentScale = scale;
+    this.ctx = this.canvas.getContext('2d', { alpha: true }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
     
-    // Re-render sprite if canvas changed to ensure validity
+    // Re-render sprite if canvas changed to ensure validity (though sprite is separate, context might need fresh sprite on some platforms)
     this.renderLightSprite();
   }
 
   setResolutionScale(scale: number) {
       if (Math.abs(this.currentScale - scale) > 0.01) {
+          this.currentScale = scale;
           this.updateCanvasDimensions();
       }
   }
@@ -80,10 +79,8 @@ export class LightingRendererService {
 
       ctx.clearRect(0, 0, w, h);
 
-      // Draw standard falloff
-      // CRITICAL FIX: Use BLACK instead of WHITE.
-      // 'destination-out' uses Alpha to cut holes. Color doesn't matter.
-      // But if blending fails, Black is invisible on the dark overlay, White creates fog.
+      // FIX: Use BLACK gradient for proper destination-out blending behavior
+      // White gradients can cause "white fog" artifacts on some compositors when using destination-out
       const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
       grad.addColorStop(0, 'rgba(0, 0, 0, 1)');
       grad.addColorStop(0.2, 'rgba(0, 0, 0, 0.8)');
@@ -109,11 +106,6 @@ export class LightingRendererService {
     screenHeight: number
   ) {
     if (!RENDER_CONFIG.LIGHTING.ENABLED || !this.ctx || !this.canvas) return;
-
-    // Ensure scale matches current state
-    if (this.currentScale !== RENDER_STATE.lightingScale) {
-        this.updateCanvasDimensions();
-    }
 
     const scale = this.currentScale;
     const w = this.canvas.width;

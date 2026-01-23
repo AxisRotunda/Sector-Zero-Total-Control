@@ -15,7 +15,7 @@ export const RENDER_CONFIG = {
   
   LIGHTING: {
     ENABLED: true,
-    RESOLUTION_SCALE: 0.5,
+    // Base resolution scale is now handled dynamically by PerformanceManager
     BLUR_QUALITY: 'medium',
     BASE_AMBIENT: 'rgba(0, 0, 0, 0.7)',
     PRESETS: {
@@ -54,12 +54,5 @@ export const RENDER_CONFIG = {
 export const QUALITY_TIERS = [
   { name: 'LOW', shadow: false, lightScale: 0.25, particleCap: 100 },
   { name: 'MEDIUM', shadow: false, lightScale: 0.5, particleCap: 300 },
-  { name: 'HIGH', shadow: true, lightScale: 0.5, particleCap: 600 }
+  { name: 'HIGH', shadow: true, lightScale: 0.75, particleCap: 600 }
 ];
-
-export const RENDER_STATE = {
-  currentTier: 2, // Start at HIGH (index 2)
-  shadowsEnabled: true,
-  lightingScale: 0.5,
-  particleLimit: 600
-};
