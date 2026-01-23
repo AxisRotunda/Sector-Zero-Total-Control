@@ -2,12 +2,11 @@
 import { ZoneTemplate } from "../../models/zone.models";
 import { BUILDING_PREFABS, STRUCTURE_DIMENSIONS } from "../prefabs/structures";
 
-// --- ARCHITECTURE: COMPACT HUB ---
-// Services are clustered around the spawn point for efficient access.
-// High-traffic NPCs are immediate neighbors.
+// --- ARCHITECTURE: CITADEL HUB ---
+// A bastion of Order and Sterility. Slate, Chrome, and Cyan light.
 
 const D = STRUCTURE_DIMENSIONS;
-const COLOR_PRIMARY = '#27272a';
+const COLOR_PRIMARY = '#334155'; // Slate-700 (Replaces heavy dark industrial)
 
 // Use a tighter plaza for the settlement feel
 const PLAZA_SIZE = 800; 
@@ -33,14 +32,21 @@ const shop = BUILDING_PREFABS.shop(300, 100); // Right side
 const training = BUILDING_PREFABS.trainingChamber(-600, -300); // Back Left
 const southGate = BUILDING_PREFABS.gateAssembly(1000, true);
 
+// Override prefab wall colors to match Citadel Theme
+[...spire.walls, ...medBay.walls, ...shop.walls, ...training.walls, ...southGate.walls].forEach(w => {
+    if (w.color === '#52525b' || w.color === '#27272a' || w.color === '#3f3f46') {
+        w.color = COLOR_PRIMARY;
+    }
+});
+
 export const HUB_ZONE: ZoneTemplate = {
   id: 'HUB',
   name: 'Liminal Citadel',
-  theme: 'INDUSTRIAL',
+  theme: 'HIGH_TECH', // Switch to High Tech for grid/clean look
   bounds: { minX: -1600, maxX: 1600, minY: -1600, maxY: 1800 },
   
   regionType: 'hub',
-  isSafeZone: true, // Safe harbor, disable combat
+  isSafeZone: true, // Safe harbor logic (brighter ambient)
   childZoneIds: ['SECTOR_9_N', 'HUB_TRAINING'],
 
   renderLayers: {
@@ -137,13 +143,13 @@ export const HUB_ZONE: ZoneTemplate = {
       { type: 'DECORATION', subType: 'HOLO_TABLE', x: 0, y: 0, data: { color: '#06b6d4' } },
 
       // --- ATMOSPHERE ---
-      { type: 'DECORATION', subType: 'RUG', x: 0, y: 0, data: { width: 600, height: 600, color: '#18181b' } },
+      { type: 'DECORATION', subType: 'RUG', x: 0, y: 0, data: { width: 600, height: 600, color: '#1e293b' } }, // Slate Rug
       
-      // Lamps
-      { type: 'DECORATION', subType: 'STREET_LIGHT', x: -200, y: -200, data: {} },
-      { type: 'DECORATION', subType: 'STREET_LIGHT', x: 200, y: -200, data: {} },
-      { type: 'DECORATION', subType: 'STREET_LIGHT', x: -200, y: 200, data: {} },
-      { type: 'DECORATION', subType: 'STREET_LIGHT', x: 200, y: 200, data: {} },
+      // Lamps - Using White/Cyan overrides for sterile lighting
+      { type: 'DECORATION', subType: 'STREET_LIGHT', x: -200, y: -200, data: { color: '#cffafe' } },
+      { type: 'DECORATION', subType: 'STREET_LIGHT', x: 200, y: -200, data: { color: '#cffafe' } },
+      { type: 'DECORATION', subType: 'STREET_LIGHT', x: -200, y: 200, data: { color: '#cffafe' } },
+      { type: 'DECORATION', subType: 'STREET_LIGHT', x: 200, y: 200, data: { color: '#cffafe' } },
     ],
     dynamic: []
   },
@@ -155,18 +161,19 @@ export const HUB_ZONE: ZoneTemplate = {
       targetZoneId: 'SECTOR_9_N', 
       transitionType: 'GATE', 
       locked: true,
-      spawnOverride: { x: 0, y: -650 } // Offset 150px from return portal (-800)
+      spawnOverride: { x: 0, y: -650 } 
     }
   ],
 
   environment: {
-    weather: 'ASH',
+    weather: 'NONE', // Clean air
     floorPattern: 'HUB',
     colors: {
-      ground: '#09090b',
-      wall: '#27272a',
-      detail: '#06b6d4'
-    }
+      ground: '#1e293b', // Slate-800
+      wall: '#334155',   // Slate-700
+      detail: '#06b6d4'  // Cyan-500
+    },
+    ambientColor: '#0f172a' // Slate-900 (High-Tech Base)
   },
 
   metadata: {

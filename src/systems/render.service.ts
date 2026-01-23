@@ -224,7 +224,13 @@ export class RenderService {
 
           if (ent.type === 'DECORATION') {
               if (ent.subType === 'STREET_LIGHT') {
-                  this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, type: 'STATIC', ...presets.STREET_LIGHT });
+                  // Allow override via entity color, fallback to preset
+                  const lightColor = ent.color && ent.color !== '#ffffff' ? ent.color : presets.STREET_LIGHT.color;
+                  this.lighting.registerLight({ 
+                      id: `L_${ent.id}`, x: ent.x, y: ent.y, type: 'STATIC', 
+                      ...presets.STREET_LIGHT,
+                      color: lightColor 
+                  });
               } else if (ent.subType === 'NEON') {
                   this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, color: ent.color, type: 'STATIC', ...presets.NEON });
               } else if (ent.subType === 'DYNAMIC_GLOW') {

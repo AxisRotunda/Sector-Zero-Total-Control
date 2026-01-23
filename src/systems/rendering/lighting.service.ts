@@ -55,6 +55,14 @@ export class LightingService {
           case 'VOID': intensity = 0.95; color = '#020617'; break; // Pitch black
       }
       
+      // SOCIO-POLITICAL OVERRIDE: Safe Zones (Hubs) should be well-lit to represent Order/Safety
+      // Lower intensity value = Less darkness alpha = Brighter scene
+      if (zone.isSafeZone) {
+          intensity = Math.min(intensity, 0.4); 
+          // Shift ambient towards blue/white in safe zones for sterility
+          if (color === '#000000') color = '#1e293b'; 
+      }
+      
       this.globalAmbient.set({ ambientColor: color, intensity });
   }
 

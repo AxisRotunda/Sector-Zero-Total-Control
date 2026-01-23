@@ -51,8 +51,8 @@ export class StructureRendererService {
       }
 
       // --- STATIC CACHED STRUCTURES ---
-      // Cache Key: Includes visual properties + 'v7' version bump for geometry update
-      const cacheKey = `STRUCT_${structureType}_${w}_${d}_${h}_${e.color}_${theme}_${e.locked}_${detailStyle}_v7`;
+      // Cache Key: Includes visual properties + 'v8' version bump
+      const cacheKey = `STRUCT_${structureType}_${w}_${d}_${h}_${e.color}_${theme}_${e.locked}_${detailStyle}_v8`;
       
       const isoBounds = this.calculateIsoBounds(w, d, h);
       const padding = 120;
@@ -519,7 +519,13 @@ export class StructureRendererService {
       ctx.fillStyle = '#18181b';
       ctx.fillRect(0, -5, 40, 10);
       ctx.translate(35, 0);
-      ctx.fillStyle = '#fbbf24'; ctx.shadowColor = '#fbbf24'; ctx.shadowBlur = 10;
+      
+      // Use entity color for the bulb if provided (default to amber if not)
+      const bulbColor = e.color || '#fbbf24';
+      ctx.fillStyle = bulbColor; 
+      ctx.shadowColor = bulbColor; 
+      ctx.shadowBlur = 15;
+      
       ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI*2); ctx.fill();
       ctx.restore();
       ctx.translate(-ax, -ay);
