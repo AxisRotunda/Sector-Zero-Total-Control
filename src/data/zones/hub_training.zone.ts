@@ -24,12 +24,16 @@ export const HUB_TRAINING_ZONE: ZoneTemplate = {
   
   geometry: {
     walls: [
-      // --- Perimeter Bounds ---
-      // Vertical
+      // --- BOUNDARIES (The "Invisible" Walls made Visible) ---
+      // Surrounding the central combat square (Size 1400x1400)
+      
+      // West Wall (Left)
       { x: -700, y: 0, w: 20, h: 1400, height: 400, color: '#38bdf8', type: 'BARRIER' },
+      // East Wall (Right)
       { x: 700, y: 0, w: 20, h: 1400, height: 400, color: '#38bdf8', type: 'BARRIER' },
-      // Horizontal
+      // North Wall (Top)
       { x: 0, y: -700, w: 1400, h: 20, height: 400, color: '#38bdf8', type: 'BARRIER' },
+      // South Wall (Bottom)
       { x: 0, y: 700, w: 1400, h: 20, height: 400, color: '#38bdf8', type: 'BARRIER' },
       
       // --- Combat Arena Cover (Symmetric) ---

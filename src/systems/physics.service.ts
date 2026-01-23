@@ -6,12 +6,14 @@ import { ChunkManagerService } from '../game/world/chunk-manager.service';
 import { isDestructible } from '../utils/type-guards';
 import * as BALANCE from '../config/balance.config';
 import { WorldService } from '../game/world/world.service';
+import { ParticleService } from './particle.service';
 
 @Injectable({ providedIn: 'root' })
 export class PhysicsService {
   private spatialHash = inject(SpatialHashService);
   private chunkManager = inject(ChunkManagerService);
   private world = inject(WorldService);
+  private particleService = inject(ParticleService);
 
   // Optimization constants
   private readonly SPATIAL_BUFFER_RATIO = 1.5;
@@ -107,6 +109,8 @@ export class PhysicsService {
         if (this.checkCollision(e)) {
             e.x = prevX;
             e.vx = 0;
+            // Visual feedback for hitting wall
+            if (isPlayer && Math.abs(stepVx) > 0.5) this.spawnWallImpact(e);
         }
 
         const prevY = e.y;
@@ -114,6 +118,8 @@ export class PhysicsService {
         if (this.checkCollision(e)) {
             e.y = prevY;
             e.vy = 0;
+            // Visual feedback for hitting wall
+            if (isPlayer && Math.abs(stepVy) > 0.5) this.spawnWallImpact(e);
         }
 
         const bounds = this.world.mapBounds;
@@ -128,6 +134,26 @@ export class PhysicsService {
     }
     
     return isMoving;
+  }
+
+  private spawnWallImpact(e: Entity) {
+      // Small cooldown to prevent particle spam
+      if (!e.data) e.data = {};
+      const now = Date.now();
+      if (e.data.lastWallHit && now - e.data.lastWallHit < 200) return;
+      
+      e.data.lastWallHit = now;
+      this.particleService.addParticles({
+          x: e.x + e.vx * 2, // Project slightly forward to hit point
+          y: e.y + e.vy * 2,
+          z: 20,
+          color: '#06b6d4',
+          count: 3,
+          speed: 1,
+          size: 2,
+          type: 'square',
+          life: 0.4
+      });
   }
 
   private checkCollision(e: Entity): boolean {

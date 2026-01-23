@@ -594,17 +594,94 @@ export class StructureRendererService {
   // --- SUB-STRUCTURE RENDERERS ---
   
   drawEnergyBarrier(ctx: CanvasRenderingContext2D, e: Entity) {
-      const h = e.height || 80; const w = e.width || 100; const pos = IsoUtils.toIso(e.x, e.y, 0);
-      ctx.save(); ctx.translate(pos.x, pos.y);
-      const p1 = IsoUtils.toIso(-w/2, 0, 0); const p2 = IsoUtils.toIso(w/2, 0, 0); const p3 = IsoUtils.toIso(w/2, 0, h); const p4 = IsoUtils.toIso(-w/2, 0, h);
-      ctx.fillStyle = '#18181b'; ctx.fillRect(p1.x - 5, p1.y - 10, 10, 10); ctx.fillRect(p2.x - 5, p2.y - 10, 10, 10);
+      const h = e.height || 150; 
+      const w = e.width || 100; 
+      const d = e.depth || 20; // Used for "Fence" thickness/alignment if needed, but barrier usually flat
+      const pos = IsoUtils.toIso(e.x, e.y, 0);
+      
+      ctx.save(); 
+      ctx.translate(pos.x, pos.y);
+      
+      // Calculate corner points in Iso space
+      // Note: Assuming barrier aligns with X axis by default. If Y-axis, dimensions should be flipped in Entity config or rotated.
+      // For general "Box" volume of barrier:
+      const hw = w/2;
+      const hd = d/2;
+      
+      const p1 = IsoUtils.toIso(-hw, hd, 0); // Base Left
+      const p2 = IsoUtils.toIso(hw, hd, 0);  // Base Right
+      const p3 = IsoUtils.toIso(hw, hd, h);  // Top Right
+      const p4 = IsoUtils.toIso(-hw, hd, h); // Top Left
+      
+      // Draw Base Emitters (Physical anchors)
+      ctx.fillStyle = '#18181b'; 
+      ctx.fillRect(p1.x - 5, p1.y - 5, 10, 10); 
+      ctx.fillRect(p2.x - 5, p2.y - 5, 10, 10);
+      
+      // Setup Holographic Effect
       ctx.globalCompositeOperation = 'screen';
-      const pulse = Math.sin(Date.now() * 0.005) * 0.2 + 0.5; 
+      
+      // 1. Energy Field Gradient (Vertical Fade)
       const grad = ctx.createLinearGradient(0, p1.y, 0, p3.y); 
-      grad.addColorStop(0, `${e.color}00`); grad.addColorStop(0.5, `${e.color}${Math.floor(pulse * 255).toString(16).padStart(2,'0')}`); grad.addColorStop(1, `${e.color}00`); 
-      ctx.fillStyle = grad; ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.fill();
-      ctx.strokeStyle = e.color; ctx.lineWidth = 1; ctx.globalAlpha = 0.3;
-      const lines = 5; for(let i=1; i<lines; i++) { const t = i/lines; const yOffset = (Date.now() * 0.02) % (h/lines); const lh = h * t + yOffset; if (lh > h) continue; const l1 = IsoUtils.toIso(-w/2, 0, lh); const l2 = IsoUtils.toIso(w/2, 0, lh); ctx.beginPath(); ctx.moveTo(l1.x, l1.y); ctx.lineTo(l2.x, l2.y); ctx.stroke(); }
+      grad.addColorStop(0, `${e.color}00`); 
+      grad.addColorStop(0.2, `${e.color}40`); 
+      grad.addColorStop(0.8, `${e.color}40`); 
+      grad.addColorStop(1, `${e.color}00`); 
+      
+      ctx.fillStyle = grad; 
+      ctx.beginPath(); 
+      ctx.moveTo(p1.x, p1.y); 
+      ctx.lineTo(p2.x, p2.y); 
+      ctx.lineTo(p3.x, p3.y); 
+      ctx.lineTo(p4.x, p4.y); 
+      ctx.fill();
+      
+      // 2. Holographic Grid Pattern (The "Visible Wall")
+      ctx.strokeStyle = e.color || '#38bdf8'; 
+      ctx.lineWidth = 1; 
+      ctx.globalAlpha = 0.6;
+      
+      // Clip to barrier face
+      ctx.save();
+      ctx.beginPath(); 
+      ctx.moveTo(p1.x, p1.y); 
+      ctx.lineTo(p2.x, p2.y); 
+      ctx.lineTo(p3.x, p3.y); 
+      ctx.lineTo(p4.x, p4.y); 
+      ctx.clip();
+
+      const time = Date.now() * 0.05;
+      const spacing = 40;
+      
+      // Draw Vertical Lines
+      const cols = Math.ceil(w / spacing);
+      for(let i=0; i<=cols; i++) {
+          const lx = -hw + i * spacing;
+          const top = IsoUtils.toIso(lx, hd, h);
+          const bot = IsoUtils.toIso(lx, hd, 0);
+          ctx.beginPath(); ctx.moveTo(bot.x, bot.y); ctx.lineTo(top.x, top.y); ctx.stroke();
+      }
+      
+      // Draw Scrolling Horizontal Lines
+      const rows = Math.ceil(h / spacing) + 1;
+      const yOffset = time % spacing;
+      
+      for(let i=0; i<rows; i++) {
+          const lh = (i * spacing + yOffset) % h;
+          const left = IsoUtils.toIso(-hw, hd, lh);
+          const right = IsoUtils.toIso(hw, hd, lh);
+          ctx.beginPath(); ctx.moveTo(left.x, left.y); ctx.lineTo(right.x, right.y); ctx.stroke();
+      }
+      
+      ctx.restore(); // End Clip
+
+      // 3. Top Rim Glow
+      ctx.lineWidth = 2; 
+      ctx.shadowColor = e.color || '#38bdf8';
+      ctx.shadowBlur = 10;
+      ctx.beginPath(); ctx.moveTo(p4.x, p4.y); ctx.lineTo(p3.x, p3.y); ctx.stroke();
+      
+      ctx.shadowBlur = 0;
       ctx.restore();
   }
 
