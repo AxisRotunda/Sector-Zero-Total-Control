@@ -202,140 +202,91 @@ export class PlayerAbilitiesService {
       
       const currentZoneId = this.world.currentZone().id;
 
-      // BRANCH 1: UNARMED
-      if (!equippedWeapon) {
-          const level = this.progression.level() || 1;
-          const baseDamage = 8; // Buffed from 6 to ensure damage vs armor
-          const scaledDamage = baseDamage + (level * 2) + (stats.damage * 0.3); 
-          
-          let comboMultiplier = 1.0;
-          let knockback = 5;
-          let stun = 0;
-          // BUFF: Significantly increased base reach (45 -> 75)
-          let reach = 75; 
-          let color = '#fbbf24';
-          let radiusMult = 1.0;
-
-          // Add a forward Lunge to help connect hits on mobile
-          const lungeSpeed = 12 + (combo * 4);
-          player.vx += Math.cos(player.angle) * lungeSpeed;
-          player.vy += Math.sin(player.angle) * lungeSpeed;
-
-          if (combo === 1) {
-              comboMultiplier = 1.2;
-              knockback = 8;
-              color = '#fcd34d';
-              reach = 80;
-          } else if (combo === 2) {
-              comboMultiplier = 2.5;
-              knockback = 35; 
-              stun = 45; 
-              color = '#f59e0b'; 
-              reach = 90;
-              radiusMult = 1.3; 
-              
-              this.sound.play('IMPACT');
-              this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: { intensity: 8, decay: 0.8 } });
-          }
-
-          const finalDamage = Math.max(1, scaledDamage * comboMultiplier);
-
-          const hitbox = this.entityPool.acquire('HITBOX', undefined, currentZoneId);
-          hitbox.type = 'HITBOX';
-          hitbox.source = 'PLAYER';
-          const offsetDist = 20 + (combo * 5); 
-          hitbox.x = player.x + Math.cos(player.angle) * offsetDist;
-          hitbox.y = player.y + Math.sin(player.angle) * offsetDist;
-          hitbox.z = 10;
-          
-          // Projectile Motion to sweep area
-          hitbox.vx = Math.cos(player.angle) * (3 + combo);
-          hitbox.vy = Math.sin(player.angle) * (3 + combo);
-          
-          hitbox.angle = player.angle;
-          hitbox.radius = reach * radiusMult;
-          // BUFF: Duration 10 -> 12
-          hitbox.timer = 12; 
-          
-          hitbox.damageValue = finalDamage; 
-
-          hitbox.color = color;
-          hitbox.state = 'ATTACK';
-          hitbox.knockbackForce = knockback;
-          hitbox.status.stun = stun;
-          hitbox.hitIds = new Set(); 
-
-          this.collisionService.checkHitboxCollisions(hitbox);
-          this.world.entities.push(hitbox);
-          this.haptic.impactLight();
-          
-          if (combo === 2) {
-              this.particleService.addParticles({
-                  x: hitbox.x, y: hitbox.y, z: 15,
-                  count: 12, speed: 6, color: '#f59e0b', size: 3, type: 'square',
-                  life: 0.4, emitsLight: true
-              });
-          }
-          
-          player.comboIndex = (combo + 1) % this.MAX_COMBO;
-          this.currentCombo.set(player.comboIndex);
-          return;
-      }
-
-      // BRANCH 2: ARMED
-      const weapon = equippedWeapon;
+      // UNARMED vs ARMED Logic
+      // If unarmed, base damage is handled in stats.damagePacket
       
-      const baseReach = weapon.stats?.['reach'] || 60; 
-      const reachScale = weapon.shape === 'psiBlade' ? 1.2 : 1.0;
-      let reach = (baseReach + (stats.damage * 0.3)) * reachScale;
-
-      let damage = weapon.stats['dmg'] || 5;
-      damage += stats.damage; 
-
-      let dmgMult = 1.0;
-      const baseKb = 8;
-      const kbMult = 4;
-      let color = '#f97316'; 
-      let stun = 0;
-
-      const knockback = baseKb + (combo * kbMult);
-
-      if (combo === 1) {
-          reach *= 1.2;
-          dmgMult = 1.2;
-          color = '#fb923c';
-      } else if (combo === 2) {
-          reach *= 1.5;
-          dmgMult = 2.0;
-          stun = 15; 
-          color = '#ea580c';
-      }
-
-      const finalDamage = Math.max(1, damage * dmgMult);
-
       const hitbox = this.entityPool.acquire('HITBOX', undefined, currentZoneId);
       hitbox.type = 'HITBOX';
       hitbox.source = 'PLAYER';
-      hitbox.x = player.x + Math.cos(player.angle) * 30; 
-      hitbox.y = player.y + Math.sin(player.angle) * 30;
+      
+      // ✅ FIX: Use damagePacket from stats directly
+      hitbox.damagePacket = { ...stats.damagePacket };
+      
+      // ✅ FIX: Use penetration from stats
+      if (stats.penetration) {
+        hitbox.penetration = { ...stats.penetration };
+      }
+
+      // Damage conversion (from equipped weapon)
+      if (equippedWeapon?.damageConversion) {
+        hitbox.damageConversion = { ...equippedWeapon.damageConversion };
+      }
+
+      let comboMultiplier = 1.0;
+      let knockback = 5;
+      let stun = 0;
+      let color = '#f97316';
+      let radiusMult = 1.0;
+      let reach = 60;
+
+      if (!equippedWeapon) {
+          // Unarmed specific tweaks
+          reach = 75; 
+          color = '#fbbf24';
+          const lungeSpeed = 12 + (combo * 4);
+          player.vx += Math.cos(player.angle) * lungeSpeed;
+          player.vy += Math.sin(player.angle) * lungeSpeed;
+      } else {
+          // Weapon tweaks
+          reach = (equippedWeapon.stats['reach'] || 60) + (stats.damage * 0.1); 
+      }
+
+      if (combo === 1) {
+          comboMultiplier = 1.2;
+          knockback += 3;
+          radiusMult = 1.1;
+      } else if (combo === 2) {
+          comboMultiplier = 2.0; // Big finisher
+          knockback += 15;
+          stun = 20;
+          radiusMult = 1.3;
+          this.sound.play('IMPACT');
+      }
+
+      // Apply combo multiplier to physical damage component
+      if (hitbox.damagePacket) {
+          hitbox.damagePacket.physical = Math.floor(hitbox.damagePacket.physical * comboMultiplier);
+      }
+
+      // Position logic (Sweep)
+      const offsetDist = 20 + (combo * 5); 
+      hitbox.x = player.x + Math.cos(player.angle) * offsetDist;
+      hitbox.y = player.y + Math.sin(player.angle) * offsetDist;
       hitbox.z = 10;
-      hitbox.vx = Math.cos(player.angle) * (2 + combo); 
-      hitbox.vy = Math.sin(player.angle) * (2 + combo);
-      hitbox.angle = player.angle; 
-      hitbox.radius = reach; 
+      hitbox.vx = Math.cos(player.angle) * (3 + combo);
+      hitbox.vy = Math.sin(player.angle) * (3 + combo);
       
-      hitbox.damageValue = finalDamage;
+      hitbox.angle = player.angle;
+      hitbox.radius = reach * radiusMult;
+      hitbox.timer = 12; // Duration
       
-      hitbox.color = color; 
-      hitbox.state = 'ATTACK'; 
-      hitbox.timer = 15; 
+      hitbox.color = color;
+      hitbox.state = 'ATTACK';
       hitbox.knockbackForce = knockback;
       hitbox.status.stun = stun;
-      hitbox.hitIds = new Set();
+      
+      // Status effects (from weapon)
+      if (equippedWeapon?.status) {
+          // Safely merge status effects
+          hitbox.status = { ...hitbox.status, ...equippedWeapon.status };
+      }
+      
+      hitbox.critChance = stats.crit;
+      hitbox.hitIds = new Set(); 
 
       this.collisionService.checkHitboxCollisions(hitbox);
       this.world.entities.push(hitbox);
-      this.haptic.impactMedium();
+      this.haptic.impactLight();
       
       player.comboIndex = (combo + 1) % this.MAX_COMBO;
       this.currentCombo.set(player.comboIndex);

@@ -1,6 +1,6 @@
 
 import { Item } from "./item.models";
-import { DamagePacket, Resistances, Penetration, DamageConversion } from './damage.model';
+import { DamagePacket, Resistances, Penetration, DamageConversion, StatusEffects } from './damage.model';
 
 export type SectorId = string;
 
@@ -83,14 +83,7 @@ export interface Entity extends Volumetric {
   itemData?: Item;
   trail?: {x: number, y: number, alpha: number}[];
   weaponTrail?: {x: number, y: number, angle: number, alpha: number}[]; // New: Weapon trail for swings
-  status: {
-      stun: number;
-      slow: number;
-      poison: { duration: number; dps: number; timer: number } | null;
-      burn: { duration: number; dps: number; timer: number } | null;
-      weakness: { duration: number; damageReduction: number; armorReduction: number; timer: number } | null;
-      bleed: { duration: number; dps: number; stacks: number; timer: number } | null;
-  };
+  status: StatusEffects;
   knockbackForce?: number;
   psionicEffect?: 'wave';
   rotation?: number;

@@ -51,6 +51,15 @@ export interface DamageConversion {
   coldToFire?: number;
 }
 
+export interface StatusEffects {
+  stun: number;
+  slow: number;
+  poison: { duration: number; dps: number; timer: number } | null;
+  burn: { duration: number; dps: number; timer: number } | null;
+  weakness: { duration: number; damageReduction: number; armorReduction: number; timer: number } | null;
+  bleed: { duration: number; dps: number; stacks: number; timer: number } | null;
+}
+
 export function createEmptyDamagePacket(): DamagePacket {
   return { physical: 0, fire: 0, cold: 0, lightning: 0, chaos: 0 };
 }

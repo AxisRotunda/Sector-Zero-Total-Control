@@ -1,4 +1,3 @@
-
 import { Injectable, inject } from '@angular/core';
 import { Entity } from '../models/game.models';
 import {
@@ -74,33 +73,43 @@ export class CombatService {
   }
 
   /**
-   * Creates a fallback damage packet for legacy hitboxes.
+   * Creates fallback damage packet for entities without damagePacket.
    */
   private createFallbackDamagePacket(hitbox: Entity): DamagePacket {
     const packet = createEmptyDamagePacket();
     
-    // Default to physical damage based on damageValue
-    const val = hitbox.damageValue ?? this.calculateFallbackDamage(hitbox);
+    // Check for legacy damageValue first
+    if (hitbox.damageValue !== undefined) {
+      // Temporary migration hack: color mapping for legacy hitboxes
+      if (hitbox.color === '#ef4444') packet.fire = hitbox.damageValue;
+      else if (hitbox.color === '#3b82f6') packet.cold = hitbox.damageValue;
+      else if (hitbox.color === '#eab308') packet.lightning = hitbox.damageValue;
+      else if (hitbox.color === '#a855f7') packet.chaos = hitbox.damageValue;
+      else packet.physical = hitbox.damageValue;
+      return packet;
+    }
     
-    // Simple Elemental logic based on color (temporary migration hack)
-    if (hitbox.color === '#ef4444') packet.fire = val;
-    else if (hitbox.color === '#3b82f6') packet.cold = val;
-    else if (hitbox.color === '#eab308') packet.lightning = val;
-    else if (hitbox.color === '#a855f7') packet.chaos = val;
-    else packet.physical = val;
+    // Calculate from source
+    if (hitbox.source === 'PLAYER' || hitbox.source === 'PSIONIC') {
+      // ✅ FIX: Use damagePacket from playerStats
+      const stats = this.stats.playerStats();
+      
+      if (stats.damagePacket) {
+        return { ...stats.damagePacket }; // Clone to avoid mutation
+      }
+      
+      // Fallback: Legacy damage property
+      if (stats.damage !== undefined) {
+        packet.physical = stats.damage;
+      } else {
+        packet.physical = 10; // Ultimate fallback
+      }
+    } else {
+      // Enemy/environment default
+      packet.physical = 10;
+    }
     
     return packet;
-  }
-
-  private calculateFallbackDamage(hitbox: Entity): number {
-    if (hitbox.source === 'PLAYER' || hitbox.source === 'PSIONIC') {
-      return this.stats.playerStats().damage;
-    }
-    // Check if hitbox is actually the enemy entity
-    if (hitbox.type === 'ENEMY' && hitbox.equipment?.weapon?.stats['dmg']) {
-        return hitbox.equipment.weapon.stats['dmg'];
-    }
-    return 10; // Default
   }
 
   private rollCritical(source: Entity): boolean {
@@ -203,7 +212,14 @@ export class CombatService {
     const penetration = source.penetration ?? createZeroPenetration();
     // Default armor pen for player from stats if not set on source entity
     if ((source.source === 'PLAYER' || source.source === 'PSIONIC') && !source.penetration) {
-        penetration.physical = this.stats.playerStats().armorPen;
+        const pStats = this.stats.playerStats();
+        if (pStats.penetration) {
+            penetration.physical += pStats.penetration.physical;
+            penetration.fire += pStats.penetration.fire;
+            // ... merge others if needed, typically physical is main one stored in stats.penetration
+        } else {
+            penetration.physical = pStats.armorPen;
+        }
     } else if (source.armorPen) {
         penetration.physical = source.armorPen;
     }
@@ -218,10 +234,15 @@ export class CombatService {
 
     // 7. Calculate physical mitigation (Armor based)
     // Reduce armor by penetration amount first (Flat reduction for armor usually)
-    const effectiveArmor = Math.max(0, targetResistances.physical - penetration.physical);
+    const effectiveArmor = Math.max(0, targetResistances.physical - penetration.physical * 100); // Assuming pen is %, but armor is flat. 
+    // Actually, in this system, pen seems to serve as both % reduction for elements and flat/percent for armor depending on implementation.
+    // Let's stick to standard ARPG: Pen reduces effective armor value.
+    // If penetration.physical is 0.5 (50%), we reduce armor by 50%.
+    const armorMitigationVal = targetResistances.physical * (1 - penetration.physical);
+    
     const physicalMitigation = this.calculatePhysicalMitigation(
       damagePacket.physical,
-      effectiveArmor
+      armorMitigationVal
     );
 
     // 8. Apply per-type mitigation

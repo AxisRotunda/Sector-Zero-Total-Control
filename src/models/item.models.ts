@@ -1,4 +1,6 @@
 
+import { DamagePacket, Penetration, DamageConversion, StatusEffects } from './damage.model';
+
 export type Rarity = 'COMMON' | 'UNCOMMON' | 'RARE' | 'BLACK_MARKET';
 export type ItemType = 'WEAPON' | 'ARMOR' | 'IMPLANT' | 'STIM' | 'PSI_BLADE' | 'AMULET' | 'RING';
 export type ItemShape = 'sword' | 'shield' | 'chip' | 'syringe' | 'psiBlade' | 'amulet' | 'ring';
@@ -14,6 +16,12 @@ export interface Item {
   color: string;
   stack: number;
   maxStack: number;
+
+  // Extended Combat Properties
+  damagePacket?: DamagePacket;
+  penetration?: Penetration;
+  damageConversion?: DamageConversion;
+  status?: Partial<StatusEffects>;
 }
 
 export const UNARMED_WEAPON: Item = {

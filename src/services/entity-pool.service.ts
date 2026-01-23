@@ -4,7 +4,7 @@ import { Entity } from '../models/game.models';
 import { ObjectPool } from '../utils/object-pool';
 import { IdGeneratorService } from '../utils/id-generator.service';
 import { NpcVisualGeneratorService } from './npc-visual-generator.service';
-import { DamagePacket, Resistances, createEmptyDamagePacket } from '../models/damage.model';
+import { DamagePacket, Resistances, createEmptyDamagePacket, createDefaultResistances } from '../models/damage.model';
 import * as BALANCE from '../config/balance.config';
 
 const baseEntity: Omit<Entity, 'id' | 'type' | 'x' | 'y'> = {
@@ -37,6 +37,14 @@ export class EntityPoolService {
           e.x = 0;
           e.y = 0;
           e.status = { ...baseEntity.status };
+          
+          // ✅ FIX: Reset damage properties
+          e.damagePacket = undefined;
+          e.damageValue = undefined;
+          e.penetration = undefined;
+          e.damageConversion = undefined;
+          e.resistances = createDefaultResistances();
+
           e.trail = undefined;
           e.itemData = undefined;
           e.psionicEffect = undefined;
@@ -52,10 +60,6 @@ export class EntityPoolService {
           e.hitStopFrames = 0;
           e.isHitStunned = false;
           e.invulnerable = false; // Reset iframes
-          e.resistances = undefined;
-          e.damagePacket = undefined;
-          e.penetration = undefined;
-          e.damageConversion = undefined;
           e.equipment = undefined;
           e.squadId = undefined;
           e.aiRole = undefined;
