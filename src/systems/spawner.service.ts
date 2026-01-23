@@ -42,13 +42,14 @@ export class SpawnerService {
       const difficulty = this.world.currentZone().difficultyMult;
       const subType = spawner.spawnType as any;
       let stats: Partial<Entity> = { hp: 40 * difficulty, speed: 2.0, radius: 20, color: '#94a3b8', xpValue: 20 * difficulty, armor: 0 };
-      let aggro = 350; let equipmentChance = 0; let resistances = {};
+      let aggro = 350; let equipmentChance = 0; 
+      let statusResistances: Entity['statusResistances'] = {};
 
       if (subType === 'STALKER') { stats = { hp: 25 * difficulty, speed: 3.5, radius: 15, color: '#60a5fa', xpValue: 35 * difficulty }; aggro = 450; equipmentChance = 0.1; }
-      if (subType === 'SNIPER') { stats = { hp: 20 * difficulty, speed: 2.0, radius: 15, color: '#a855f7', xpValue: 45 * difficulty }; aggro = 600; equipmentChance = 0.2; resistances = { burn: 1.5, poison: 0.8 }; }
+      if (subType === 'SNIPER') { stats = { hp: 20 * difficulty, speed: 2.0, radius: 15, color: '#a855f7', xpValue: 45 * difficulty }; aggro = 600; equipmentChance = 0.2; statusResistances = { burn: 1.5, poison: 0.8 }; }
       if (subType === 'STEALTH') { stats = { hp: 30 * difficulty, speed: 4.0, radius: 15, color: '#334155', xpValue: 40 * difficulty }; aggro = 250; }
-      if (subType === 'HEAVY') { stats = { hp: 150 * difficulty, speed: 1.5, radius: 35, color: '#f59e0b', xpValue: 90 * difficulty, armor: 15 * difficulty }; aggro = 400; equipmentChance = 0.5; resistances = { stun: 0.5, poison: 1.2 }; }
-      if (subType === 'BOSS') { stats = { hp: 400 * difficulty, speed: 4.5, radius: 30, color: '#dc2626', xpValue: 300 * difficulty, armor: 30 * difficulty }; aggro = 500; equipmentChance = 1.0; resistances = { stun: 0.2, burn: 0.5 }; }
+      if (subType === 'HEAVY') { stats = { hp: 150 * difficulty, speed: 1.5, radius: 35, color: '#f59e0b', xpValue: 90 * difficulty, armor: 15 * difficulty }; aggro = 400; equipmentChance = 0.5; statusResistances = { stun: 0.5, poison: 1.2 }; }
+      if (subType === 'BOSS') { stats = { hp: 400 * difficulty, speed: 4.5, radius: 30, color: '#dc2626', xpValue: 300 * difficulty, armor: 30 * difficulty }; aggro = 500; equipmentChance = 1.0; statusResistances = { stun: 0.2, burn: 0.5 }; }
       if (subType === 'GRUNT') { stats = { hp: 40 * difficulty, speed: 2.0, radius: 18, color: '#a1a1aa', xpValue: 20 * difficulty }; }
 
       // CRITICAL: Inherit zone ID from spawner
@@ -56,7 +57,7 @@ export class SpawnerService {
       Object.assign(enemy, stats);
       const angle = Math.random() * Math.PI * 2; const dist = Math.random() * 50;
       enemy.x = spawner.x + Math.cos(angle) * dist; enemy.y = spawner.y + Math.sin(angle) * dist; enemy.homeX = spawner.x; enemy.homeY = spawner.y;
-      enemy.aggroRadius = aggro; enemy.maxHp = stats.hp!; enemy.hp = stats.hp!; enemy.attackTimer = Math.random() * 100; enemy.resistances = resistances;
+      enemy.aggroRadius = aggro; enemy.maxHp = stats.hp!; enemy.hp = stats.hp!; enemy.attackTimer = Math.random() * 100; enemy.statusResistances = statusResistances;
       
       if (total > 1) {
           enemy.squadId = squadId; this.squadAi.registerMember(enemy);

@@ -1,3 +1,4 @@
+
 import { Injectable, inject } from '@angular/core';
 import { Entity } from '../models/game.models';
 import { WorldService } from '../game/world/world.service';
@@ -8,6 +9,7 @@ import { EventBusService } from '../core/events/event-bus.service';
 import { GameEvents } from '../core/events/game-events';
 import { TimeService } from '../game/time.service';
 import * as BALANCE from '../config/balance.config';
+import { DamagePacket, DAMAGE_TYPE_COLORS } from '../models/damage.model';
 
 @Injectable({ providedIn: 'root' })
 export class CombatFeedbackService {
@@ -18,7 +20,12 @@ export class CombatFeedbackService {
   private eventBus = inject(EventBusService);
   private time = inject(TimeService);
 
-  public onHitConfirmed(target: Entity, damage: number, isCrit: boolean): void {
+  public onHitConfirmed(
+    target: Entity, 
+    damage: number, 
+    isCrit: boolean,
+    breakdown?: DamagePacket
+  ): void {
     // Audio
     this.sound.play(isCrit ? 'CRIT' : 'HIT');
 
@@ -46,10 +53,64 @@ export class CombatFeedbackService {
     this.time.triggerHitStop(stopDuration);
 
     // Damage Numbers
-    this.spawnDamageNumber(target, damage, isCrit);
+    this.spawnDamageNumbers(target, damage, isCrit, breakdown);
   }
 
-  private spawnDamageNumber(target: Entity, damage: number, isCrit: boolean): void {
+  private spawnDamageNumbers(
+    target: Entity,
+    totalDamage: number,
+    isCrit: boolean,
+    breakdown?: DamagePacket
+  ): void {
+    if (!breakdown) {
+        // Fallback for single type
+        this.spawnSingleDamageNumber(target, totalDamage, isCrit);
+        return;
+    }
+
+    // Show dominant type if mixed, or stack them?
+    // Let's stack distinct non-zero types
+    const types = [
+        { type: 'physical', val: breakdown.physical },
+        { type: 'fire', val: breakdown.fire },
+        { type: 'cold', val: breakdown.cold },
+        { type: 'lightning', val: breakdown.lightning },
+        { type: 'chaos', val: breakdown.chaos }
+    ].filter(t => t.val > 0);
+
+    if (types.length === 0) {
+        this.spawnSingleDamageNumber(target, totalDamage, isCrit);
+        return;
+    }
+
+    let yOffset = isCrit ? -50 : -40;
+    
+    // Stack numbers upwards
+    types.forEach((t, i) => {
+        const color = DAMAGE_TYPE_COLORS[t.type as keyof typeof DAMAGE_TYPE_COLORS];
+        const size = isCrit ? 24 : 18;
+        
+        this.world.spawnFloatingText(
+            target.x,
+            target.y + yOffset - (i * 20),
+            Math.ceil(t.val).toString(),
+            color,
+            size
+        );
+    });
+
+    if (isCrit) {
+      this.world.spawnFloatingText(
+        target.x,
+        target.y - 70,
+        'CRITICAL!',
+        '#facc15',
+        10
+      );
+    }
+  }
+
+  private spawnSingleDamageNumber(target: Entity, damage: number, isCrit: boolean): void {
     const displayDamage = Math.ceil(damage);
     const color = isCrit ? '#f97316' : '#fff';
     const size = isCrit ? 30 : 20;

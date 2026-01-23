@@ -1,5 +1,19 @@
+
 import { Injectable, inject } from '@angular/core';
 import { Entity } from '../models/game.models';
+import {
+  DamagePacket,
+  DamageResult,
+  Resistances,
+  Penetration,
+  createEmptyDamagePacket,
+  createZeroPenetration,
+  calculateTotalDamage,
+  RESISTANCE_CAPS,
+  RESISTANCE_FLOOR,
+  DamageConversion,
+  createDefaultResistances
+} from '../models/damage.model';
 import { PlayerStatsService } from '../game/player/player-stats.service';
 import { WorldService } from '../game/world/world.service';
 import * as BALANCE from '../config/balance.config';
@@ -32,16 +46,15 @@ export class CombatService {
   public processHit(hitbox: Entity, target: Entity): void {
     if (target.hitFlash > 0 || target.isHitStunned) return;
 
-    const result = this.calculateMitigatedDamage(
-      hitbox,
-      target,
-      hitbox.damageValue || 0
-    );
+    // Get damage packet from hitbox or generate fallback
+    const damagePacket = hitbox.damagePacket ?? this.createFallbackDamagePacket(hitbox);
+    const result = this.calculateMitigatedDamage(hitbox, target, damagePacket);
+    
     this.applyCombatResult(hitbox, target, result);
   }
 
   /**
-   * Entry point for Direct Melee attacks.
+   * Entry point for Direct Melee attacks (Collision).
    */
   public applyDirectDamage(
     attacker: Entity,
@@ -52,8 +65,42 @@ export class CombatService {
       return;
     }
 
-    const result = this.calculateMitigatedDamage(attacker, target, baseDamage);
+    // Convert single damage value to pure physical packet
+    const damagePacket = createEmptyDamagePacket();
+    damagePacket.physical = baseDamage;
+
+    const result = this.calculateMitigatedDamage(attacker, target, damagePacket);
     this.applyCombatResult(attacker, target, result);
+  }
+
+  /**
+   * Creates a fallback damage packet for legacy hitboxes.
+   */
+  private createFallbackDamagePacket(hitbox: Entity): DamagePacket {
+    const packet = createEmptyDamagePacket();
+    
+    // Default to physical damage based on damageValue
+    const val = hitbox.damageValue ?? this.calculateFallbackDamage(hitbox);
+    
+    // Simple Elemental logic based on color (temporary migration hack)
+    if (hitbox.color === '#ef4444') packet.fire = val;
+    else if (hitbox.color === '#3b82f6') packet.cold = val;
+    else if (hitbox.color === '#eab308') packet.lightning = val;
+    else if (hitbox.color === '#a855f7') packet.chaos = val;
+    else packet.physical = val;
+    
+    return packet;
+  }
+
+  private calculateFallbackDamage(hitbox: Entity): number {
+    if (hitbox.source === 'PLAYER' || hitbox.source === 'PSIONIC') {
+      return this.stats.playerStats().damage;
+    }
+    // Check if hitbox is actually the enemy entity
+    if (hitbox.type === 'ENEMY' && hitbox.equipment?.weapon?.stats['dmg']) {
+        return hitbox.equipment.weapon.stats['dmg'];
+    }
+    return 10; // Default
   }
 
   private rollCritical(source: Entity): boolean {
@@ -66,81 +113,158 @@ export class CombatService {
     return Math.random() * 100 < critChance;
   }
 
-  private calculateArmorReduction(
-    armor: number,
-    damage: number,
-    armorPen: number
-  ): number {
-    const effectiveArmor = Math.max(0, armor - armorPen);
-    if (effectiveArmor <= 0) return 0;
+  private applyDamageConversion(
+    packet: DamagePacket,
+    conversion?: DamageConversion
+  ): DamagePacket {
+    if (!conversion) return packet;
 
-    // POE-style diminishing returns: Armor / (Armor + 10 * Damage)
-    return effectiveArmor / (effectiveArmor + 10 * damage);
+    const converted = { ...packet };
+
+    // Physical conversions
+    if (conversion.physicalToFire) {
+      const amount = packet.physical * conversion.physicalToFire;
+      converted.physical -= amount;
+      converted.fire += amount;
+    }
+    if (conversion.physicalToCold) {
+      const amount = packet.physical * conversion.physicalToCold;
+      converted.physical -= amount;
+      converted.cold += amount;
+    }
+    if (conversion.physicalToLightning) {
+      const amount = packet.physical * conversion.physicalToLightning;
+      converted.physical -= amount;
+      converted.lightning += amount;
+    }
+    if (conversion.physicalToChaos) {
+      const amount = packet.physical * conversion.physicalToChaos;
+      converted.physical -= amount;
+      converted.chaos += amount;
+    }
+
+    return converted;
+  }
+
+  private applyPenetration(
+    targetResistances: Resistances,
+    penetration: Penetration
+  ): Resistances {
+    return {
+      physical: targetResistances.physical, // Armor calculation handles pen separately
+      fire: Math.max(RESISTANCE_FLOOR, targetResistances.fire * (1 - penetration.fire)),
+      cold: Math.max(RESISTANCE_FLOOR, targetResistances.cold * (1 - penetration.cold)),
+      lightning: Math.max(RESISTANCE_FLOOR, targetResistances.lightning * (1 - penetration.lightning)),
+      chaos: Math.max(RESISTANCE_FLOOR, targetResistances.chaos * (1 - penetration.chaos))
+    };
+  }
+
+  private calculatePhysicalMitigation(
+    physicalDamage: number,
+    armor: number
+  ): number {
+    if (armor <= 0 || physicalDamage <= 0) return 0;
+    // Diminishing returns: Armor / (Armor + 10 * Damage)
+    const reduction = armor / (armor + 10 * physicalDamage);
+    return Math.min(0.90, reduction);
   }
 
   private calculateMitigatedDamage(
     source: Entity,
     target: Entity,
-    incomingDamage: number
-  ): { damage: number; isCrit: boolean } {
-    let damage = incomingDamage;
+    incomingDamage: DamagePacket
+  ): DamageResult {
+    let damagePacket = { ...incomingDamage };
 
-    // 1. Critical Strike
+    // 1. Critical Strike (multiplicative to all types)
     const isCrit = this.rollCritical(source);
     if (isCrit) {
-      damage *= BALANCE.COMBAT.CRIT_MULTIPLIER;
+      damagePacket.physical *= BALANCE.COMBAT.CRIT_MULTIPLIER;
+      damagePacket.fire *= BALANCE.COMBAT.CRIT_MULTIPLIER;
+      damagePacket.cold *= BALANCE.COMBAT.CRIT_MULTIPLIER;
+      damagePacket.lightning *= BALANCE.COMBAT.CRIT_MULTIPLIER;
+      damagePacket.chaos *= BALANCE.COMBAT.CRIT_MULTIPLIER;
     }
 
-    // 2. Weakness Amplification
+    // 2. Damage Conversion
+    damagePacket = this.applyDamageConversion(damagePacket, source.damageConversion);
+
+    // 3. Weakness Amplification
     if (target.status.weakness) {
-      damage *= 1 + target.status.weakness.damageReduction;
+      const amp = 1 + target.status.weakness.damageReduction;
+      damagePacket.physical *= amp;
+      damagePacket.fire *= amp;
+      damagePacket.cold *= amp;
+      damagePacket.lightning *= amp;
+      damagePacket.chaos *= amp;
     }
 
-    // 3. Armor Mitigation
-    if (target.armor > 0) {
-      let attackerArmorPen = source.armorPen || 0;
-      if (source.source === 'PLAYER' || source.source === 'PSIONIC') {
-        attackerArmorPen = this.stats.playerStats().armorPen;
-      }
-
-      let targetArmor = target.armor;
-      if (target.status.weakness) {
-        targetArmor *= 1 - target.status.weakness.armorReduction;
-      }
-
-      const reduction = this.calculateArmorReduction(
-        targetArmor,
-        damage,
-        attackerArmorPen
-      );
-      const cappedReduction = Math.min(0.9, reduction);
-      damage *= 1 - cappedReduction;
+    // 4. Get penetration
+    const penetration = source.penetration ?? createZeroPenetration();
+    // Default armor pen for player from stats if not set on source entity
+    if ((source.source === 'PLAYER' || source.source === 'PSIONIC') && !source.penetration) {
+        penetration.physical = this.stats.playerStats().armorPen;
+    } else if (source.armorPen) {
+        penetration.physical = source.armorPen;
     }
 
-    return { damage: Math.max(1, damage), isCrit };
+    // 5. Target Resistances (Fallback if missing)
+    const targetResistances = target.resistances ?? createDefaultResistances();
+    // Use legacy armor if physical resist is 0
+    if (targetResistances.physical === 0 && target.armor > 0) targetResistances.physical = target.armor;
+
+    // 6. Apply penetration to elemental resistances
+    const effectiveResistances = this.applyPenetration(targetResistances, penetration);
+
+    // 7. Calculate physical mitigation (Armor based)
+    // Reduce armor by penetration amount first (Flat reduction for armor usually)
+    const effectiveArmor = Math.max(0, targetResistances.physical - penetration.physical);
+    const physicalMitigation = this.calculatePhysicalMitigation(
+      damagePacket.physical,
+      effectiveArmor
+    );
+
+    // 8. Apply per-type mitigation
+    const mitigatedDamage: DamagePacket = {
+      physical: damagePacket.physical * (1 - physicalMitigation),
+      fire: damagePacket.fire * (1 - Math.min(RESISTANCE_CAPS.fire, effectiveResistances.fire)),
+      cold: damagePacket.cold * (1 - Math.min(RESISTANCE_CAPS.cold, effectiveResistances.cold)),
+      lightning: damagePacket.lightning * (1 - Math.min(RESISTANCE_CAPS.lightning, effectiveResistances.lightning)),
+      chaos: damagePacket.chaos * (1 - Math.min(RESISTANCE_CAPS.chaos, effectiveResistances.chaos))
+    };
+
+    const total = calculateTotalDamage(mitigatedDamage);
+    const finalTotal = total > 0 ? Math.max(1, total) : 0;
+
+    return {
+      total: finalTotal,
+      breakdown: mitigatedDamage,
+      isCrit,
+      penetratedResistances: effectiveResistances
+    };
   }
 
   private applyCombatResult(
     source: Entity,
     target: Entity,
-    result: { damage: number; isCrit: boolean }
+    result: DamageResult
   ): void {
-    const { damage, isCrit } = result;
+    const { total, breakdown, isCrit } = result;
 
-    this.feedback.onHitConfirmed(target, damage, isCrit);
+    this.feedback.onHitConfirmed(target, total, isCrit, breakdown);
 
     // State updates
     if (target.type === 'PLAYER') {
-      this.stats.takeDamage(damage);
+      this.stats.takeDamage(total);
       target.invulnerable = true;
       target.iframeTimer = 30;
     } else {
-      target.hp -= damage;
+      target.hp -= total;
     }
 
     target.hitFlash = 10;
     target.hitStopFrames =
-      isCrit || damage > 50
+      isCrit || total > 50
         ? BALANCE.ENEMY_AI.HIT_STOP_FRAMES_HEAVY
         : BALANCE.ENEMY_AI.HIT_STOP_FRAMES_LIGHT;
     target.isHitStunned = true;
@@ -153,7 +277,7 @@ export class CombatService {
     this.applyStatusEffects(source, target);
 
     // Lifesteal
-    this.applyLifeSteal(source, damage);
+    this.applyLifeSteal(source, total);
 
     // Death check
     if (target.hp <= 0 && target.type !== 'PLAYER') {
@@ -216,7 +340,9 @@ export class CombatService {
     const applyEffect = (type: StatusKey, sourceEffect: StatusEffect | undefined): void => {
       if (!sourceEffect) return;
   
-      const resistance = target.resistances?.[type] ?? 1.0;
+      // Legacy resistance check via statusResistances, fallback to 1.0 (no resist)
+      // New system could use explicit resistances if we map them
+      const resistance = target.statusResistances?.[type as keyof typeof target.statusResistances] ?? 1.0;
       if (resistance <= 0) return;
   
       if (type === 'stun' || type === 'slow') {
@@ -301,7 +427,12 @@ export class CombatService {
       explosion.x = e.x;
       explosion.y = e.y;
       explosion.radius = BALANCE.ENVIRONMENT.BARREL_EXPLOSION_RADIUS;
-      explosion.damageValue = BALANCE.ENVIRONMENT.BARREL_EXPLOSION_DMG;
+      
+      // Explosion now deals Fire damage logic internally via packet
+      const packet = createEmptyDamagePacket();
+      packet.fire = BALANCE.ENVIRONMENT.BARREL_EXPLOSION_DMG;
+      explosion.damagePacket = packet;
+      
       explosion.color = '#f87171';
       explosion.state = 'ATTACK';
       explosion.timer = 5;

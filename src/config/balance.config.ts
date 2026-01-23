@@ -1,3 +1,4 @@
+
 export const PLAYER = {
     BASE_HP: 100,
     BASE_SPEED: 5,
@@ -54,6 +55,22 @@ export const COMBAT = {
     HIT_STOP_FRAMES: 3,
     KNOCKBACK_FORCE: 8,
 };
+
+export const DAMAGE_TYPES = {
+  // Base damage multipliers per enemy type
+  ENEMY_TYPES: {
+    MELEE: { physical: 1.0, fire: 0, cold: 0, lightning: 0, chaos: 0 },
+    RANGED: { physical: 0.7, fire: 0, cold: 0, lightning: 0.3, chaos: 0 },
+    ELITE: { physical: 0.5, fire: 0.3, cold: 0.2, lightning: 0, chaos: 0 },
+    BOSS: { physical: 0.4, fire: 0.2, cold: 0.2, lightning: 0.1, chaos: 0.1 }
+  },
+  // Resistances (Flat for phys, % for others)
+  RESISTANCES: {
+    TRASH: { physical: 0, fire: 0, cold: 0, lightning: 0, chaos: -0.25 },
+    ELITE: { physical: 10, fire: 0.2, cold: 0.2, lightning: 0.2, chaos: 0 },
+    BOSS: { physical: 50, fire: 0.4, cold: 0.4, lightning: 0.4, chaos: 0.2 }
+  }
+} as const;
 
 export const ENVIRONMENT = {
     BARREL_EXPLOSION_DMG: 80,

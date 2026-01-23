@@ -1,5 +1,6 @@
 
 import { Item } from "./item.models";
+import { DamagePacket, Resistances, Penetration, DamageConversion } from './damage.model';
 
 export type SectorId = string;
 
@@ -53,11 +54,18 @@ export interface Entity extends Volumetric {
   radius: number;
   hp: number;
   maxHp: number;
-  armor: number;
+  armor: number; // Legacy Physical Armor Value
   
   // Combat Stats (Explicit)
-  damageValue?: number;
-  armorPen?: number;
+  damageValue?: number; // Legacy Flat Damage
+  
+  // New Damage System
+  damagePacket?: DamagePacket;
+  resistances?: Resistances;
+  penetration?: Penetration;
+  damageConversion?: DamageConversion;
+
+  armorPen?: number; // Legacy
   critChance?: number;
   
   color: string;
@@ -120,7 +128,9 @@ export interface Entity extends Volumetric {
 
   invulnerable?: boolean; // New: Iframes support
   iframeTimer?: number; // New: Frame-based invulnerability countdown
-  resistances?: {
+  
+  // Resistance modifiers for Status Effects (legacy structure, consider migrating to main resistances later)
+  statusResistances?: {
       burn?: number;
       poison?: number;
       stun?: number;
