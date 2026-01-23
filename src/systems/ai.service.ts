@@ -63,7 +63,8 @@ export class AiService {
   }
 
   private updateSeekCover(enemy: Entity, player: Entity, dist: number, angle: number) {
-      const walls = this.spatialHash.query(enemy.x, enemy.y, BALANCE.ENEMY_AI.COVER_SEEK_DISTANCE);
+      // FIX: Query using enemy's zoneId
+      const walls = this.spatialHash.query(enemy.x, enemy.y, BALANCE.ENEMY_AI.COVER_SEEK_DISTANCE, enemy.zoneId);
       let bestCover: Entity | null = null; let bestDist = Infinity;
       for (const w of walls) {
           if (w.type === 'WALL') {

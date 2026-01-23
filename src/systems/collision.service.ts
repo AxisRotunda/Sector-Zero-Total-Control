@@ -15,8 +15,11 @@ export class CollisionService {
   private world = inject(WorldService);
   
   public checkHitboxCollisions(hitbox: Entity): void {
+    // CRITICAL FIX: Use the hitbox's zoneId (inherited from source) or fallback to current world zone
+    const zoneId = hitbox.zoneId || this.world.currentZone().id;
+
     if (hitbox.source === 'PLAYER' || hitbox.source === 'ENVIRONMENT' || hitbox.source === 'PSIONIC' || hitbox.source === 'DEFENSE') {
-        const potentialTargets = this.spatialHash.query(hitbox.x, hitbox.y, hitbox.radius);
+        const potentialTargets = this.spatialHash.query(hitbox.x, hitbox.y, hitbox.radius, zoneId);
         potentialTargets.forEach(target => {
             if (target.state !== 'DEAD' && (isEnemy(target) || isDestructible(target))) {
                  const dist = Math.hypot(target.x - hitbox.x, target.y - hitbox.y);

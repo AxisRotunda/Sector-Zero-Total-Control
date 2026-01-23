@@ -20,7 +20,8 @@ export class NpcUpdateService {
       t.angle += 0.02;
       if (t.attackTimer <= 0) {
           const range = 500;
-          const targets = this.spatialHash.query(t.x, t.y, range);
+          // FIX: Query using turret's zoneId
+          const targets = this.spatialHash.query(t.x, t.y, range, t.zoneId);
           let nearest: Entity | null = null; let minDist = range;
           for (const target of targets) {
               if (isEnemy(target) && target.state !== 'DEAD') {
