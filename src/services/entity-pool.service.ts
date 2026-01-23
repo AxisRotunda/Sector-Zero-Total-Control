@@ -54,6 +54,7 @@ export class EntityPoolService {
           e.aiRole = undefined;
           e.zoneId = undefined; 
           e.persistenceTag = undefined; // Reset Tag
+          e.data = undefined; // CRITICAL: Clear custom data bag
           if (e.hitIds) e.hitIds.clear(); // Reset Hit Memory
         },
         100 

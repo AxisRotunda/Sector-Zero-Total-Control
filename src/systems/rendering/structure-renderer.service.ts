@@ -12,7 +12,6 @@ export class StructureRendererService {
   private textureGen = inject(TextureGeneratorService);
   
   // ISOMETRIC LIGHTING CONSTANTS
-  // Simulates a light source from Top-Left-Front
   private readonly SHADE_TOP = 1.15;   // Direct overhead light (Highlight)
   private readonly SHADE_LEFT = 1.0;   // Main lit face (Base color)
   private readonly SHADE_RIGHT = 0.7;  // Occluded face (Shadow)
@@ -52,8 +51,8 @@ export class StructureRendererService {
       }
 
       // --- STATIC CACHED STRUCTURES ---
-      // Cache Key: Includes visual properties + 'v5' version bump for shading update
-      const cacheKey = `STRUCT_${structureType}_${w}_${d}_${h}_${e.color}_${theme}_${e.locked}_${detailStyle}_v5`;
+      // Cache Key: Includes visual properties + 'v7' version bump for geometry update
+      const cacheKey = `STRUCT_${structureType}_${w}_${d}_${h}_${e.color}_${theme}_${e.locked}_${detailStyle}_v7`;
       
       const isoBounds = this.calculateIsoBounds(w, d, h);
       const padding = 120;
@@ -68,8 +67,8 @@ export class StructureRendererService {
       const sprite = this.cache.getOrRender(cacheKey, canvasW, canvasH, (bufferCtx) => {
           if (renderStyle === 'CUSTOM') {
               if (structureType === 'MONOLITH') this.renderMonolith(bufferCtx, e, w, d, h, anchorX, anchorY, visuals);
-              else if (structureType === 'OBSERVATION_DECK') this.renderObservationDeck(bufferCtx, e, w, d, h, anchorX, anchorY, visuals);
-              else if (structureType === 'TRAINING_EXTERIOR') this.renderTrainingExterior(bufferCtx, e, w, d, h, anchorX, anchorY, visuals);
+              else if (structureType === 'OBSERVATION_DECK') this.renderObservationDeck(bufferCtx, e, w, d, h, anchorX, anchorY);
+              else if (structureType === 'TRAINING_EXTERIOR') this.renderTrainingExterior(bufferCtx, e, w, d, h, anchorX, anchorY);
               else if (structureType === 'HOLO_TABLE') this.renderHoloTable(bufferCtx, e, w, d, h, anchorX, anchorY);
               else if (structureType === 'VENDING_MACHINE') this.renderVendingMachine(bufferCtx, e, w, d, h, anchorX, anchorY);
               else if (structureType === 'VENT') this.renderVent(bufferCtx, e, w, d, h, anchorX, anchorY);
@@ -182,9 +181,6 @@ export class StructureRendererService {
 
       // Helper to apply shading tint
       const applyShade = (baseHex: string, multiplier: number) => {
-          // Adjust brightness by multiplier. 
-          // Reusing adjustColor from TextureGen which uses +/- int, so we map multiplier to int.
-          // 1.0 = 0 shift. 0.7 = -30 shift. 1.15 = +20 shift.
           const shift = Math.floor((multiplier - 1.0) * 100);
           return this.textureGen.adjustColor(baseHex, shift);
       };
@@ -211,7 +207,7 @@ export class StructureRendererService {
           }
       };
 
-      // 1. Fill Faces (Order matters for simple painter's algorithm inside prism)
+      // 1. Fill Faces
       drawFace(baseB, baseR, topR, topB, 'RIGHT'); // Darkest
       drawFace(baseB, baseL, topL, topB, 'LEFT');  // Medium
       drawFace(topT, topR, topB, topL, 'TOP');     // Brightest
@@ -320,9 +316,109 @@ export class StructureRendererService {
   }
 
   // --- SPECIALIZED RENDERERS ---
+  
+  // High-Tech "Black Box" look for the Training Chamber exterior in Hub
+  private renderTrainingExterior(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number) {
+      // 1. Reinforced Bunker Shell
+      // Use Industrial visuals with Plating for a heavy look
+      const visuals = { ...this.textureGen.getThemeVisuals('INDUSTRIAL'), detailStyle: 'PLATING' };
+      
+      // Draw main bulk
+      this.renderPrism(ctx, w, d, h, ax, ay, '#27272a', visuals as any, 'RIVETS');
+
+      ctx.translate(ax, ay);
+      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
+
+      // 2. Holographic Overhead Sign
+      // Positioned above the front face
+      const centerTop = p(0, d/2, h - 50);
+      
+      ctx.save();
+      ctx.translate(centerTop.x, centerTop.y);
+      
+      // Glow effect
+      ctx.shadowColor = '#06b6d4';
+      ctx.shadowBlur = 20;
+      ctx.fillStyle = '#06b6d4';
+      ctx.globalAlpha = 0.9;
+      
+      // Text transform: Flatten and Rotate to align with Iso left-face logic roughly
+      // In pure iso, vertical text is tricky. We'll float it billboard style or projected.
+      // Let's project it onto the "Left" face plane (the face facing south-west).
+      ctx.scale(1, 0.5);
+      ctx.rotate(-Math.PI / 4);
+      
+      ctx.font = 'bold 40px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText("SIMULATION", 0, 0);
+      
+      ctx.restore();
+
+      // 3. Hazard Striping on floor entrance
+      // Assuming entrance is on the "Left" face (Positive Y in model space)
+      const baseCenter = p(0, d/2 + 20, 5); // Slightly in front
+      ctx.translate(baseCenter.x, baseCenter.y);
+      
+      ctx.fillStyle = '#eab308';
+      ctx.beginPath();
+      ctx.moveTo(-40, 0);
+      ctx.lineTo(40, 0);
+      ctx.lineTo(0, 20); // Triangle pointer
+      ctx.fill();
+
+      ctx.translate(-baseCenter.x, -baseCenter.y);
+      ctx.translate(-ax, -ay);
+  }
+
+  private renderObservationDeck(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number) {
+      // Sleek, metallic platform
+      this.renderPrism(ctx, w, d, h, ax, ay, '#1e293b', this.textureGen.getThemeVisuals('HIGH_TECH'), 'PLATING');
+      
+      ctx.translate(ax, ay);
+      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
+      
+      // Glass Panes on Front Faces
+      const topL = p(-w/2, d/2, h);
+      const topB = p(w/2, d/2, h);
+      const topR = p(w/2, -d/2, h);
+      const midL = p(-w/2, d/2, h/2);
+      const midB = p(w/2, d/2, h/2);
+      const midR = p(w/2, -d/2, h/2);
+
+      ctx.fillStyle = '#bae6fd';
+      ctx.strokeStyle = '#0ea5e9';
+      ctx.lineWidth = 1;
+      
+      // Left Face Glass
+      ctx.save();
+      ctx.globalAlpha = 0.2;
+      ctx.beginPath();
+      ctx.moveTo(topL.x, topL.y);
+      ctx.lineTo(topB.x, topB.y);
+      ctx.lineTo(midB.x, midB.y);
+      ctx.lineTo(midL.x, midL.y);
+      ctx.fill();
+      ctx.globalAlpha = 0.6;
+      ctx.stroke();
+      
+      // Right Face Glass
+      ctx.globalAlpha = 0.2;
+      ctx.beginPath();
+      ctx.moveTo(topB.x, topB.y);
+      ctx.lineTo(topR.x, topR.y);
+      ctx.lineTo(midR.x, midR.y);
+      ctx.lineTo(midB.x, midB.y);
+      ctx.fill();
+      ctx.globalAlpha = 0.6;
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.translate(-ax, -ay);
+  }
+
+  // ... Other specialized renderers (Monolith, HoloTable etc.) kept as is for brevity ...
   private renderGenericPrism(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number, visuals: ThemeVisuals, detailStyle: any) {
       const coords = this.renderPrism(ctx, w, d, h, ax, ay, e.color, visuals, detailStyle);
-      
       if (visuals.overlayColor && Math.random() > 0.7) {
           ctx.translate(ax, ay);
           ctx.globalCompositeOperation = 'source-over';
@@ -334,7 +430,6 @@ export class StructureRendererService {
           ctx.globalAlpha = 1.0;
           ctx.translate(-ax, -ay);
       }
-
       if (e.subType === 'PILLAR') {
           ctx.translate(ax, ay);
           ctx.strokeStyle = this.textureGen.adjustColor(e.color, 30);
@@ -350,17 +445,13 @@ export class StructureRendererService {
       ctx.translate(ax, ay);
       const halfW = w / 2; const halfD = d / 2;
       const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
-
       const topT = p(-halfW, -halfD, h); const topR = p(halfW, -halfD, h); const topB = p(halfW, halfD, h); const topL = p(-halfW, halfD, h);
       const baseB = p(halfW, halfD, 0); const baseR = p(halfW, -halfD, 0); const baseL = p(-halfW, halfD, 0);
-
       const grad = ctx.createLinearGradient(0, topT.y, 0, baseB.y);
       grad.addColorStop(0, '#3b82f6'); grad.addColorStop(1, '#1e1b4b');
-
       ctx.fillStyle = grad;
       ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(baseR.x, baseR.y); ctx.lineTo(topR.x, topR.y); ctx.lineTo(topB.x, topB.y); ctx.fill();
       ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(baseL.x, baseL.y); ctx.lineTo(topL.x, topL.y); ctx.lineTo(topB.x, topB.y); ctx.fill();
-      
       ctx.shadowBlur = 30; ctx.shadowColor = '#06b6d4';
       ctx.strokeStyle = '#cffafe'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y - 50); ctx.lineTo(topB.x, topB.y + 50); ctx.stroke();
@@ -373,7 +464,6 @@ export class StructureRendererService {
       ctx.translate(ax, ay);
       const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
       const center = p(0, 0, h);
-      
       ctx.save();
       ctx.translate(center.x, center.y - 20);
       ctx.globalCompositeOperation = 'screen';
@@ -415,31 +505,14 @@ export class StructureRendererService {
       ctx.translate(-ax, -ay);
   }
 
-  private renderTrainingExterior(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number, visuals: ThemeVisuals) {
-      this.renderPrism(ctx, w, d, h, ax, ay, e.color, visuals, 'PLATING');
-  }
-
-  private renderObservationDeck(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number, visuals: ThemeVisuals) {
-      this.renderPrism(ctx, w, d, h, ax, ay, e.color, visuals, 'NONE');
-      ctx.save();
-      ctx.translate(ax, ay);
-      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
-      const front = p(0, d/2, h/2);
-      ctx.globalCompositeOperation = 'screen'; ctx.fillStyle = '#bae6fd'; ctx.globalAlpha = 0.2;
-      ctx.beginPath(); ctx.arc(front.x, front.y, w/3, 0, Math.PI*2); ctx.fill();
-      ctx.restore();
-  }
-
   private renderStreetLight(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number) {
       ctx.translate(ax, ay);
       const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
       const base = p(0, 0, 0);
       const top = p(0, 0, h);
-      
       ctx.lineWidth = 4;
       ctx.strokeStyle = '#27272a';
       ctx.beginPath(); ctx.moveTo(base.x, base.y); ctx.lineTo(top.x, top.y); ctx.stroke();
-      
       ctx.save();
       ctx.translate(top.x, top.y);
       ctx.rotate(-Math.PI/6);
@@ -456,7 +529,6 @@ export class StructureRendererService {
       ctx.translate(ax, ay);
       const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
       const pos = p(0, 0, 0);
-      
       ctx.save();
       ctx.translate(pos.x, pos.y);
       ctx.shadowColor = e.color; ctx.shadowBlur = 15; ctx.strokeStyle = e.color; ctx.lineWidth = 3; ctx.lineCap = 'round';
@@ -469,12 +541,10 @@ export class StructureRendererService {
   }
 
   private drawDynamicGlow(ctx: CanvasRenderingContext2D, e: Entity) {
-      // Glow logic handled by LightingRenderer now for emission, this handles the physical strip
       const w = e.width || 500;
       const thickness = e.depth || 10;
       const elevation = e.height || 0;
       const pos = IsoUtils.toIso(e.x, e.y, e.z + elevation);
-      
       ctx.save();
       ctx.translate(pos.x, pos.y);
       ctx.fillStyle = e.color;

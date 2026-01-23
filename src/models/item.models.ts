@@ -17,19 +17,19 @@ export interface Item {
 
 export const UNARMED_WEAPON: Item = {
   id: 'FIST_BASE',
-  name: 'Unarmed Strike',
+  name: 'Kinetic Arts',
   type: 'WEAPON',
-  shape: 'chip',
+  shape: 'chip', // Placeholder shape, not rendered
   rarity: 'COMMON',
   level: 1,
   color: '#fbbf24', // Gold
   stats: {
-    dmg: 5,        // Low base damage
-    spd: 1.5,      // Fast attack speed
-    reach: 40,     // Short range
-    crit: 5,       // 5% base crit
+    dmg: 6,        // Slight buff
+    spd: 2.0,      // Very fast base speed
+    reach: 35,     // Short range requiring positioning
+    crit: 15,      // High base crit (Martial precision)
     ls: 0,
-    armorPen: 0
+    armorPen: 5    // Innate armor piercing (Targeting weak points)
   },
   stack: 1,
   maxStack: 1

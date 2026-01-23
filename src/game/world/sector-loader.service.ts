@@ -123,6 +123,11 @@ export class SectorLoaderService {
 
       // Apply Instance Overrides
       if (def.data) {
+          // CRITICAL FIX: Propagate the entire data object to the entity.
+          // This ensures properties like 'targetZone' for transitions are preserved.
+          e.data = { ...def.data };
+
+          // Map specific properties to entity root for performance/logic access
           if (def.data.dialogueId) e.dialogueId = def.data.dialogueId;
           if (def.data.color) e.color = def.data.color;
           if (def.data.width) e.width = def.data.width;

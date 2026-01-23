@@ -190,7 +190,8 @@ export class InteractionService {
           // FIX: Check targetZoneId on entity root first, then data
           const dest = (target as any).targetZoneId || target.data?.targetZone;
           if (dest) {
-              this.requestedFloorChange.set({ id: dest, spawn: target.spawnOverride });
+              const spawn = target.spawnOverride || target.data?.spawnOverride;
+              this.requestedFloorChange.set({ id: dest, spawn: spawn });
               this.lastTransitionTime = Date.now();
               this.sound.play('UI');
           }

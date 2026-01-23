@@ -143,7 +143,6 @@ export const BUILDING_PREFABS = {
                     y: y - 100,
                     data: {
                         targetZone: 'HUB_TRAINING',
-                        spawnPoint: 'chamber_entrance',
                         promptText: 'ENTER SIMULATION',
                         isTransition: true
                     }

@@ -5,7 +5,7 @@ export const HUB_TRAINING_ZONE: ZoneTemplate = {
   id: 'HUB_TRAINING',
   name: 'Neural Simulation Chamber',
   theme: 'HIGH_TECH',
-  bounds: { minX: -500, maxX: 500, minY: -500, maxY: 500 },
+  bounds: { minX: -600, maxX: 600, minY: -600, maxY: 600 },
   
   isTrainingZone: true,
   regionType: 'hub',
@@ -15,27 +15,27 @@ export const HUB_TRAINING_ZONE: ZoneTemplate = {
     floorPattern: 'GRID',
     weather: 'NONE',
     colors: {
-        ground: '#f8fafc',
-        wall: '#cbd5e1',
-        detail: '#0ea5e9'
+        ground: '#0f172a', // Darker Blue/Slate for contrast
+        wall: '#334155',   // Slate
+        detail: '#38bdf8'  // Cyan Light
     },
-    ambientColor: '#f0f9ff'
+    ambientColor: '#0c4a6e'
   },
   
   geometry: {
     walls: [
       // Perimeter containment field (invisible walls or glass)
-      { x: -500, y: 0, w: 20, h: 1000, height: 400, color: '#e2e8f0', type: 'BARRIER' }, // West
-      { x: 500, y: 0, w: 20, h: 1000, height: 400, color: '#e2e8f0', type: 'BARRIER' },  // East
-      { x: 0, y: -500, w: 1000, h: 20, height: 400, color: '#e2e8f0', type: 'BARRIER' }, // North
-      { x: 0, y: 500, w: 1000, h: 20, height: 400, color: '#e2e8f0', type: 'BARRIER' },  // South
+      { x: -500, y: 0, w: 20, h: 1000, height: 400, color: '#38bdf8', type: 'BARRIER' }, // West
+      { x: 500, y: 0, w: 20, h: 1000, height: 400, color: '#38bdf8', type: 'BARRIER' },  // East
+      { x: 0, y: -500, w: 1000, h: 20, height: 400, color: '#38bdf8', type: 'BARRIER' }, // North
+      { x: 0, y: 500, w: 1000, h: 20, height: 400, color: '#38bdf8', type: 'BARRIER' },  // South
       
       // Observation deck (glass-walled platform at north)
       { 
         x: 0, y: -450, 
-        w: 400, h: 80, 
-        height: 200, 
-        color: '#3f3f46', 
+        w: 400, h: 100, 
+        height: 250, 
+        color: '#1e293b', 
         type: 'OBSERVATION_DECK',
         data: { glassWalls: true }
       }
@@ -44,15 +44,16 @@ export const HUB_TRAINING_ZONE: ZoneTemplate = {
   
   entities: {
     static: [
-      // Central training terminal (dialogue-driven spawner)
+      // Central training terminal
       {
         type: 'TERMINAL',
         x: 0,
         y: 0,
         data: {
           dialogueId: 'training_terminal',
-          color: '#06b6d4',
-          hoverPrompt: 'Access Protocols [F]'
+          color: '#38bdf8',
+          hoverPrompt: 'SIMULATION CONTROL',
+          interactionRadius: 150 // Extended for mobile tap
         }
       },
       // The Overseer (floating observation eye)
@@ -62,54 +63,35 @@ export const HUB_TRAINING_ZONE: ZoneTemplate = {
         x: 0,
         y: -400,
         data: {
-          z: 150,
-          trackPlayer: true
+          z: 200,
+          trackPlayer: true,
+          color: '#38bdf8'
         }
+      },
+      // Floor details
+      {
+          type: 'DECORATION', subType: 'DYNAMIC_GLOW', x: 0, y: 0,
+          data: { width: 400, depth: 400, color: '#0ea5e9' }
       }
     ],
     dynamic: [
-      // Corner spawners (dormant until terminal activates them)
+      // Corner spawners
       {
-        type: 'SPAWNER',
-        subType: 'SPAWN_NODE',
-        x: -350,
-        y: -250,
-        data: {
-          spawnType: 'GRUNT',
-          spawnMax: 3,
-          triggerFlag: 'TRAINING_LVL1_ACTIVE',
-          spawnCooldown: 1000
-        }
+        type: 'SPAWNER', subType: 'SPAWN_NODE', x: -350, y: -250,
+        data: { spawnType: 'GRUNT', spawnMax: 3, triggerFlag: 'TRAINING_LVL1_ACTIVE', spawnCooldown: 1000 }
       },
       {
-        type: 'SPAWNER',
-        subType: 'SPAWN_NODE',
-        x: 350,
-        y: -250,
-        data: {
-          spawnType: 'GRUNT',
-          spawnMax: 3,
-          triggerFlag: 'TRAINING_LVL1_ACTIVE',
-          spawnCooldown: 1000
-        }
+        type: 'SPAWNER', subType: 'SPAWN_NODE', x: 350, y: -250,
+        data: { spawnType: 'GRUNT', spawnMax: 3, triggerFlag: 'TRAINING_LVL1_ACTIVE', spawnCooldown: 1000 }
       },
       {
-        type: 'SPAWNER',
-        subType: 'SPAWN_NODE',
-        x: 0,
-        y: -300,
-        data: {
-          spawnType: 'STALKER',
-          spawnMax: 2,
-          triggerFlag: 'TRAINING_LVL2_ACTIVE',
-          spawnCooldown: 2000
-        }
+        type: 'SPAWNER', subType: 'SPAWN_NODE', x: 0, y: -300,
+        data: { spawnType: 'STALKER', spawnMax: 2, triggerFlag: 'TRAINING_LVL2_ACTIVE', spawnCooldown: 2000 }
       }
     ]
   },
   
   exits: [
-      // Return to Hub
       {
         x: 0,
         y: 480,

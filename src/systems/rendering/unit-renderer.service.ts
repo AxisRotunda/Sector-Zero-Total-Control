@@ -320,7 +320,6 @@ export class UnitRendererService {
               
               // Impact Sparks if attacking
               if (entity.state === 'ATTACK' && entity.animPhase === 'active') {
-                  // Reuse facingAngle for spark direction
                   const sparkCount = 3 + combo;
                   for(let i=0; i<sparkCount; i++) {
                       const sa = facingAngle + (Math.random() - 0.5);
@@ -328,6 +327,15 @@ export class UnitRendererService {
                       ctx.fillStyle = '#fff';
                       ctx.fillRect(Math.cos(sa)*sd, Math.sin(sa)*sd, 2, 2);
                   }
+                  
+                  // Procedural Kinetic Swipe (Unarmed)
+                  ctx.rotate(facingAngle);
+                  ctx.globalAlpha = 0.6;
+                  ctx.strokeStyle = glowColor;
+                  ctx.lineWidth = 4 + combo;
+                  ctx.beginPath();
+                  ctx.arc(0, 0, 30 + (combo * 5), -Math.PI/3, Math.PI/3);
+                  ctx.stroke();
               }
               
               ctx.restore();

@@ -202,48 +202,60 @@ export class PlayerAbilitiesService {
       const equippedWeapon = this.inventory.equipped().weapon;
       const combo = player.comboIndex || 0;
 
-      // BRANCH 1: UNARMED PATH (Clean, no weapon dependency)
+      // BRANCH 1: UNARMED (MARTIAL ARTS) PATH
       if (!equippedWeapon) {
-          console.log('[Combat] Spawning UNARMED Hitbox');
           
           const level = this.progression.level() || 1;
-          const baseDamage = 5;
-          const scaledDamage = baseDamage + (level * 1.5) + (stats.damage * 0.2);
-          const comboMultiplier = 1.0 + (combo * 0.15);
-          const finalDamage = scaledDamage * comboMultiplier;
-
-          const baseKb = 8;
-          const kbMult = 4;
-          const knockback = baseKb + (combo * kbMult);
+          const baseDamage = 6; // Buffed base from UNARMED_WEAPON
+          const scaledDamage = baseDamage + (level * 2) + (stats.damage * 0.3); // Better scaling
           
-          let color = '#fbbf24'; // Gold
+          // Combo multipliers: 1x -> 1.2x -> 2.5x (Finisher)
+          let comboMultiplier = 1.0;
+          let knockback = 5;
           let stun = 0;
-          let reach = 30; // Short reach for fists
+          let reach = 35; 
+          let color = '#fbbf24'; // Base Gold
+          let radiusMult = 1.0;
 
           if (combo === 1) {
-              reach = 35;
+              comboMultiplier = 1.2;
+              knockback = 8;
               color = '#fcd34d';
-          } else if (combo === 2) {
               reach = 40;
-              stun = 25;
-              color = '#f59e0b';
+          } else if (combo === 2) {
+              // THUNDER STRIKE FINISHER
+              comboMultiplier = 2.5;
+              knockback = 35; // Heavy KB
+              stun = 45; // Guaranteed Stun
+              color = '#f59e0b'; // Darker Gold
+              reach = 50;
+              radiusMult = 1.5; // Wider Hitbox
+              
+              // Finisher SFX
+              this.sound.play('IMPACT');
+              this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: { intensity: 8, decay: 0.8 } });
           }
 
-          // Spawn unarmed hitbox
+          const finalDamage = scaledDamage * comboMultiplier;
+
+          // Spawn hitbox
           const hitbox = this.entityPool.acquire('HITBOX', undefined, player.zoneId);
           hitbox.type = 'HITBOX';
           hitbox.source = 'PLAYER';
-          // Offset slightly forward
-          hitbox.x = player.x + Math.cos(player.angle) * 25;
-          hitbox.y = player.y + Math.sin(player.angle) * 25;
+          // Offset forward based on reach
+          const offsetDist = 20 + (combo * 5); 
+          hitbox.x = player.x + Math.cos(player.angle) * offsetDist;
+          hitbox.y = player.y + Math.sin(player.angle) * offsetDist;
           hitbox.z = 10;
-          hitbox.vx = Math.cos(player.angle) * (2 + combo);
-          hitbox.vy = Math.sin(player.angle) * (2 + combo);
-          hitbox.angle = player.angle;
-          hitbox.radius = reach;
-          hitbox.timer = 10;
           
-          // CRITICAL: Set damage properties explicitly on the instance
+          // Add forward momentum to hitbox
+          hitbox.vx = Math.cos(player.angle) * (3 + combo);
+          hitbox.vy = Math.sin(player.angle) * (3 + combo);
+          
+          hitbox.angle = player.angle;
+          hitbox.radius = reach * radiusMult;
+          hitbox.timer = 8; // Fast frames
+          
           hitbox.hp = finalDamage; 
           (hitbox as any).damage = finalDamage; 
           (hitbox as any).attackPower = finalDamage;
@@ -252,15 +264,7 @@ export class PlayerAbilitiesService {
           hitbox.state = 'ATTACK';
           hitbox.knockbackForce = knockback;
           hitbox.status.stun = stun;
-          hitbox.hitIds = new Set(); // Reset hit memory
-
-          console.log('👊 UNARMED HITBOX SPAWNED:', {
-              finalDamage,
-              reach,
-              combo,
-              position: { x: hitbox.x, y: hitbox.y },
-              zoneId: hitbox.zoneId
-          });
+          hitbox.hitIds = new Set(); 
 
           // Immediate collision check
           this.collisionService.checkHitboxCollisions(hitbox);
@@ -268,13 +272,22 @@ export class PlayerAbilitiesService {
           this.world.entities.push(hitbox);
           this.haptic.impactLight();
           
+          // Finisher Particles
+          if (combo === 2) {
+              this.particleService.addParticles({
+                  x: hitbox.x, y: hitbox.y, z: 15,
+                  count: 12, speed: 6, color: '#f59e0b', size: 3, type: 'square',
+                  life: 0.4, emitsLight: true
+              });
+          }
+          
           // Cycle combo
           player.comboIndex = (combo + 1) % this.MAX_COMBO;
           this.currentCombo.set(player.comboIndex);
           return;
       }
 
-      // BRANCH 2: ARMED PATH (Original Logic)
+      // BRANCH 2: ARMED PATH
       const weapon = equippedWeapon;
       
       const baseReach = weapon.stats?.['reach'] || 60; 
