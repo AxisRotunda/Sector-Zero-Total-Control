@@ -11,6 +11,8 @@ import { EventBusService } from '../../core/events/event-bus.service';
 import { GameEvents } from '../../core/events/game-events';
 import { HapticService } from '../../services/haptic.service';
 import { Entity } from '../../models/game.models';
+import { UNARMED_WEAPON } from '../../models/item.models';
+import { PlayerProgressionService } from './player-progression.service';
 
 @Injectable({ providedIn: 'root' })
 export class PlayerAbilitiesService {
@@ -22,6 +24,7 @@ export class PlayerAbilitiesService {
   private inventory = inject(InventoryService);
   private eventBus = inject(EventBusService);
   private haptic = inject(HapticService);
+  private progression = inject(PlayerProgressionService);
 
   cooldowns = signal({ primary: 0, secondary: 0, dash: 0, utility: 0 });
   maxCooldowns = signal({ primary: BALANCE.COOLDOWNS.PRIMARY, secondary: BALANCE.COOLDOWNS.SECONDARY, dash: BALANCE.COOLDOWNS.DASH, utility: BALANCE.COOLDOWNS.UTILITY });
@@ -186,17 +189,35 @@ export class PlayerAbilitiesService {
 
   spawnPrimaryAttackHitbox(player: Entity) {
       const stats = this.stats.playerStats();
-      const weapon = this.inventory.equipped().weapon;
+      const equippedWeapon = this.inventory.equipped().weapon;
+      
+      const isUnarmed = !equippedWeapon;
+      
+      // Select Effective Weapon (Real or Virtual Fist)
+      const weapon = isUnarmed ? UNARMED_WEAPON : equippedWeapon;
       
       // Calculate Reach based on Item Stats
-      const baseReach = weapon?.stats?.['reach'] || 60; // Default if not present
+      const baseReach = weapon?.stats?.['reach'] || 60; 
       const reachScale = weapon?.shape === 'psiBlade' ? 1.2 : 1.0;
       let reach = (baseReach + (stats.damage * 0.3)) * reachScale;
+
+      let damage = weapon?.stats?.['dmg'] || 5;
+      
+      // Dynamic Scaling for Unarmed
+      if (isUnarmed) {
+          const level = this.progression.level();
+          // Formula: Base 5 + (Level * 1.5) + (20% of Total Damage Stat)
+          const scalingBonus = (level * 1.5) + (stats.damage * 0.2);
+          damage += scalingBonus;
+      } else {
+          // Add stat scaling to weapon
+          damage += stats.damage; 
+      }
 
       let dmgMult = 1.0;
       const baseKb = 8;
       const kbMult = 4;
-      let color = '#f97316';
+      let color = isUnarmed ? '#fbbf24' : '#f97316'; // Gold for fists
       let stun = 0;
 
       // Combo scaling
@@ -206,12 +227,14 @@ export class PlayerAbilitiesService {
       if (combo === 1) {
           reach *= 1.2;
           dmgMult = 1.2;
-          color = '#fb923c';
+          if (isUnarmed) color = '#fcd34d'; // Brighter Gold
+          else color = '#fb923c';
       } else if (combo === 2) {
           reach *= 1.5;
           dmgMult = 2.0;
-          stun = 15;
-          color = '#ea580c';
+          stun = isUnarmed ? 25 : 15; // Unarmed hits stun more on finish
+          if (isUnarmed) color = '#f59e0b'; // Deep Gold
+          else color = '#ea580c';
       }
 
       // Pass zoneId to projectile
@@ -224,7 +247,7 @@ export class PlayerAbilitiesService {
       hitbox.vy = Math.sin(player.angle) * (2 + combo);
       hitbox.angle = player.angle; 
       hitbox.radius = reach; 
-      hitbox.hp = stats.damage * dmgMult; 
+      hitbox.hp = damage * dmgMult; 
       hitbox.maxHp = hitbox.hp; 
       hitbox.color = color; 
       hitbox.state = 'ATTACK'; 

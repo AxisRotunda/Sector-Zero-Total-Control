@@ -14,3 +14,23 @@ export interface Item {
   stack: number;
   maxStack: number;
 }
+
+export const UNARMED_WEAPON: Item = {
+  id: 'FIST_BASE',
+  name: 'Unarmed Strike',
+  type: 'WEAPON',
+  shape: 'chip',
+  rarity: 'COMMON',
+  level: 1,
+  color: '#fbbf24', // Gold
+  stats: {
+    dmg: 5,        // Low base damage
+    spd: 1.5,      // Fast attack speed
+    reach: 40,     // Short range
+    crit: 5,       // 5% base crit
+    ls: 0,
+    armorPen: 0
+  },
+  stack: 1,
+  maxStack: 1
+};

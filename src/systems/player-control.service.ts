@@ -17,6 +17,7 @@ import { HapticService } from '../services/haptic.service';
 import { CameraService } from '../game/camera.service';
 import { InteractionService } from '../services/interaction.service';
 import { InventoryService } from '../game/inventory.service';
+import { UNARMED_WEAPON } from '../models/item.models';
 
 @Injectable({ providedIn: 'root' })
 export class PlayerControlService {
@@ -166,9 +167,10 @@ export class PlayerControlService {
     }
 
     private updatePlayerAnimation(player: Entity) {
-        // Calculate Speed based on Weapon Stats
-        const weapon = this.inventory.equipped().weapon;
-        const weaponSpeed = weapon?.stats?.['spd'] || 1.0;
+        // Calculate Speed based on Weapon Stats (or Unarmed fallback)
+        const weapon = this.inventory.equipped().weapon || UNARMED_WEAPON;
+        const weaponSpeed = weapon.stats['spd'] || 1.0;
+        
         // Faster animations for later combo steps
         const comboSpeedMult = player.comboIndex === 2 ? 0.7 : (player.comboIndex === 1 ? 0.85 : 1.0);
         const attackSpeedStat = this.playerService.stats.playerStats().speed * 0.1; // Minor impact from Agility

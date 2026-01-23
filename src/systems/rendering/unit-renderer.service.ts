@@ -248,7 +248,8 @@ export class UnitRendererService {
       if (!isNPC) { 
           // Use Entity's weaponTrail storage
           if (!e.weaponTrail) e.weaponTrail = [];
-          this.drawWeapon(ctx, pHandR, rArmAngle, equippedWeapon, e.angle + bodyTwist, isHit, e.weaponTrail, isPlayer); 
+          // Pass e to access comboIndex for unarmed drawing
+          this.drawWeapon(ctx, pHandR, rArmAngle, equippedWeapon, e.angle + bodyTwist, isHit, e.weaponTrail, isPlayer, e); 
       }
       
       if (isStunned) {
@@ -295,7 +296,48 @@ export class UnitRendererService {
       ctx.restore();
   }
 
-  private drawWeapon(ctx: CanvasRenderingContext2D, handPos: {x: number, y: number}, armAngle: number, item: Item | null, facingAngle: number, isHit: boolean, trail: any[], isPlayer: boolean) {
+  private drawWeapon(ctx: CanvasRenderingContext2D, handPos: {x: number, y: number}, armAngle: number, item: Item | null, facingAngle: number, isHit: boolean, trail: any[], isPlayer: boolean, entity: Entity) {
+      // UNARMED LOGIC
+      if (!item) {
+          const combo = entity.comboIndex || 0;
+          
+          // Only draw glowing fist for players or specific enemies
+          if (isPlayer || entity.type === 'ENEMY') {
+              const glowIntensity = 10 + (combo * 15);
+              const glowColor = combo > 0 ? '#fbbf24' : '#f59e0b';
+              
+              ctx.save();
+              ctx.translate(handPos.x, handPos.y);
+              
+              // Fist Aura
+              ctx.shadowBlur = glowIntensity;
+              ctx.shadowColor = glowColor;
+              ctx.fillStyle = combo > 0 ? '#fcd34d' : '#27272a';
+              
+              ctx.beginPath();
+              ctx.arc(0, 0, 6, 0, Math.PI * 2);
+              ctx.fill();
+              
+              // Impact Sparks if attacking
+              if (entity.state === 'ATTACK' && entity.animPhase === 'active') {
+                  // Reuse facingAngle for spark direction
+                  const sparkCount = 3 + combo;
+                  for(let i=0; i<sparkCount; i++) {
+                      const sa = facingAngle + (Math.random() - 0.5);
+                      const sd = Math.random() * 20;
+                      ctx.fillStyle = '#fff';
+                      ctx.fillRect(Math.cos(sa)*sd, Math.sin(sa)*sd, 2, 2);
+                  }
+              }
+              
+              ctx.restore();
+          } else {
+              // Basic fist for NPCs
+              ctx.beginPath(); ctx.arc(handPos.x, handPos.y, 4, 0, Math.PI*2); ctx.fill();
+          }
+          return;
+      }
+
       ctx.save(); 
       ctx.translate(handPos.x, handPos.y);
       const isoRotation = Math.atan2(Math.sin(facingAngle), Math.cos(facingAngle));
