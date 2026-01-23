@@ -29,11 +29,6 @@ export class CollisionService {
                  const dist = Math.hypot(target.x - hitbox.x, target.y - hitbox.y);
                  if (dist < target.radius + hitbox.radius) {
                     
-                    // --- DIAGNOSTIC LOG ---
-                    console.log(`[CollisionService] Hit Detected! Source: ${hitbox.source} -> Target: ${target.type} (${target.subType})`);
-                    console.log(`  Hitbox Damage Props: hp=${hitbox.hp}, damage=${(hitbox as any).damage}`);
-                    // ---------------------
-
                     this.combat.processHit(hitbox, target);
                     
                     hitbox.hitIds!.add(target.id);
@@ -48,9 +43,8 @@ export class CollisionService {
         
         if (dist < player.radius + hitbox.radius) {
             if (player.state !== 'DEAD' && !player.invulnerable) {
-                this.playerStats.takeDamage(hitbox.hp);
-                player.invulnerable = true;
-                player.iframeTimer = 30; // 0.5s @ 60fps
+                // Unified damage application
+                this.combat.applyDirectDamage(hitbox, player, hitbox.damageValue || 0);
                 hitbox.timer = 0;
             }
         }

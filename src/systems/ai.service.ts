@@ -7,6 +7,7 @@ import { SoundService } from '../services/sound.service';
 import { EntityPoolService } from '../services/entity-pool.service';
 import { SquadAiService } from './squad-ai.service';
 import { SpatialHashService } from './spatial-hash.service';
+import { CombatService } from './combat.service';
 import * as BALANCE from '../config/balance.config';
 
 @Injectable({ providedIn: 'root' })
@@ -17,6 +18,7 @@ export class AiService {
   private entityPool = inject(EntityPoolService);
   private squadAi = inject(SquadAiService);
   private spatialHash = inject(SpatialHashService);
+  private combat = inject(CombatService);
   
   private strategies: { [key: string]: (e: Entity, p: Entity, dist: number, angle: number) => void } = {
     'SNIPER': this.updateSniper.bind(this), 'STEALTH': this.updateStealth.bind(this), 'GRUNT': this.updateFlanker.bind(this),
@@ -63,7 +65,6 @@ export class AiService {
   }
 
   private updateSeekCover(enemy: Entity, player: Entity, dist: number, angle: number) {
-      // FIX: Query using enemy's zoneId
       const walls = this.spatialHash.query(enemy.x, enemy.y, BALANCE.ENEMY_AI.COVER_SEEK_DISTANCE, enemy.zoneId);
       let bestCover: Entity | null = null; let bestDist = Infinity;
       for (const w of walls) {
@@ -109,8 +110,8 @@ export class AiService {
   private checkMeleeAttack(enemy: Entity, player: Entity, dist: number, angle: number) {
       if (dist < player.radius + enemy.radius) {
          let damage = (enemy.equipment?.weapon?.stats['dmg'] || 8) * this.world.currentZone().difficultyMult;
-         if (enemy.status.weakness) damage *= (1 - enemy.status.weakness.damageReduction);
-         this.playerService.damagePlayer(damage);
+         // Apply Combat Pipeline
+         this.combat.applyDirectDamage(enemy, player, damage);
          enemy.vx -= Math.cos(angle) * 15; enemy.vy -= Math.sin(angle) * 15;
      }
   }
@@ -141,12 +142,23 @@ export class AiService {
        if (enemy.timer > 180) { 
             enemy.timer = 0; this.sound.play('SHOOT');
             let damage = 40 * this.world.currentZone().difficultyMult;
-            if (enemy.status.weakness) damage *= (1 - enemy.status.weakness.damageReduction);
+            
             // Pass zoneId to projectile
             const projectile = this.entityPool.acquire('HITBOX', undefined, enemy.zoneId);
             projectile.source = 'ENEMY'; projectile.x = enemy.x; projectile.y = enemy.y; projectile.z = 10;
             projectile.vx = Math.cos(angle) * 15; projectile.vy = Math.sin(angle) * 15;
-            projectile.angle = angle; projectile.radius = 8; projectile.hp = damage; projectile.color = '#a855f7'; projectile.state = 'ATTACK'; projectile.timer = 60;
+            projectile.angle = angle; projectile.radius = 8; 
+            
+            // New strict damage prop
+            projectile.damageValue = damage; 
+            
+            projectile.color = '#a855f7'; projectile.state = 'ATTACK'; projectile.timer = 60;
+            
+            // Pass weakness if present
+            if (enemy.status.weakness) {
+                projectile.status.weakness = { ...enemy.status.weakness };
+            }
+
             this.world.entities.push(projectile);
        }
     } else { enemy.vx += Math.cos(angle) * 0.3; enemy.vy += Math.sin(angle) * 0.3; }
@@ -161,8 +173,7 @@ export class AiService {
          if (enemy.attackTimer === undefined) enemy.attackTimer = 0;
          if (enemy.attackTimer <= 0) {
              let damage = 15 * this.world.currentZone().difficultyMult;
-             if (enemy.status.weakness) damage *= (1 - enemy.status.weakness.damageReduction);
-             this.playerService.damagePlayer(damage);
+             this.combat.applyDirectDamage(enemy, player, damage);
              enemy.attackTimer = 60; enemy.state = 'ATTACK';
          }
     }

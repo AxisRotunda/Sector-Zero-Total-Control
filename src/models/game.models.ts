@@ -37,7 +37,12 @@ export interface Entity extends Volumetric {
   hp: number;
   maxHp: number;
   armor: number;
+  
+  // Combat Stats (Explicit)
+  damageValue?: number;
   armorPen?: number;
+  critChance?: number;
+  
   color: string;
   state: 'IDLE' | 'MOVE' | 'ATTACK' | 'DEAD' | 'CHARGE' | 'RETREAT' | 'PATROL' | 'ACTIVE' | 'COOLDOWN' | 'SUPPORT';
   animFrame: number;

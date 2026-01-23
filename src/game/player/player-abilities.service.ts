@@ -56,7 +56,6 @@ export class PlayerAbilitiesService {
         if (canCombo) {
             newComboIndex = (this.currentCombo() + 1) % this.MAX_COMBO;
         } else {
-            // Reset if not chaining
             newComboIndex = 0;
         }
         
@@ -64,7 +63,6 @@ export class PlayerAbilitiesService {
         player.comboIndex = newComboIndex;
 
         const baseCdr = Math.max(0, Math.min(BALANCE.COOLDOWNS.CDR_CAP, stats.cdr / 100));
-        // Reduce cooldown for combo chain hits to make it fluid
         const cdTime = canCombo ? 15 : BALANCE.COOLDOWNS.PRIMARY;
         const cooldown = Math.max(10, cdTime * (1 - baseCdr)); 
         
@@ -78,11 +76,9 @@ export class PlayerAbilitiesService {
         player.animFrameTimer = 0; 
         player.animPhase = 'startup';
         
-        // Vary shake intensity by combo step
         const shakeIntensity = 2 + newComboIndex;
         this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: { intensity: shakeIntensity, decay: 0.9, x: Math.cos(attackDir), y: Math.sin(attackDir) } });
         
-        // Pitch shift sound slightly for combos
         this.sound.play('SHOOT'); 
     }
     if (skill === 'SECONDARY') {
@@ -92,16 +88,17 @@ export class PlayerAbilitiesService {
         this.cooldowns.update(c => ({...c, secondary: 300}));
         
         const hitbox = this.entityPool.acquire('HITBOX', undefined, player.zoneId);
-        hitbox.source = 'PSIONIC'; hitbox.x = player.x; hitbox.y = player.y; hitbox.radius = 120 + stats.psyche * 3; hitbox.hp = 15 + stats.psyche * 2; hitbox.color = '#a855f7'; hitbox.state = 'ATTACK'; hitbox.timer = 10; hitbox.knockbackForce = 20; hitbox.psionicEffect = 'wave';
+        hitbox.source = 'PSIONIC'; hitbox.x = player.x; hitbox.y = player.y; 
+        hitbox.radius = 120 + stats.psyche * 3; 
+        hitbox.damageValue = 15 + stats.psyche * 2; 
+        hitbox.color = '#a855f7'; hitbox.state = 'ATTACK'; hitbox.timer = 10; hitbox.knockbackForce = 20; hitbox.psionicEffect = 'wave';
         
-        // Immediate check for AoE
         this.collisionService.checkHitboxCollisions(hitbox);
         
         this.world.entities.push(hitbox);
         this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: BALANCE.SHAKE.EXPLOSION });
         this.sound.play('EXPLOSION');
         
-        // Emissive particles for Blast
         this.particleService.addParticles({
             x: player.x, y: player.y, z: 20,
             count: 20, speed: 8, color: '#d8b4fe', size: 4, type: 'circle',
@@ -111,7 +108,6 @@ export class PlayerAbilitiesService {
     if (skill === 'DASH') {
         if (cds.dash > 0) return;
         this.cooldowns.update(c => ({...c, dash: 40}));
-        // Reset combo on dash
         this.currentCombo.set(0); 
         player.comboIndex = 0;
         
@@ -131,7 +127,7 @@ export class PlayerAbilitiesService {
         hitbox.x = player.x + Math.cos(angle) * 70; 
         hitbox.y = player.y + Math.sin(angle) * 70; 
         hitbox.radius = 60; 
-        hitbox.hp = 5 + stats.psyche * 0.5; // Less damage
+        hitbox.damageValue = 5 + stats.psyche * 0.5;
         hitbox.timer = 8; 
         hitbox.color = '#a855f7'; 
         hitbox.status.stun = 30; 
@@ -155,19 +151,17 @@ export class PlayerAbilitiesService {
         hitbox.x = player.x + Math.cos(angle) * 40;
         hitbox.y = player.y + Math.sin(angle) * 40;
         hitbox.radius = 80;
-        hitbox.hp = 25;
+        hitbox.damageValue = 25;
         hitbox.timer = 6;
         hitbox.color = '#fbbf24';
         hitbox.status.stun = 45;
         hitbox.knockbackForce = 15;
         
-        // Immediate check
         this.collisionService.checkHitboxCollisions(hitbox);
         
         this.world.entities.push(hitbox);
         this.sound.play('IMPACT');
         
-        // Gold Sparks
         this.particleService.addParticles({
             x: hitbox.x, y: hitbox.y, z: 20,
             count: 15, speed: 6, color: '#fbbf24', size: 3, type: 'square',
@@ -179,16 +173,17 @@ export class PlayerAbilitiesService {
         this.stats.psionicEnergy.set(0);
         this.world.player.status.stun = 120;
         const explosion = this.entityPool.acquire('HITBOX', undefined, player.zoneId);
-        explosion.source = 'PSIONIC'; explosion.x = player.x; explosion.y = player.y; explosion.radius = 350; explosion.hp = 100 + this.stats.playerStats().psyche * 5; explosion.knockbackForce = 50; explosion.timer = 15; explosion.color = '#f0abfc'; explosion.psionicEffect = 'wave';
+        explosion.source = 'PSIONIC'; explosion.x = player.x; explosion.y = player.y; 
+        explosion.radius = 350; 
+        explosion.damageValue = 100 + this.stats.playerStats().psyche * 5; 
+        explosion.knockbackForce = 50; explosion.timer = 15; explosion.color = '#f0abfc'; explosion.psionicEffect = 'wave';
         
-        // Immediate check
         this.collisionService.checkHitboxCollisions(explosion);
         
         this.world.entities.push(explosion);
         this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: { intensity: 30, decay: 0.7 } });
         this.sound.play('EXPLOSION');
         
-        // Massive burst
         this.particleService.addParticles({
             x: player.x, y: player.y, z: 20,
             count: 50, speed: 12, color: '#f0abfc', size: 6, type: 'circle',
@@ -202,19 +197,17 @@ export class PlayerAbilitiesService {
       const equippedWeapon = this.inventory.equipped().weapon;
       const combo = player.comboIndex || 0;
 
-      // BRANCH 1: UNARMED (MARTIAL ARTS) PATH
+      // BRANCH 1: UNARMED
       if (!equippedWeapon) {
-          
           const level = this.progression.level() || 1;
-          const baseDamage = 6; // Buffed base from UNARMED_WEAPON
-          const scaledDamage = baseDamage + (level * 2) + (stats.damage * 0.3); // Better scaling
+          const baseDamage = 6; 
+          const scaledDamage = baseDamage + (level * 2) + (stats.damage * 0.3); 
           
-          // Combo multipliers: 1x -> 1.2x -> 2.5x (Finisher)
           let comboMultiplier = 1.0;
           let knockback = 5;
           let stun = 0;
           let reach = 35; 
-          let color = '#fbbf24'; // Base Gold
+          let color = '#fbbf24';
           let radiusMult = 1.0;
 
           if (combo === 1) {
@@ -223,42 +216,35 @@ export class PlayerAbilitiesService {
               color = '#fcd34d';
               reach = 40;
           } else if (combo === 2) {
-              // THUNDER STRIKE FINISHER
               comboMultiplier = 2.5;
-              knockback = 35; // Heavy KB
-              stun = 45; // Guaranteed Stun
-              color = '#f59e0b'; // Darker Gold
+              knockback = 35; 
+              stun = 45; 
+              color = '#f59e0b'; 
               reach = 50;
-              radiusMult = 1.5; // Wider Hitbox
+              radiusMult = 1.5; 
               
-              // Finisher SFX
               this.sound.play('IMPACT');
               this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: { intensity: 8, decay: 0.8 } });
           }
 
           const finalDamage = scaledDamage * comboMultiplier;
 
-          // Spawn hitbox
           const hitbox = this.entityPool.acquire('HITBOX', undefined, player.zoneId);
           hitbox.type = 'HITBOX';
           hitbox.source = 'PLAYER';
-          // Offset forward based on reach
           const offsetDist = 20 + (combo * 5); 
           hitbox.x = player.x + Math.cos(player.angle) * offsetDist;
           hitbox.y = player.y + Math.sin(player.angle) * offsetDist;
           hitbox.z = 10;
           
-          // Add forward momentum to hitbox
           hitbox.vx = Math.cos(player.angle) * (3 + combo);
           hitbox.vy = Math.sin(player.angle) * (3 + combo);
           
           hitbox.angle = player.angle;
           hitbox.radius = reach * radiusMult;
-          hitbox.timer = 8; // Fast frames
+          hitbox.timer = 8; 
           
-          hitbox.hp = finalDamage; 
-          (hitbox as any).damage = finalDamage; 
-          (hitbox as any).attackPower = finalDamage;
+          hitbox.damageValue = finalDamage; 
 
           hitbox.color = color;
           hitbox.state = 'ATTACK';
@@ -266,13 +252,10 @@ export class PlayerAbilitiesService {
           hitbox.status.stun = stun;
           hitbox.hitIds = new Set(); 
 
-          // Immediate collision check
           this.collisionService.checkHitboxCollisions(hitbox);
-          
           this.world.entities.push(hitbox);
           this.haptic.impactLight();
           
-          // Finisher Particles
           if (combo === 2) {
               this.particleService.addParticles({
                   x: hitbox.x, y: hitbox.y, z: 15,
@@ -281,13 +264,12 @@ export class PlayerAbilitiesService {
               });
           }
           
-          // Cycle combo
           player.comboIndex = (combo + 1) % this.MAX_COMBO;
           this.currentCombo.set(player.comboIndex);
           return;
       }
 
-      // BRANCH 2: ARMED PATH
+      // BRANCH 2: ARMED
       const weapon = equippedWeapon;
       
       const baseReach = weapon.stats?.['reach'] || 60; 
@@ -303,7 +285,6 @@ export class PlayerAbilitiesService {
       let color = '#f97316'; 
       let stun = 0;
 
-      // Combo scaling
       const knockback = baseKb + (combo * kbMult);
 
       if (combo === 1) {
@@ -320,7 +301,6 @@ export class PlayerAbilitiesService {
       const finalDamage = damage * dmgMult;
 
       const hitbox = this.entityPool.acquire('HITBOX', undefined, player.zoneId);
-      
       hitbox.type = 'HITBOX';
       hitbox.source = 'PLAYER';
       hitbox.x = player.x + Math.cos(player.angle) * 30; 
@@ -331,22 +311,16 @@ export class PlayerAbilitiesService {
       hitbox.angle = player.angle; 
       hitbox.radius = reach; 
       
-      hitbox.hp = finalDamage; 
-      (hitbox as any).damage = finalDamage;
-      (hitbox as any).attackPower = finalDamage;
-      (hitbox as any).dmg = finalDamage;
+      hitbox.damageValue = finalDamage;
       
-      hitbox.maxHp = finalDamage; 
       hitbox.color = color; 
       hitbox.state = 'ATTACK'; 
       hitbox.timer = 15; 
       hitbox.knockbackForce = knockback;
       hitbox.status.stun = stun;
-      
       hitbox.hitIds = new Set();
 
       this.collisionService.checkHitboxCollisions(hitbox);
-
       this.world.entities.push(hitbox);
       this.haptic.impactMedium();
       
