@@ -14,6 +14,7 @@ import { Entity } from '../../models/game.models';
 import { UNARMED_WEAPON } from '../../models/item.models';
 import { PlayerProgressionService } from './player-progression.service';
 import { CollisionService } from '../../systems/collision.service';
+import { createEmptyDamagePacket } from '../../models/damage.model';
 
 @Injectable({ providedIn: 'root' })
 export class PlayerAbilitiesService {
@@ -90,7 +91,12 @@ export class PlayerAbilitiesService {
         const hitbox = this.entityPool.acquire('HITBOX', undefined, this.world.currentZone().id);
         hitbox.source = 'PSIONIC'; hitbox.x = player.x; hitbox.y = player.y; 
         hitbox.radius = 120 + stats.psyche * 3; 
-        hitbox.damageValue = 15 + stats.psyche * 2; 
+        
+        // Damage: Chaos scaling
+        const damage = 15 + stats.psyche * 2;
+        hitbox.damagePacket = createEmptyDamagePacket();
+        hitbox.damagePacket.chaos = damage;
+
         hitbox.color = '#a855f7'; hitbox.state = 'ATTACK'; hitbox.timer = 10; hitbox.knockbackForce = 20; hitbox.psionicEffect = 'wave';
         
         this.collisionService.checkHitboxCollisions(hitbox);
@@ -129,12 +135,19 @@ export class PlayerAbilitiesService {
         hitbox.x = player.x + Math.cos(angle) * 70; 
         hitbox.y = player.y + Math.sin(angle) * 70; 
         hitbox.radius = 60; 
-        hitbox.damageValue = 5 + stats.psyche * 0.5;
+        
+        // Damage: Minor Chaos
+        const damage = 5 + stats.psyche * 0.5;
+        hitbox.damagePacket = createEmptyDamagePacket();
+        hitbox.damagePacket.chaos = damage;
+
         hitbox.timer = 8; 
         hitbox.color = '#a855f7'; 
         hitbox.status.stun = 30; 
         hitbox.knockbackForce = -15; // VACUUM PULL
         hitbox.psionicEffect = 'wave';
+        
+        this.collisionService.checkHitboxCollisions(hitbox);
         this.world.entities.push(hitbox);
         this.sound.play('CHARGE');
     }
@@ -154,7 +167,11 @@ export class PlayerAbilitiesService {
         hitbox.x = player.x + Math.cos(angle) * 40;
         hitbox.y = player.y + Math.sin(angle) * 40;
         hitbox.radius = 80;
-        hitbox.damageValue = 25;
+        
+        // Damage: Physical
+        hitbox.damagePacket = createEmptyDamagePacket();
+        hitbox.damagePacket.physical = 25;
+
         hitbox.timer = 6;
         hitbox.color = '#fbbf24';
         hitbox.status.stun = 45;
@@ -178,7 +195,12 @@ export class PlayerAbilitiesService {
         const explosion = this.entityPool.acquire('HITBOX', undefined, this.world.currentZone().id);
         explosion.source = 'PSIONIC'; explosion.x = player.x; explosion.y = player.y; 
         explosion.radius = 350; 
-        explosion.damageValue = 100 + this.stats.playerStats().psyche * 5; 
+        
+        // Damage: Massive Chaos
+        const damage = 100 + this.stats.playerStats().psyche * 5; 
+        explosion.damagePacket = createEmptyDamagePacket();
+        explosion.damagePacket.chaos = damage;
+
         explosion.knockbackForce = 50; explosion.timer = 15; explosion.color = '#f0abfc'; explosion.psionicEffect = 'wave';
         
         this.collisionService.checkHitboxCollisions(explosion);
@@ -202,22 +224,27 @@ export class PlayerAbilitiesService {
       
       const currentZoneId = this.world.currentZone().id;
 
-      // UNARMED vs ARMED Logic
-      // If unarmed, base damage is handled in stats.damagePacket
-      
+      // Create Hitbox
       const hitbox = this.entityPool.acquire('HITBOX', undefined, currentZoneId);
       hitbox.type = 'HITBOX';
       hitbox.source = 'PLAYER';
       
-      // ✅ FIX: Use damagePacket from stats directly
-      hitbox.damagePacket = { ...stats.damagePacket };
+      // 1. CLONE PLAYER DAMAGE PACKET
+      // This includes weapons, skill tree, and base stats.
+      if (stats.damagePacket) {
+          hitbox.damagePacket = { ...stats.damagePacket };
+      } else {
+          // Safety Fallback (Should not happen with proper Stats init)
+          hitbox.damagePacket = createEmptyDamagePacket();
+          hitbox.damagePacket.physical = 10;
+      }
       
-      // ✅ FIX: Use penetration from stats
+      // 2. APPLY PENETRATION
       if (stats.penetration) {
         hitbox.penetration = { ...stats.penetration };
       }
 
-      // Damage conversion (from equipped weapon)
+      // 3. APPLY DAMAGE CONVERSION (Item property)
       if (equippedWeapon?.damageConversion) {
         hitbox.damageConversion = { ...equippedWeapon.damageConversion };
       }
@@ -253,9 +280,14 @@ export class PlayerAbilitiesService {
           this.sound.play('IMPACT');
       }
 
-      // Apply combo multiplier to physical damage component
-      if (hitbox.damagePacket) {
+      // 4. APPLY COMBO SCALING
+      // Scale ALL damage types in the packet, not just physical.
+      if (hitbox.damagePacket && comboMultiplier !== 1.0) {
           hitbox.damagePacket.physical = Math.floor(hitbox.damagePacket.physical * comboMultiplier);
+          hitbox.damagePacket.fire = Math.floor(hitbox.damagePacket.fire * comboMultiplier);
+          hitbox.damagePacket.cold = Math.floor(hitbox.damagePacket.cold * comboMultiplier);
+          hitbox.damagePacket.lightning = Math.floor(hitbox.damagePacket.lightning * comboMultiplier);
+          hitbox.damagePacket.chaos = Math.floor(hitbox.damagePacket.chaos * comboMultiplier);
       }
 
       // Position logic (Sweep)
