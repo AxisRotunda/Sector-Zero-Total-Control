@@ -20,17 +20,22 @@ export class PhysicsService {
   private readonly MAX_SEPARATION_NEIGHBORS = 6; 
 
   public updateEntityPhysics(e: Entity, stats?: { speed: number }, inputVec?: { x: number, y: number }): boolean {
-    const ACCELERATION = 2.0; 
-    const FRICTION = 0.80; 
     const isPlayer = e.type === 'PLAYER';
     
+    // Tighter controls: Faster acceleration, much higher stopping friction
+    const ACCELERATION = isPlayer ? 3.0 : 2.0; 
+    const FRICTION_MOVING = 0.85; 
+    const FRICTION_STOPPING = 0.6; // Decays velocity much faster when no input
+    
+    const hasInput = isPlayer && inputVec && (Math.abs(inputVec.x) > 0.01 || Math.abs(inputVec.y) > 0.01);
+
     // 1. Input Acceleration
-    if (isPlayer && inputVec && stats) {
+    if (hasInput && stats) {
         const MAX_SPEED = BALANCE.PLAYER.BASE_SPEED + (stats.speed * BALANCE.PLAYER.SPEED_STAT_SCALE);
-        if (Math.hypot(inputVec.x, inputVec.y) > 0.01) {
-            e.vx += inputVec.x * ACCELERATION; 
-            e.vy += inputVec.y * ACCELERATION;
-        }
+        e.vx += inputVec!.x * ACCELERATION; 
+        e.vy += inputVec!.y * ACCELERATION;
+        
+        // Soft Cap Speed
         const currentSpeed = Math.hypot(e.vx, e.vy);
         if (currentSpeed > MAX_SPEED) { 
             const scale = MAX_SPEED / currentSpeed; 
@@ -75,8 +80,13 @@ export class PhysicsService {
     }
 
     // 2. Friction
-    e.vx *= FRICTION; 
-    e.vy *= FRICTION;
+    // Apply different friction based on whether we are actively moving or stopping
+    const friction = hasInput ? FRICTION_MOVING : FRICTION_STOPPING;
+    
+    e.vx *= friction; 
+    e.vy *= friction;
+    
+    // Aggressive snap to zero to prevent micro-sliding
     if (Math.abs(e.vx) < 0.1) e.vx = 0; 
     if (Math.abs(e.vy) < 0.1) e.vy = 0;
     

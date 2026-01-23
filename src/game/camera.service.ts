@@ -12,6 +12,7 @@ export class CameraService {
   private input = inject(InputService);
 
   private targetZoom = RENDER_CONFIG.CAMERA.BASE_ZOOM;
+  private targetRotation = 0;
   
   // Maximum distance the mouse can offset the camera (screen pixels approx)
   private readonly MOUSE_PEEK_DISTANCE = 300; 
@@ -25,15 +26,12 @@ export class CameraService {
   });
 
   constructor() {
+      const config = RENDER_CONFIG.CAMERA;
+
       // Subscribe to Input Zoom events (Wheel / Pinch)
       this.input.zoomEvents.subscribe((delta) => {
           // Dynamic Sensitivity: Scale sensitivity based on current zoom level
-          // When Zoomed IN (High Value), we want higher sensitivity for twitch adjustments.
-          // When Zoomed OUT (Low Value), we want lower sensitivity for broad tactical framing.
-          const config = RENDER_CONFIG.CAMERA;
           const range = config.MAX_ZOOM - config.MIN_ZOOM;
-          
-          // 0.0 (Zoomed out completely) to 1.0 (Zoomed in completely)
           const zoomProgress = (this.targetZoom - config.MIN_ZOOM) / range; 
           
           // Interpolate sensitivity
@@ -44,6 +42,11 @@ export class CameraService {
           
           // Hard Clamp
           this.targetZoom = Math.max(config.MIN_ZOOM, Math.min(config.MAX_ZOOM, this.targetZoom));
+      });
+
+      // Subscribe to Rotation events
+      this.input.rotationEvents.subscribe((deltaRadians) => {
+          this.targetRotation += deltaRadians * config.ROTATION_SENSITIVITY;
       });
   }
 
@@ -71,9 +74,23 @@ export class CameraService {
         const peekX = Math.sign(cursor.x) * Math.pow(Math.abs(cursor.x), 2) * this.MOUSE_PEEK_DISTANCE;
         const peekY = Math.sign(cursor.y) * Math.pow(Math.abs(cursor.y), 2) * this.MOUSE_PEEK_DISTANCE;
         
+        // Rotate Peek Vector to match Camera Rotation
+        // Cursor is Screen Space (Up is Up). World Space rotates.
+        // We need to apply inverse rotation? 
+        // No, lookAheadX is World Space. We want to peek in World Space.
+        // Camera will rotate World. 
+        // If cursor is Up, we want to look at World "Top of Screen".
+        // World "Top of Screen" depends on rotation.
+        // WorldVec = Rotate(ScreenVec, -CameraAngle)
+        const cos = Math.cos(-camera.rotation);
+        const sin = Math.sin(-camera.rotation);
+        
+        const worldPeekX = peekX * cos - peekY * sin;
+        const worldPeekY = peekX * sin + peekY * cos;
+
         // Scale peek by zoom level (look further when zoomed out)
-        rawTargetX += peekX / camera.zoom;
-        rawTargetY += peekY / camera.zoom;
+        rawTargetX += worldPeekX / camera.zoom;
+        rawTargetY += worldPeekY / camera.zoom;
     }
 
     // --- 2. Soft-Clamp Bounds ---
@@ -87,12 +104,20 @@ export class CameraService {
 
     // --- 3. Smooth Damping (Lerp) ---
     // Interpolate current position towards the clamped target.
-    camera.x += (clampedTargetX - camera.x) * config.POSITION_DAMPING;
-    camera.y += (clampedTargetY - camera.y) * config.POSITION_DAMPING;
+    // Reduced damping factor slightly for smoother/heavier feel (was 0.08)
+    const DAMPING = 0.06;
+    camera.x += (clampedTargetX - camera.x) * DAMPING;
+    camera.y += (clampedTargetY - camera.y) * DAMPING;
 
-    // --- 4. Smooth Zoom Damping ---
+    // --- 4. Smooth Zoom & Rotation Damping ---
     if (Math.abs(camera.zoom - this.targetZoom) > 0.001) {
         camera.zoom += (this.targetZoom - camera.zoom) * config.SMOOTH_FACTOR;
+    }
+    
+    if (Math.abs(camera.rotation - this.targetRotation) > 0.001) {
+        camera.rotation += (this.targetRotation - camera.rotation) * config.ROTATION_SMOOTHING;
+    } else {
+        camera.rotation = this.targetRotation;
     }
 
     // --- 5. Apply Screen Shake ---

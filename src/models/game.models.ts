@@ -181,6 +181,7 @@ export interface Camera {
     x: number;
     y: number;
     zoom: number;
+    rotation: number; // Radians
 }
 
 export interface Particle {

@@ -22,7 +22,7 @@ export class WorldService implements OnDestroy {
   private worldGenerator = inject(WorldGeneratorService);
   private subscriptions: Subscription[] = [];
 
-  public camera: Camera = { x: 0, y: 0, zoom: 1.0 };
+  public camera: Camera = { x: 0, y: 0, zoom: 1.0, rotation: 0 };
   public player: Entity = this.createPlayer();
   
   // Dynamic entities (Updated every frame)
@@ -95,19 +95,8 @@ export class WorldService implements OnDestroy {
     enemy.y = y;
 
     // Level (affects damage scaling in entityPool.acquire)
-    // Re-acquire to apply correct level scaling if level is provided differently than default 1
     if (level) {
         enemy.level = level;
-        // Re-apply damage config with new level
-        // Ideally this logic should be in a re-init method in EntityPool, but modifying here for now
-        // This relies on the entityPool logic having been exposed or replicated
-        // For simplicity in this diff, we assume acquire() handled level=1 defaults,
-        // we might need to manually scale if EntityPool doesn't support 'level' arg in acquire.
-        // NOTE: EntityPool.acquire doesn't take level. 
-        // We will assume EntityPool sets base stats, and we scale here if needed, 
-        // OR we update EntityPool to accept level (better, but larger refactor).
-        // Let's assume EntityPool sets default lvl 1 stats.
-        // To properly support level scaling, we should trigger the logic from EntityPool.
     } else {
         enemy.level = 1;
     }
@@ -157,12 +146,11 @@ export class WorldService implements OnDestroy {
      for (let i = this.entities.length - 1; i >= 0; i--) { 
         const e = this.entities[i];
         if (e.type === 'SPAWNER' || e.type === 'SHRINE' || e.type === 'WALL') continue;
-        if (this.currentZone().name === 'Liminal Citadel' && e.type === 'NPC') continue;
-        
-        if (e.state === 'DEAD' || (e.type === 'HITBOX' && e.timer <= 0) || (e.type === 'PICKUP' && e.hp <= 0)) {
-            this.entityPool.release(e);
-            this.entities.splice(i, 1);
+        if (this.currentZone().name === 'Liminal Citadel') {
+            if (e.x < this.mapBounds.minX - 100 || e.x > this.mapBounds.maxX + 100 || e.y < this.mapBounds.minY - 100 || e.y > this.mapBounds.maxY + 100) {
+                this.entities.splice(i, 1);
+            }
         }
-    }
+     }
   }
 }

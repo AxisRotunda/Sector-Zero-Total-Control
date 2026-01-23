@@ -88,20 +88,26 @@ export class RenderService {
 
   getScreenToWorld(screenX: number, screenY: number, cam: Camera) {
       if (!this.canvas) return { x: 0, y: 0 };
+      
+      // We must temporarily set the IsoUtils context to the current camera state 
+      // to correctly inverse the rotation.
+      IsoUtils.setContext(cam.rotation, cam.x, cam.y);
+      
+      // Calculate Center Iso position (pivot)
       IsoUtils.toIso(cam.x, cam.y, 0, this.camCenter);
       
-      const sx = screenX - this.canvas.width / 2;
-      const sy = screenY - this.canvas.height / 2;
-      const unzoomedX = sx / cam.zoom;
-      const unzoomedY = sy / cam.zoom;
+      // 1. Un-center and Un-zoom (Screen Space -> Iso Space)
+      // Screen Center (w/2, h/2) maps to camCenter in Iso Space.
+      const dx = screenX - this.canvas.width / 2;
+      const dy = screenY - this.canvas.height / 2;
       
-      const isoX = unzoomedX + this.camCenter.x;
-      const isoY = unzoomedY + this.camCenter.y;
+      const isoX = this.camCenter.x + dx / cam.zoom;
+      const isoY = this.camCenter.y + dy / cam.zoom;
       
-      const worldX = isoY + 0.5 * isoX;
-      const worldY = isoY - 0.5 * isoX;
+      // 2. Inverse Projection & Rotation via IsoUtils
+      const worldPos = IsoUtils.fromIso(isoX, isoY);
       
-      return { x: worldX, y: worldY };
+      return worldPos;
   }
 
   render(
@@ -118,6 +124,10 @@ export class RenderService {
     const w = this.canvas.width;
     const h = this.canvas.height;
     
+    // --- 0. SETUP ROTATION CONTEXT ---
+    // This is the key fix. We rotate coordinates, not the canvas.
+    IsoUtils.setContext(cam.rotation, cam.x, cam.y);
+
     // Calculate View Frustum
     const frustum = this.calculateFrustum(cam, w, h);
 
@@ -136,7 +146,7 @@ export class RenderService {
     this.ctx.fillRect(0, 0, w, h);
     this.ctx.save();
     
-    // Camera Transform
+    // Camera Transform (Pan & Zoom ONLY)
     this.applyCameraTransform(cam, w, h, shake);
 
     // 3. Background Pass
@@ -178,6 +188,10 @@ export class RenderService {
         w, h, 
         zone.id
     );
+    
+    // --- CLEANUP ---
+    // Reset IsoUtils to default (no rotation) to prevent side effects outside render loop
+    IsoUtils.setContext(0, 0, 0);
   }
 
   private prepareLighting(
@@ -266,7 +280,10 @@ export class RenderService {
 
   private applyCameraTransform(cam: Camera, w: number, h: number, shake: {intensity: number, x: number, y: number}) {
       if (!this.ctx) return;
+      
+      // Calculate pivot point in Iso space (Center of screen)
       IsoUtils.toIso(cam.x, cam.y, 0, this.camCenter);
+      
       this.ctx.translate(w/2, h/2);
       
       if (shake.intensity > 0.1) {
@@ -277,6 +294,9 @@ export class RenderService {
           this.ctx.translate(sx, sy);
       }
 
+      // REMOVED: this.ctx.rotate(cam.rotation); 
+      // Rotation is now handled mathematically in IsoUtils.toIso
+      
       this.ctx.scale(cam.zoom, cam.zoom);
       this.ctx.translate(-this.camCenter.x, -this.camCenter.y);
   }

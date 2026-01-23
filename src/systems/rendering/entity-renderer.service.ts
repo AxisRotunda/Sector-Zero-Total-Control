@@ -33,12 +33,20 @@ export class EntityRendererService {
   // Used by ItemIconComponent
   drawItemIcon(ctx: CanvasRenderingContext2D, item: Item, size: number) {
       ctx.save(); ctx.clearRect(0, 0, size, size);
+      
+      // Normalize color to ensure 6-digit hex before appending alpha
+      const baseColor = this.normalizeHex(item.color);
+
       if (item.rarity !== 'COMMON') {
-        const glowColor = item.color; ctx.shadowBlur = 10; ctx.shadowColor = glowColor; ctx.strokeStyle = glowColor; ctx.lineWidth = 2; ctx.strokeRect(2, 2, size - 4, size - 4); ctx.shadowBlur = 0;
+        const glowColor = baseColor; 
+        ctx.shadowBlur = 10; ctx.shadowColor = glowColor; ctx.strokeStyle = glowColor; ctx.lineWidth = 2; ctx.strokeRect(2, 2, size - 4, size - 4); ctx.shadowBlur = 0;
       }
       ctx.translate(size / 2, size / 2);
       if (item.rarity !== 'COMMON') {
-        const grad = ctx.createRadialGradient(0, 0, size * 0.1, 0, 0, size * 0.5); grad.addColorStop(0, `${item.color}50`); grad.addColorStop(1, `${item.color}00`); ctx.fillStyle = grad; ctx.fillRect(-size/2, -size/2, size, size);
+        const grad = ctx.createRadialGradient(0, 0, size * 0.1, 0, 0, size * 0.5); 
+        grad.addColorStop(0, `${baseColor}50`); 
+        grad.addColorStop(1, `${baseColor}00`); 
+        ctx.fillStyle = grad; ctx.fillRect(-size/2, -size/2, size, size);
       }
       const s = size * 0.035; 
       ctx.scale(s, s);
@@ -220,5 +228,38 @@ export class EntityRendererService {
       ctx.fillRect(2, 12, 10, 8);
 
       ctx.restore();
+  }
+
+  // --- SUB-STRUCTURE RENDERERS ---
+  
+  drawEnergyBarrier(ctx: CanvasRenderingContext2D, e: Entity) {
+      const h = e.height || 80; const w = e.width || 100; const pos = IsoUtils.toIso(e.x, e.y, 0);
+      ctx.save(); ctx.translate(pos.x, pos.y);
+      
+      // Normalize color for gradient to avoid crash
+      const color = this.normalizeHex(e.color || '#ef4444');
+      
+      const p1 = IsoUtils.toIso(-w/2, 0, 0); const p2 = IsoUtils.toIso(w/2, 0, 0); const p3 = IsoUtils.toIso(w/2, 0, h); const p4 = IsoUtils.toIso(-w/2, 0, h);
+      ctx.fillStyle = '#18181b'; ctx.fillRect(p1.x - 5, p1.y - 10, 10, 10); ctx.fillRect(p2.x - 5, p2.y - 10, 10, 10);
+      ctx.globalCompositeOperation = 'screen';
+      const pulse = Math.sin(Date.now() * 0.005) * 0.2 + 0.5; 
+      const grad = ctx.createLinearGradient(0, p1.y, 0, p3.y); 
+      
+      grad.addColorStop(0, `${color}00`); 
+      grad.addColorStop(0.5, `${color}${Math.floor(pulse * 255).toString(16).padStart(2,'0')}`); 
+      grad.addColorStop(1, `${color}00`); 
+      
+      ctx.fillStyle = grad; ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.fill();
+      ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.globalAlpha = 0.3;
+      const lines = 5; for(let i=1; i<lines; i++) { const t = i/lines; const yOffset = (Date.now() * 0.02) % (h/lines); const lh = h * t + yOffset; if (lh > h) continue; const l1 = IsoUtils.toIso(-w/2, 0, lh); const l2 = IsoUtils.toIso(w/2, 0, lh); ctx.beginPath(); ctx.moveTo(l1.x, l1.y); ctx.lineTo(l2.x, l2.y); ctx.stroke(); }
+      ctx.restore();
+  }
+
+  private normalizeHex(hex: string): string {
+      // Expand 3-digit hex to 6-digit
+      if (hex.length === 4) {
+          return '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
+      }
+      return hex;
   }
 }

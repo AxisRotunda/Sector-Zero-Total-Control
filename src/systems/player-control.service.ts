@@ -73,10 +73,24 @@ export class PlayerControlService {
             const prevVx = player.vx;
             const prevVy = player.vy;
             
-            isMoving = this.physics.updateEntityPhysics(player, stats, this.input.inputVector);
+            // Adjust input vector based on Camera Rotation to ensure Screen-Relative control
+            const camRot = this.world.camera.rotation;
+            const input = this.input.inputVector;
+            
+            // Rotate the input vector inversely to the camera rotation
+            // WorldVec = Rotate(ScreenVec, -CameraAngle)
+            const cos = Math.cos(-camRot);
+            const sin = Math.sin(-camRot);
+            
+            const rotatedInput = {
+                x: input.x * cos - input.y * sin,
+                y: input.x * sin + input.y * cos
+            };
+
+            isMoving = this.physics.updateEntityPhysics(player, stats, rotatedInput);
             
             // Haptic feedback for sudden stops (wall hits)
-            if (Math.hypot(this.input.inputVector.x, this.input.inputVector.y) > 0.5) {
+            if (Math.hypot(input.x, input.y) > 0.5) {
                 if (!isMoving && (Math.abs(prevVx) > 0.5 || Math.abs(prevVy) > 0.5)) {
                     if (this.playerService.screenShake().intensity < 1) {
                         this.haptic.impactLight();
@@ -96,12 +110,14 @@ export class PlayerControlService {
         if (player.state !== 'ATTACK') {
             if (this.input.aimAngle !== null) {
                 // Priority: Manual Aim (Right Stick / Mouse)
-                player.angle = this.input.aimAngle;
+                // Also needs rotation adjustment if it's relative to screen
+                // Mouse logic in InputService calculates angle relative to screen center.
+                // We need to add inverse camera rotation to this angle.
+                player.angle = this.input.aimAngle - this.world.camera.rotation;
             } else if (isMoving) {
                 // Fallback: Face Movement Direction (Left Stick)
-                // This ensures player doesn't "moonwalk" or punch air sideways
+                // Since we already rotated the movement vector, this angle is correct in World Space
                 const moveAngle = Math.atan2(player.vy, player.vx);
-                // Simple lerp for smoothness could go here, but instant snap is snappier for gameplay
                 player.angle = moveAngle;
             }
         }
@@ -140,6 +156,9 @@ export class PlayerControlService {
                     // Absolute fallback
                     targetAngle = player.angle;
                 }
+            } else {
+                // Adjust manual aim for camera rotation
+                targetAngle -= this.world.camera.rotation;
             }
             
             this.inputBuffer.addCommand('PRIMARY', targetAngle ?? undefined, 1);

@@ -55,14 +55,16 @@ export class InputService {
   
   actionEvents = new Subject<Action>();
   zoomEvents = new Subject<number>(); // Delta value
+  rotationEvents = new Subject<number>(); // Delta angle in radians
 
   private inputState$ = new Subject<InputState>();
   private activeKeys = new Set<string>();
   private activeActions = new Set<Action>();
   private canvasRef: HTMLCanvasElement | null = null;
 
-  // Touch Zoom State
+  // Touch Gesture State
   private initialPinchDist: number | null = null;
+  private initialPinchAngle: number | null = null;
 
   // Gamepad State
   private gamepadIndex: number | null = null;
@@ -80,7 +82,7 @@ export class InputService {
 
   setCanvas(canvas: HTMLCanvasElement) {
     this.canvasRef = canvas;
-    this.initTouchZoom(canvas);
+    this.initTouchGestures(canvas);
   }
 
   private initListeners() {
@@ -110,21 +112,50 @@ export class InputService {
     });
   }
 
-  private initTouchZoom(canvas: HTMLCanvasElement) {
+  private initTouchGestures(canvas: HTMLCanvasElement) {
       canvas.addEventListener('touchmove', (e) => {
           if (e.touches.length === 2) {
               e.preventDefault(); // Prevent page scroll
+              
+              const t1 = e.touches[0];
+              const t2 = e.touches[1];
+
+              // --- ZOOM (Distance) ---
               const dist = Math.hypot(
-                  e.touches[0].clientX - e.touches[1].clientX,
-                  e.touches[0].clientY - e.touches[1].clientY
+                  t1.clientX - t2.clientX,
+                  t1.clientY - t2.clientY
               );
 
               if (this.initialPinchDist === null) {
                   this.initialPinchDist = dist;
               } else {
                   const delta = this.initialPinchDist - dist;
-                  this.zoomEvents.next(delta * 5); // Multiplier to match wheel sensitivity roughly
-                  this.initialPinchDist = dist;
+                  // Only emit if significant change to reduce jitter
+                  if (Math.abs(delta) > 2) {
+                      this.zoomEvents.next(delta * 5); // Multiplier to match wheel sensitivity roughly
+                      this.initialPinchDist = dist;
+                  }
+              }
+
+              // --- ROTATION (Angle) ---
+              const angle = Math.atan2(
+                  t2.clientY - t1.clientY,
+                  t2.clientX - t1.clientX
+              );
+
+              if (this.initialPinchAngle === null) {
+                  this.initialPinchAngle = angle;
+              } else {
+                  let deltaAngle = angle - this.initialPinchAngle;
+                  
+                  // Handle Angle Wrap-around (e.g. 179deg to -179deg)
+                  if (deltaAngle > Math.PI) deltaAngle -= Math.PI * 2;
+                  if (deltaAngle < -Math.PI) deltaAngle += Math.PI * 2;
+
+                  if (Math.abs(deltaAngle) > 0.01) {
+                      this.rotationEvents.next(deltaAngle);
+                      this.initialPinchAngle = angle;
+                  }
               }
           }
       }, { passive: false });
@@ -132,6 +163,7 @@ export class InputService {
       canvas.addEventListener('touchend', (e) => {
           if (e.touches.length < 2) {
               this.initialPinchDist = null;
+              this.initialPinchAngle = null;
           }
       });
   }

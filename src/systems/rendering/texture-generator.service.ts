@@ -174,9 +174,31 @@ export class TextureGeneratorService {
 
   adjustColor(hex: string, percent: number) {
       if (!hex) return '#333333';
-      let R = parseInt(hex.substring(1,3),16); let G = parseInt(hex.substring(3,5),16); let B = parseInt(hex.substring(5,7),16);
-      R = Math.min(255, Math.max(10, R + percent)); G = Math.min(255, Math.max(10, G + percent)); B = Math.min(255, Math.max(15, B + percent));
-      const RR = ((R.toString(16).length==1)?"0"+R.toString(16):R.toString(16)); const GG = ((G.toString(16).length==1)?"0"+G.toString(16):G.toString(16)); const BB = ((B.toString(16).length==1)?"0"+B.toString(16):B.toString(16));
+      
+      // Expand short hex to full hex (e.g. #fff -> #ffffff)
+      let fullHex = hex.replace(/^#/, '');
+      if (fullHex.length === 3) {
+          fullHex = fullHex.split('').map(c => c + c).join('');
+      } else if (fullHex.length !== 6) {
+          // If invalid length, fallback to safe color or return original if it's a named color (rare)
+          return hex.length > 0 ? hex : '#333333';
+      }
+
+      let R = parseInt(fullHex.substring(0,2), 16); 
+      let G = parseInt(fullHex.substring(2,4), 16); 
+      let B = parseInt(fullHex.substring(4,6), 16);
+
+      // Validation to prevent NaN
+      if (isNaN(R) || isNaN(G) || isNaN(B)) return hex;
+
+      R = Math.min(255, Math.max(0, R + percent)); 
+      G = Math.min(255, Math.max(0, G + percent)); 
+      B = Math.min(255, Math.max(0, B + percent));
+      
+      const RR = R.toString(16).padStart(2, '0');
+      const GG = G.toString(16).padStart(2, '0');
+      const BB = B.toString(16).padStart(2, '0');
+      
       return "#"+RR+GG+BB;
   }
 }

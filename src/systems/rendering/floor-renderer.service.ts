@@ -20,6 +20,7 @@ export class FloorRendererService {
   private lastViewX: number = -99999;
   private lastViewY: number = -99999;
   private lastZoom: number = 1;
+  private lastRotation: number = 0; // New tracking
   private readonly CACHE_PADDING = RENDER_CONFIG.FLOOR_CACHE_PADDING; 
 
   // Vector Pooling (Reuse to prevent GC thrashing)
@@ -41,10 +42,15 @@ export class FloorRendererService {
       const viewW = canvasWidth / cam.zoom;
       const viewH = canvasHeight / cam.zoom;
       
-      // Invalidate cache if: Zone changed, Zoom changed significantly, or Pan exceeded padding buffer
+      // Invalidate cache if: 
+      // 1. Zone changed
+      // 2. Zoom changed significantly
+      // 3. Pan exceeded padding buffer
+      // 4. Rotation changed (Must redraw cache on rotation!)
       const needsRedraw = 
           zone.id !== this.lastZoneId ||
           Math.abs(cam.zoom - this.lastZoom) > 0.01 || 
+          Math.abs(cam.rotation - this.lastRotation) > 0.01 ||
           Math.abs(cam.x - this.lastViewX) > this.CACHE_PADDING / 3 ||
           Math.abs(cam.y - this.lastViewY) > this.CACHE_PADDING / 3;
 
@@ -69,6 +75,7 @@ export class FloorRendererService {
       this.lastViewX = cam.x;
       this.lastViewY = cam.y;
       this.lastZoom = cam.zoom;
+      this.lastRotation = cam.rotation;
 
       // Calculate cache dimensions with padding
       const maxDim = RENDER_CONFIG.MAX_CANVAS_DIMENSION;

@@ -45,6 +45,10 @@ export const RENDER_CONFIG = {
     MAX_ZOOM_SENSITIVITY: 0.002,  // Faster when zoomed in (Detail)
     
     PINCH_SENSITIVITY: 0.005,
-    WHEEL_SENSITIVITY: 0.001
+    WHEEL_SENSITIVITY: 0.001,
+    
+    // Rotation Config
+    ROTATION_SENSITIVITY: 1.5,
+    ROTATION_SMOOTHING: 0.15
   }
 };

@@ -97,8 +97,13 @@ export class LightingRendererService {
 
     // Camera Transform for Light Map
     ctx.save();
+    
+    // Calculate center relative to camera
+    // Note: IsoUtils handles rotation now, so we just translate/scale
     IsoUtils.toIso(cam.x, cam.y, 0, this._iso);
+    
     ctx.translate(w/2, h/2);
+    // REMOVED: ctx.rotate(cam.rotation); -> Handled in IsoUtils
     ctx.scale(cam.zoom * scale, cam.zoom * scale);
     ctx.translate(-this._iso.x, -this._iso.y);
 
@@ -123,12 +128,6 @@ export class LightingRendererService {
         const light = visibleLights[i];
         if (light.color === '#ffffff' || light.color === '#000000') continue; 
         
-        // For colored lights, we still use gradients or can tint sprites?
-        // Canvas 'lighter' blends colors additively.
-        // Drawing a sprite is still faster than creating a gradient.
-        // We can draw the sprite, but setting its color is tricky without cache.
-        // Fallback to Gradient for COLORED lights (fewer of them) or use a colored rect with mask.
-        // Gradient is acceptable here as it's a smaller subset than "all lights".
         this.drawColoredLight(ctx, light.x, light.y, light.z || 0, light.radius * 0.8, light.intensity * 0.6, light.color);
     }
 
