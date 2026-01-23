@@ -1,3 +1,4 @@
+
 import { Injectable, inject } from '@angular/core';
 import { Entity } from '../models/game.models';
 import {
@@ -234,10 +235,9 @@ export class CombatService {
 
     // 7. Calculate physical mitigation (Armor based)
     // Reduce armor by penetration amount first (Flat reduction for armor usually)
-    const effectiveArmor = Math.max(0, targetResistances.physical - penetration.physical * 100); // Assuming pen is %, but armor is flat. 
-    // Actually, in this system, pen seems to serve as both % reduction for elements and flat/percent for armor depending on implementation.
-    // Let's stick to standard ARPG: Pen reduces effective armor value.
-    // If penetration.physical is 0.5 (50%), we reduce armor by 50%.
+    const effectiveArmor = Math.max(0, targetResistances.physical - penetration.physical * 100); 
+    
+    // We reduce effective armor by penetration % of current armor
     const armorMitigationVal = targetResistances.physical * (1 - penetration.physical);
     
     const physicalMitigation = this.calculatePhysicalMitigation(

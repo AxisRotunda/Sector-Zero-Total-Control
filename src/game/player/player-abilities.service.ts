@@ -229,12 +229,12 @@ export class PlayerAbilitiesService {
       hitbox.type = 'HITBOX';
       hitbox.source = 'PLAYER';
       
-      // 1. CLONE PLAYER DAMAGE PACKET
+      // ✅ FIX: CLONE PLAYER DAMAGE PACKET SAFELY
       // This includes weapons, skill tree, and base stats.
       if (stats.damagePacket) {
           hitbox.damagePacket = { ...stats.damagePacket };
       } else {
-          // Safety Fallback (Should not happen with proper Stats init)
+          // Safety Fallback (Should never happen now that Stats are fixed)
           hitbox.damagePacket = createEmptyDamagePacket();
           hitbox.damagePacket.physical = 10;
       }

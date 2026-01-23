@@ -67,6 +67,7 @@ export class PlayerStatsService implements OnDestroy {
 
   /**
    * Computed player stats with equipment bonuses.
+   * CRITICAL FIX: Explicitly constructs and returns damagePacket.
    */
   public playerStats = computed(() => {
     const base = this.baseStats();
@@ -74,92 +75,124 @@ export class PlayerStatsService implements OnDestroy {
     const equipped = this.inventory.equipped();
     const gearStats = this.inventory.equipmentStats();
     
-    // Initialize final stats containers
-    const finalDamagePacket = { ...base.baseDamagePacket };
-    const finalResistances = { ...base.baseResistances };
-    const finalPenetration = { ...base.basePenetration };
+    // ========================================
+    // STEP 1: INITIALIZE PACKETS
+    // ========================================
+    // Start with empty packets to ensure clean state calculation
+    const damagePacket = createEmptyDamagePacket();
+    const resistances = createDefaultResistances();
+    const penetration = createZeroPenetration();
     
-    // Base Scaling from Skill Tree
-    finalDamagePacket.physical += tree.damage;
+    // ========================================
+    // STEP 2: APPLY BASE & TREE STATS
+    // ========================================
+    damagePacket.physical += base.baseDamagePacket.physical;
+    damagePacket.physical += tree.damage; // Tree generic damage adds to physical base
     
-    // ============================
-    // WEAPON: Damage & Penetration
-    // ============================
-    if (equipped.weapon) {
-      // New damage packet system from item (if generated with one)
-      if (equipped.weapon.damagePacket) {
-        finalDamagePacket.physical += equipped.weapon.damagePacket.physical;
-        finalDamagePacket.fire += equipped.weapon.damagePacket.fire;
-        finalDamagePacket.cold += equipped.weapon.damagePacket.cold;
-        finalDamagePacket.lightning += equipped.weapon.damagePacket.lightning;
-        finalDamagePacket.chaos += equipped.weapon.damagePacket.chaos;
-      } 
-      // Legacy/Simple weapon fallback (scalar damage to physical)
-      else if (equipped.weapon.stats['dmg']) {
-        finalDamagePacket.physical += equipped.weapon.stats['dmg'];
-      }
+    // Apply Base/Tree Penetration
+    penetration.physical += base.basePenetration.physical + (tree.armorPen / 100);
 
+    // ========================================
+    // STEP 3: APPLY WEAPON CONFIGURATION
+    // ========================================
+    if (equipped.weapon) {
+      // New system: weapon has damagePacket
+      if (equipped.weapon.damagePacket) {
+        damagePacket.physical += equipped.weapon.damagePacket.physical;
+        damagePacket.fire += equipped.weapon.damagePacket.fire;
+        damagePacket.cold += equipped.weapon.damagePacket.cold;
+        damagePacket.lightning += equipped.weapon.damagePacket.lightning;
+        damagePacket.chaos += equipped.weapon.damagePacket.chaos;
+      }
+      // Legacy system: weapon has single 'damage' value
+      else if (equipped.weapon.stats['dmg']) {
+        damagePacket.physical += equipped.weapon.stats['dmg'];
+      }
+      
       // Weapon penetration
       if (equipped.weapon.penetration) {
-        finalPenetration.physical += equipped.weapon.penetration.physical;
-        finalPenetration.fire += equipped.weapon.penetration.fire;
-        finalPenetration.cold += equipped.weapon.penetration.cold;
-        finalPenetration.lightning += equipped.weapon.penetration.lightning;
-        finalPenetration.chaos += equipped.weapon.penetration.chaos;
+        penetration.physical += equipped.weapon.penetration.physical;
+        penetration.fire += equipped.weapon.penetration.fire;
+        penetration.cold += equipped.weapon.penetration.cold;
+        penetration.lightning += equipped.weapon.penetration.lightning;
+        penetration.chaos += equipped.weapon.penetration.chaos;
       }
+      // Legacy armorPen
       else if (equipped.weapon.stats['armorPen']) {
-        finalPenetration.physical += (equipped.weapon.stats['armorPen'] / 100);
+        penetration.physical += (equipped.weapon.stats['armorPen'] / 100);
       }
+      
+      // Psionic Blade Scaling (Special Case)
+      if (equipped.weapon.type === 'PSI_BLADE') {
+          const psyBonus = (tree.psyche + gearStats.psy) * 1.5;
+          damagePacket.chaos += psyBonus;
+      }
+
     } else {
-      // ✅ UNARMED: Base fist damage scales with level + tree
-      // Base is 10, plus 2 per level (handled in baseStats update or here)
-      // We'll calculate dynamic level scaling here to be safe
+      // ========================================
+      // UNARMED SCALING
+      // ========================================
+      // Unarmed damage scales with Level and generic Gear Damage (Rings)
       const levelBonus = (base.level - 1) * 2;
-      finalDamagePacket.physical = 10 + levelBonus + tree.damage;
+      damagePacket.physical += levelBonus;
+      
+      if (gearStats.dmg) {
+          damagePacket.physical += gearStats.dmg;
+      }
     }
 
-    // Apply generic gear stats (flat damage bonuses from rings/etc)
-    if (gearStats.dmg && !equipped.weapon) {
-        // If unarmed, ring damage adds directly
-        finalDamagePacket.physical += gearStats.dmg;
+    // ========================================
+    // STEP 4: APPLY ARMOR / RESISTANCES
+    // ========================================
+    if (equipped.armor) {
+      // New system
+      if (equipped.armor.stats['armor']) {
+        resistances.physical += equipped.armor.stats['armor'];
+      }
     }
-
-    // Psionic Blade Scaling
-    if (equipped.weapon?.type === 'PSI_BLADE') {
-        const psyBonus = (tree.psyche + gearStats.psy) * 1.5;
-        finalDamagePacket.chaos += psyBonus;
-    }
-
-    // Armor Pen from Tree/Gear
-    finalPenetration.physical += (tree.armorPen + gearStats.armorPen) / 100;
+    resistances.physical += gearStats.armor; // Add generic armor from other slots
 
     // Cap Penetration
-    finalPenetration.physical = Math.min(0.9, finalPenetration.physical);
+    penetration.physical = Math.min(0.9, penetration.physical);
 
+    // ========================================
+    // STEP 5: CALCULATE SECONDARY STATS
+    // ========================================
+    const finalHpMax = base.hpMax + tree.hpMax + gearStats.hp;
+    const finalCrit = base.crit + gearStats.crit;
+    const finalCritMult = base.critMult;
+    const finalLifesteal = base.lifesteal + gearStats.lifesteal;
+    const finalSpeed = base.moveSpeed + tree.speed + gearStats.speed;
+    const finalCdr = tree.cdr + gearStats.cdr;
+    const finalPsyche = tree.psyche + gearStats.psy;
+
+    // Calculate total flat damage for legacy consumers
+    const totalDamage = damagePacket.physical + damagePacket.fire + damagePacket.cold + damagePacket.lightning + damagePacket.chaos;
+
+    // ========================================
+    // RETURN COMPLETE STATS OBJECT
+    // ========================================
     return {
       level: base.level,
       
-      // ✅ NEW SYSTEM
-      damagePacket: finalDamagePacket,
-      resistances: finalResistances,
-      penetration: finalPenetration,
+      // ✅ NEW SYSTEM (CRITICAL FIX)
+      damagePacket,
+      resistances,
+      penetration,
       
-      // Legacy compatibility (single values = physical/primary only)
-      damage: finalDamagePacket.physical + finalDamagePacket.fire + finalDamagePacket.cold + finalDamagePacket.lightning + finalDamagePacket.chaos,
-      armor: finalResistances.physical + gearStats.armor,
-      armorPen: finalPenetration.physical,
+      // Legacy compatibility
+      damage: totalDamage,
+      armor: resistances.physical,
+      armorPen: penetration.physical,
       
       // Other stats
-      hpMax: base.hpMax + tree.hpMax + gearStats.hp,
-      crit: base.crit + gearStats.crit,
-      critMult: base.critMult,
-      lifesteal: base.lifesteal + gearStats.lifesteal,
-      
-      // EXPOSED AS 'speed' TO CONSUMERS
-      speed: base.moveSpeed + tree.speed + gearStats.speed,
-      
-      cdr: tree.cdr + gearStats.cdr,
-      psyche: tree.psyche + gearStats.psy
+      hpMax: finalHpMax,
+      crit: finalCrit,
+      critMult: finalCritMult,
+      lifesteal: finalLifesteal,
+      speed: finalSpeed,
+      cdr: finalCdr,
+      psyche: finalPsyche
     };
   });
 
