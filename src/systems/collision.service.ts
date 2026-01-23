@@ -1,4 +1,3 @@
-
 import { Injectable, inject } from '@angular/core';
 import { Entity } from '../models/game.models';
 import { CombatService } from './combat.service';
@@ -44,29 +43,29 @@ export class CollisionService {
         if (dist < player.radius + hitbox.radius) {
             if (player.state !== 'DEAD' && !player.invulnerable) {
                 // Fallback Damage Logic:
-                // If damageValue is undefined (e.g. direct enemy body contact), derive it from equipment or defaults.
-                let damage = hitbox.damageValue || 0;
-                
-                if (damage === 0) {
-                    // Try to get damage from weapon
-                    if (hitbox.equipment?.weapon?.stats['dmg']) {
-                        damage = hitbox.equipment.weapon.stats['dmg'];
-                    } else {
-                        // Hard fallback based on difficulty
-                        damage = 5 * this.world.currentZone().difficultyMult;
-                    }
-                }
+                const damage = hitbox.damageValue ?? this.calculateFallbackDamage(hitbox);
 
                 // Unified damage application
                 this.combat.applyDirectDamage(hitbox, player, damage);
                 
-                // If it's a projectile (has timer), destroy it. 
-                // If it's the enemy body, apply a cooldown or bounce (handled by physics/ai usually, but combat handles hit response)
                 if (hitbox.timer !== undefined) {
                     hitbox.timer = 0;
                 }
             }
         }
     }
+  }
+
+  private calculateFallbackDamage(hitbox: Entity): number {
+    // If hitbox is a projectile, it might have a sourceEntityId to lookup (not implemented yet).
+    // For now, if it's the enemy body itself (no timer usually), check its equipment.
+    
+    // Check if hitbox is actually the enemy entity
+    if (hitbox.type === 'ENEMY' && hitbox.equipment?.weapon?.stats['dmg']) {
+        return hitbox.equipment.weapon.stats['dmg'];
+    }
+
+    // Hard fallback based on difficulty
+    return 5 * this.world.currentZone().difficultyMult;
   }
 }
