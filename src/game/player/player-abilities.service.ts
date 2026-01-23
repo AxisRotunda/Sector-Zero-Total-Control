@@ -1,4 +1,3 @@
-
 import { Injectable, signal, inject } from '@angular/core';
 import * as BALANCE from '../../config/balance.config';
 import { PlayerStatsService } from './player-stats.service';
@@ -229,19 +228,43 @@ export class PlayerAbilitiesService {
       hitbox.type = 'HITBOX';
       hitbox.source = 'PLAYER';
       
-      // ✅ FIX: CLONE PLAYER DAMAGE PACKET SAFELY
-      // This includes weapons, skill tree, and base stats.
+      // ✅ CLONE DAMAGE PACKET WITH EXTENSIVE LOGGING
+      console.log('⚔️ Primary Attack - Player Stats:', {
+        hasDamagePacket: !!stats.damagePacket,
+        damagePacket: stats.damagePacket,
+        damage: stats.damage
+      });
+
       if (stats.damagePacket) {
-          hitbox.damagePacket = { ...stats.damagePacket };
+        // Deep clone to prevent mutation
+        hitbox.damagePacket = {
+          physical: stats.damagePacket.physical,
+          fire: stats.damagePacket.fire,
+          cold: stats.damagePacket.cold,
+          lightning: stats.damagePacket.lightning,
+          chaos: stats.damagePacket.chaos
+        };
+        
+        console.log('✅ Hitbox Damage Packet Set:', hitbox.damagePacket);
       } else {
-          // Safety Fallback (Should never happen now that Stats are fixed)
-          hitbox.damagePacket = createEmptyDamagePacket();
-          hitbox.damagePacket.physical = 10;
+        // ❌ THIS SHOULD NEVER HAPPEN
+        console.error('❌ CRITICAL: stats.damagePacket is undefined!');
+        console.error('   Stats object:', stats);
+        console.error('   Keys:', Object.keys(stats));
+        
+        hitbox.damagePacket = createEmptyDamagePacket();
+        hitbox.damagePacket.physical = 10;
       }
       
-      // 2. APPLY PENETRATION
+      // Clone penetration if exists
       if (stats.penetration) {
-        hitbox.penetration = { ...stats.penetration };
+        hitbox.penetration = {
+          physical: stats.penetration.physical,
+          fire: stats.penetration.fire,
+          cold: stats.penetration.cold,
+          lightning: stats.penetration.lightning,
+          chaos: stats.penetration.chaos
+        };
       }
 
       // 3. APPLY DAMAGE CONVERSION (Item property)

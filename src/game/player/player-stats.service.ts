@@ -1,4 +1,3 @@
-
 import { Injectable, inject, signal, computed, OnDestroy } from '@angular/core';
 import { InventoryService } from '../inventory.service';
 import { Subscription } from 'rxjs';
@@ -26,6 +25,7 @@ export class PlayerStatsService implements OnDestroy {
   private sound = inject(SoundService);
   private particleService = inject(ParticleService);
   private eventBus = inject(EventBusService);
+  
   private subscriptions: Subscription[] = [];
 
   // Player HP signal
@@ -42,7 +42,7 @@ export class PlayerStatsService implements OnDestroy {
     lifesteal: 0,
     moveSpeed: 1.0,
     
-    // Base unarmed damage (before equipment)
+    // ✅ CRITICAL: Base unarmed damage
     baseDamagePacket: {
       physical: 10,
       fire: 0,
@@ -57,125 +57,164 @@ export class PlayerStatsService implements OnDestroy {
 
   constructor() {
     const sub = this.eventBus.on(GameEvents.PLAYER_LEVEL_UP).subscribe(() => {
-        this.baseStats.update(s => ({ ...s, level: s.level + 1 }));
-        this.playerHp.set(this.playerStats().hpMax);
+      this.baseStats.update(s => ({ ...s, level: s.level + 1 }));
+      this.playerHp.set(this.playerStats().hpMax);
     });
     this.subscriptions.push(sub);
+
+    // ✅ DEBUG: Log on init
+    console.log('🎮 PlayerStatsService Initialized');
+    console.log('   Base Damage Packet:', this.baseStats().baseDamagePacket);
   }
 
-  ngOnDestroy() { this.subscriptions.forEach(s => s.unsubscribe()); }
+  ngOnDestroy() { 
+    this.subscriptions.forEach(s => s.unsubscribe()); 
+  }
 
   /**
-   * Computed player stats with equipment bonuses.
-   * CRITICAL FIX: Explicitly constructs and returns damagePacket.
+   * ✅ NUCLEAR FIX: Explicit damage packet construction with extensive logging
    */
   public playerStats = computed(() => {
     const base = this.baseStats();
     const tree = this.skillTree.totalStats();
     const equipped = this.inventory.equipped();
     const gearStats = this.inventory.equipmentStats();
-    
-    // ========================================
-    // STEP 1: INITIALIZE PACKETS
-    // ========================================
-    // Start with empty packets to ensure clean state calculation
-    const damagePacket = createEmptyDamagePacket();
-    const resistances = createDefaultResistances();
-    const penetration = createZeroPenetration();
-    
-    // ========================================
-    // STEP 2: APPLY BASE & TREE STATS
-    // ========================================
-    damagePacket.physical += base.baseDamagePacket.physical;
-    damagePacket.physical += tree.damage; // Tree generic damage adds to physical base
-    
-    // Apply Base/Tree Penetration
-    penetration.physical += base.basePenetration.physical + (tree.armorPen / 100);
 
     // ========================================
-    // STEP 3: APPLY WEAPON CONFIGURATION
+    // STEP 1: INITIALIZE FRESH PACKETS
     // ========================================
-    if (equipped.weapon) {
-      // New system: weapon has damagePacket
-      if (equipped.weapon.damagePacket) {
-        damagePacket.physical += equipped.weapon.damagePacket.physical;
-        damagePacket.fire += equipped.weapon.damagePacket.fire;
-        damagePacket.cold += equipped.weapon.damagePacket.cold;
-        damagePacket.lightning += equipped.weapon.damagePacket.lightning;
-        damagePacket.chaos += equipped.weapon.damagePacket.chaos;
-      }
-      // Legacy system: weapon has single 'damage' value
-      else if (equipped.weapon.stats['dmg']) {
-        damagePacket.physical += equipped.weapon.stats['dmg'];
-      }
+    const damagePacket: DamagePacket = {
+      physical: 0,
+      fire: 0,
+      cold: 0,
+      lightning: 0,
+      chaos: 0
+    };
+    
+    const resistances: Resistances = {
+      physical: 0,
+      fire: 0,
+      cold: 0,
+      lightning: 0,
+      chaos: 0
+    };
+    
+    const penetration: Penetration = {
+      physical: 0,
+      fire: 0,
+      cold: 0,
+      lightning: 0,
+      chaos: 0
+    };
+
+    // ========================================
+    // STEP 2: APPLY BASE DAMAGE (ALWAYS)
+    // ========================================
+    damagePacket.physical += base.baseDamagePacket?.physical ?? 10;
+    damagePacket.physical += tree?.damage ?? 0;
+
+    // Apply base penetration
+    penetration.physical += base.basePenetration?.physical ?? 0;
+    penetration.physical += (tree?.armorPen ?? 0) / 100;
+
+    // ========================================
+    // STEP 3: WEAPON CONFIGURATION
+    // ========================================
+    const hasWeapon = !!equipped?.weapon;
+    
+    if (hasWeapon) {
+      const weapon = equipped.weapon!;
       
+      // Check for new damage packet system
+      if (weapon.damagePacket) {
+        damagePacket.physical += weapon.damagePacket.physical ?? 0;
+        damagePacket.fire += weapon.damagePacket.fire ?? 0;
+        damagePacket.cold += weapon.damagePacket.cold ?? 0;
+        damagePacket.lightning += weapon.damagePacket.lightning ?? 0;
+        damagePacket.chaos += weapon.damagePacket.chaos ?? 0;
+      }
+      // Legacy weapon damage
+      else if (weapon.stats?.['dmg']) {
+        damagePacket.physical += weapon.stats['dmg'];
+      }
+
       // Weapon penetration
-      if (equipped.weapon.penetration) {
-        penetration.physical += equipped.weapon.penetration.physical;
-        penetration.fire += equipped.weapon.penetration.fire;
-        penetration.cold += equipped.weapon.penetration.cold;
-        penetration.lightning += equipped.weapon.penetration.lightning;
-        penetration.chaos += equipped.weapon.penetration.chaos;
+      if (weapon.penetration) {
+        penetration.physical += weapon.penetration.physical ?? 0;
+        penetration.fire += weapon.penetration.fire ?? 0;
+        penetration.cold += weapon.penetration.cold ?? 0;
+        penetration.lightning += weapon.penetration.lightning ?? 0;
+        penetration.chaos += weapon.penetration.chaos ?? 0;
       }
       // Legacy armorPen
-      else if (equipped.weapon.stats['armorPen']) {
-        penetration.physical += (equipped.weapon.stats['armorPen'] / 100);
-      }
-      
-      // Psionic Blade Scaling (Special Case)
-      if (equipped.weapon.type === 'PSI_BLADE') {
-          const psyBonus = (tree.psyche + gearStats.psy) * 1.5;
-          damagePacket.chaos += psyBonus;
+      else if (weapon.stats?.['armorPen']) {
+        penetration.physical += (weapon.stats['armorPen'] / 100);
       }
 
+      // Psionic Blade special scaling
+      if (weapon.type === 'PSI_BLADE') {
+        const psyBonus = ((tree?.psyche ?? 0) + (gearStats?.psy ?? 0)) * 1.5;
+        damagePacket.chaos += psyBonus;
+      }
     } else {
       // ========================================
-      // UNARMED SCALING
+      // UNARMED COMBAT (THE BUG FIX)
       // ========================================
-      // Unarmed damage scales with Level and generic Gear Damage (Rings)
       const levelBonus = (base.level - 1) * 2;
       damagePacket.physical += levelBonus;
       
-      if (gearStats.dmg) {
-          damagePacket.physical += gearStats.dmg;
+      // Add gear damage bonuses (rings, etc)
+      if (gearStats?.dmg) {
+        damagePacket.physical += gearStats.dmg;
       }
+
+      // ✅ DEBUG: Log unarmed damage calculation
+      console.log('👊 Unarmed Damage:', {
+        base: base.baseDamagePacket.physical,
+        tree: tree?.damage ?? 0,
+        level: levelBonus,
+        gear: gearStats?.dmg ?? 0,
+        total: damagePacket.physical
+      });
     }
 
     // ========================================
-    // STEP 4: APPLY ARMOR / RESISTANCES
+    // STEP 4: ARMOR / RESISTANCES
     // ========================================
-    if (equipped.armor) {
-      // New system
-      if (equipped.armor.stats['armor']) {
-        resistances.physical += equipped.armor.stats['armor'];
-      }
+    if (equipped?.armor?.stats?.['armor']) {
+      resistances.physical += equipped.armor.stats['armor'];
     }
-    resistances.physical += gearStats.armor; // Add generic armor from other slots
+    resistances.physical += gearStats?.armor ?? 0;
 
-    // Cap Penetration
+    // Cap penetration at 90%
     penetration.physical = Math.min(0.9, penetration.physical);
 
     // ========================================
-    // STEP 5: CALCULATE SECONDARY STATS
+    // STEP 5: SECONDARY STATS
     // ========================================
-    const finalHpMax = base.hpMax + tree.hpMax + gearStats.hp;
-    const finalCrit = base.crit + gearStats.crit;
+    const finalHpMax = base.hpMax + (tree?.hpMax ?? 0) + (gearStats?.hp ?? 0);
+    const finalCrit = base.crit + (gearStats?.crit ?? 0);
     const finalCritMult = base.critMult;
-    const finalLifesteal = base.lifesteal + gearStats.lifesteal;
-    const finalSpeed = base.moveSpeed + tree.speed + gearStats.speed;
-    const finalCdr = tree.cdr + gearStats.cdr;
-    const finalPsyche = tree.psyche + gearStats.psy;
+    const finalLifesteal = base.lifesteal + (gearStats?.lifesteal ?? 0);
+    const finalSpeed = base.moveSpeed + (tree?.speed ?? 0) + (gearStats?.speed ?? 0);
+    const finalCdr = (tree?.cdr ?? 0) + (gearStats?.cdr ?? 0);
+    const finalPsyche = (tree?.psyche ?? 0) + (gearStats?.psy ?? 0);
 
-    // Calculate total flat damage for legacy consumers
-    const totalDamage = damagePacket.physical + damagePacket.fire + damagePacket.cold + damagePacket.lightning + damagePacket.chaos;
+    // Calculate total damage for legacy systems
+    const totalDamage = 
+      damagePacket.physical + 
+      damagePacket.fire + 
+      damagePacket.cold + 
+      damagePacket.lightning + 
+      damagePacket.chaos;
 
     // ========================================
-    // RETURN COMPLETE STATS OBJECT
+    // RETURN STATS OBJECT
     // ========================================
-    return {
+    const stats = {
       level: base.level,
       
-      // ✅ NEW SYSTEM (CRITICAL FIX)
+      // ✅ NEW SYSTEM (PRIMARY)
       damagePacket,
       resistances,
       penetration,
@@ -194,6 +233,15 @@ export class PlayerStatsService implements OnDestroy {
       cdr: finalCdr,
       psyche: finalPsyche
     };
+
+    // ✅ DEBUG: Log final stats
+    console.log('📊 Player Stats Computed:', {
+      hasWeapon,
+      damagePacket: stats.damagePacket,
+      totalDamage: stats.damage
+    });
+
+    return stats;
   });
 
   public maxPsionicEnergy = computed(() => 100 + (this.playerStats().psyche * 5));
@@ -201,25 +249,30 @@ export class PlayerStatsService implements OnDestroy {
 
   update() {
     if (this.isDead()) return;
+
     this.psionicEnergy.update(e => Math.min(this.maxPsionicEnergy(), e + this.psionicRegenRate()));
+
     if (this.world.player.state !== 'ATTACK' && this.world.player.hitFlash === 0 && this.playerHp() < this.playerStats().hpMax) {
-        this.playerHp.update(h => Math.min(this.playerStats().hpMax, h + (0.5 + this.playerStats().psyche * 0.1) / 60));
+      this.playerHp.update(h => Math.min(this.playerStats().hpMax, h + (0.5 + this.playerStats().psyche * 0.1) / 60));
     }
   }
 
   takeDamage(amt: number) {
-      if (this.world.player.hitFlash > 0 || this.isDead()) return;
-      this.playerHp.update(h => h - amt);
-      this.world.player.hitFlash = BALANCE.PLAYER.HIT_FLASH_DURATION;
-      this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: BALANCE.SHAKE.HIT });
-      this.sound.play('HIT');
-      if (this.playerHp() <= 0) {
-          this.world.player.hp = 0; this.isDead.set(true);
-          setTimeout(() => { 
-              this.reset();
-              this.eventBus.dispatch({ type: GameEvents.PLAYER_DEATH }); 
-          }, 5000);
-      }
+    if (this.world.player.hitFlash > 0 || this.isDead()) return;
+
+    this.playerHp.update(h => h - amt);
+    this.world.player.hitFlash = BALANCE.PLAYER.HIT_FLASH_DURATION;
+    this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: BALANCE.SHAKE.HIT });
+    this.sound.play('HIT');
+
+    if (this.playerHp() <= 0) {
+      this.world.player.hp = 0;
+      this.isDead.set(true);
+      setTimeout(() => {
+        this.reset();
+        this.eventBus.dispatch({ type: GameEvents.PLAYER_DEATH });
+      }, 5000);
+    }
   }
 
   reset() {
@@ -234,6 +287,7 @@ export class PlayerStatsService implements OnDestroy {
       baseResistances: createDefaultResistances(),
       basePenetration: createZeroPenetration()
     });
+
     this.isDead.set(false);
     this.playerHp.set(100);
     this.psionicEnergy.set(100);

@@ -1,4 +1,3 @@
-
 import { Injectable, inject } from '@angular/core';
 import { Entity } from '../models/game.models';
 import {
@@ -46,9 +45,44 @@ export class CombatService {
   public processHit(hitbox: Entity, target: Entity): void {
     if (target.hitFlash > 0 || target.isHitStunned) return;
 
+    // ✅ EXTENSIVE LOGGING
+    console.log('💥 Combat Hit Detected:', {
+      hitbox: {
+        type: hitbox.type,
+        source: hitbox.source,
+        hasDamagePacket: !!hitbox.damagePacket,
+        damagePacket: hitbox.damagePacket,
+        position: { x: hitbox.x, y: hitbox.y }
+      },
+      target: {
+        type: target.type,
+        subType: target.subType,
+        hp: target.hp,
+        maxHp: target.maxHp,
+        resistances: target.resistances,
+        position: { x: target.x, y: target.y }
+      }
+    });
+
     // Get damage packet from hitbox or generate fallback
     const damagePacket = hitbox.damagePacket ?? this.createFallbackDamagePacket(hitbox);
+    
+    console.log('📦 Damage Packet Used:', damagePacket);
+
     const result = this.calculateMitigatedDamage(hitbox, target, damagePacket);
+    
+    console.log('🎯 Damage Result:', {
+      total: result.total,
+      breakdown: result.breakdown,
+      isCrit: result.isCrit
+    });
+
+    if (result.total === 0) {
+      console.error('❌ ZERO DAMAGE DETECTED - Debugging:');
+      console.error('   Packet:', damagePacket);
+      console.error('   Target Resistances:', target.resistances);
+      console.error('   Calculation breakdown:', result.breakdown);
+    }
     
     this.applyCombatResult(hitbox, target, result);
   }
