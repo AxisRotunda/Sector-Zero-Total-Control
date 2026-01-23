@@ -43,5 +43,9 @@ export const DECORATIONS: Record<string, DecorationDef> = {
     // NEW VISUALS
     'MAGLEV_TRAIN': { id: 'MAGLEV_TRAIN', width: 800, depth: 120, height: 160, baseColor: '#0ea5e9', isStaticFloor: false, renderStyle: 'CUSTOM' },
     'INFO_KIOSK': { id: 'INFO_KIOSK', width: 60, depth: 20, height: 100, baseColor: '#1e293b', isStaticFloor: false, renderStyle: 'CUSTOM' },
-    'BARRIER': { id: 'BARRIER', width: 20, depth: 20, height: 100, baseColor: '#ef4444', isStaticFloor: false, renderStyle: 'CUSTOM' } // Existing but ensuring definition
+    'BARRIER': { id: 'BARRIER', width: 20, depth: 20, height: 100, baseColor: '#ef4444', isStaticFloor: false, renderStyle: 'CUSTOM' },
+    
+    // PROPAGANDA & SYMBOLS
+    'BANNER': { id: 'BANNER', width: 60, depth: 10, height: 180, baseColor: '#06b6d4', isStaticFloor: false, renderStyle: 'CUSTOM' },
+    'HOLO_SIGN': { id: 'HOLO_SIGN', width: 100, depth: 10, height: 60, baseColor: '#06b6d4', isStaticFloor: false, renderStyle: 'CUSTOM' }
 };

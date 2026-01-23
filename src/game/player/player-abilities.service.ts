@@ -87,7 +87,7 @@ export class PlayerAbilitiesService {
         this.stats.psionicEnergy.update(e => e - cost);
         this.cooldowns.update(c => ({...c, secondary: 300}));
         
-        const hitbox = this.entityPool.acquire('HITBOX', undefined, player.zoneId);
+        const hitbox = this.entityPool.acquire('HITBOX', undefined, this.world.currentZone().id);
         hitbox.source = 'PSIONIC'; hitbox.x = player.x; hitbox.y = player.y; 
         hitbox.radius = 120 + stats.psyche * 3; 
         hitbox.damageValue = 15 + stats.psyche * 2; 
@@ -112,6 +112,8 @@ export class PlayerAbilitiesService {
         player.comboIndex = 0;
         
         const dashDir = targetAngle ?? player.angle;
+        // Ensure visual alignment to dash direction
+        player.angle = dashDir;
         player.vx += Math.cos(dashDir) * 20; player.vy += Math.sin(dashDir) * 20;
         this.particleService.addParticles({ x: player.x, y: player.y, z: 0, color: '#71717a', count: 10, speed: 2, life: 0.5, size: 2, type: 'circle' });
         this.sound.play('DASH');
@@ -122,7 +124,7 @@ export class PlayerAbilitiesService {
         this.stats.psionicEnergy.update(e => e - cost);
         this.cooldowns.update(c => ({...c, utility: BALANCE.COOLDOWNS.UTILITY}));
         const angle = targetAngle ?? player.angle;
-        const hitbox = this.entityPool.acquire('HITBOX', undefined, player.zoneId);
+        const hitbox = this.entityPool.acquire('HITBOX', undefined, this.world.currentZone().id);
         hitbox.source = 'PSIONIC'; 
         hitbox.x = player.x + Math.cos(angle) * 70; 
         hitbox.y = player.y + Math.sin(angle) * 70; 
@@ -143,10 +145,11 @@ export class PlayerAbilitiesService {
         this.cooldowns.update(c => ({...c, utility: 200}));
 
         const angle = targetAngle ?? player.angle;
+        player.angle = angle; // Snap visual
         player.vx += Math.cos(angle) * 10;
         player.vy += Math.sin(angle) * 10;
 
-        const hitbox = this.entityPool.acquire('HITBOX', undefined, player.zoneId);
+        const hitbox = this.entityPool.acquire('HITBOX', undefined, this.world.currentZone().id);
         hitbox.source = 'PLAYER';
         hitbox.x = player.x + Math.cos(angle) * 40;
         hitbox.y = player.y + Math.sin(angle) * 40;
@@ -172,7 +175,7 @@ export class PlayerAbilitiesService {
         if (this.stats.psionicEnergy() < this.stats.maxPsionicEnergy()) return;
         this.stats.psionicEnergy.set(0);
         this.world.player.status.stun = 120;
-        const explosion = this.entityPool.acquire('HITBOX', undefined, player.zoneId);
+        const explosion = this.entityPool.acquire('HITBOX', undefined, this.world.currentZone().id);
         explosion.source = 'PSIONIC'; explosion.x = player.x; explosion.y = player.y; 
         explosion.radius = 350; 
         explosion.damageValue = 100 + this.stats.playerStats().psyche * 5; 
@@ -196,40 +199,48 @@ export class PlayerAbilitiesService {
       const stats = this.stats.playerStats();
       const equippedWeapon = this.inventory.equipped().weapon;
       const combo = player.comboIndex || 0;
+      
+      const currentZoneId = this.world.currentZone().id;
 
       // BRANCH 1: UNARMED
       if (!equippedWeapon) {
           const level = this.progression.level() || 1;
-          const baseDamage = 6; 
+          const baseDamage = 8; // Buffed from 6 to ensure damage vs armor
           const scaledDamage = baseDamage + (level * 2) + (stats.damage * 0.3); 
           
           let comboMultiplier = 1.0;
           let knockback = 5;
           let stun = 0;
-          let reach = 35; 
+          // BUFF: Significantly increased base reach (45 -> 75)
+          let reach = 75; 
           let color = '#fbbf24';
           let radiusMult = 1.0;
+
+          // Add a forward Lunge to help connect hits on mobile
+          const lungeSpeed = 12 + (combo * 4);
+          player.vx += Math.cos(player.angle) * lungeSpeed;
+          player.vy += Math.sin(player.angle) * lungeSpeed;
 
           if (combo === 1) {
               comboMultiplier = 1.2;
               knockback = 8;
               color = '#fcd34d';
-              reach = 40;
+              reach = 80;
           } else if (combo === 2) {
               comboMultiplier = 2.5;
               knockback = 35; 
               stun = 45; 
               color = '#f59e0b'; 
-              reach = 50;
-              radiusMult = 1.5; 
+              reach = 90;
+              radiusMult = 1.3; 
               
               this.sound.play('IMPACT');
               this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: { intensity: 8, decay: 0.8 } });
           }
 
-          const finalDamage = scaledDamage * comboMultiplier;
+          const finalDamage = Math.max(1, scaledDamage * comboMultiplier);
 
-          const hitbox = this.entityPool.acquire('HITBOX', undefined, player.zoneId);
+          const hitbox = this.entityPool.acquire('HITBOX', undefined, currentZoneId);
           hitbox.type = 'HITBOX';
           hitbox.source = 'PLAYER';
           const offsetDist = 20 + (combo * 5); 
@@ -237,12 +248,14 @@ export class PlayerAbilitiesService {
           hitbox.y = player.y + Math.sin(player.angle) * offsetDist;
           hitbox.z = 10;
           
+          // Projectile Motion to sweep area
           hitbox.vx = Math.cos(player.angle) * (3 + combo);
           hitbox.vy = Math.sin(player.angle) * (3 + combo);
           
           hitbox.angle = player.angle;
           hitbox.radius = reach * radiusMult;
-          hitbox.timer = 8; 
+          // BUFF: Duration 10 -> 12
+          hitbox.timer = 12; 
           
           hitbox.damageValue = finalDamage; 
 
@@ -298,9 +311,9 @@ export class PlayerAbilitiesService {
           color = '#ea580c';
       }
 
-      const finalDamage = damage * dmgMult;
+      const finalDamage = Math.max(1, damage * dmgMult);
 
-      const hitbox = this.entityPool.acquire('HITBOX', undefined, player.zoneId);
+      const hitbox = this.entityPool.acquire('HITBOX', undefined, currentZoneId);
       hitbox.type = 'HITBOX';
       hitbox.source = 'PLAYER';
       hitbox.x = player.x + Math.cos(player.angle) * 30; 

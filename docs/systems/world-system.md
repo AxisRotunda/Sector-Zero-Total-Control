@@ -2,15 +2,16 @@
 
 **META**
 - **ID**: `world-system`
-- **LAST_UPDATED**: `2026-01-26T10:00:00Z`
+- **LAST_UPDATED**: `2026-01-29T15:05:00Z`
 - **PRIMARY_FILES**:
+  - `src/game/world/zone-manager.service.ts`
   - `src/game/world/world.service.ts`
-  - `src/game/world/world-manager.service.ts`
-  - `src/game/world/sector-loader.service.ts`
-  - `src/game/world/world-generator.service.ts`
+  - `src/game/world/zone-hierarchy-manager.service.ts`
   - `src/game/world/world-state.service.ts`
-  - `src/systems/world-effects.service.ts`
-  - `src/config/maps.config.ts`
+  - `src/game/world/strategies/static-zone-loader.ts`
+  - `src/game/world/strategies/procedural-zone-loader.ts`
+  - `src/data/world/world-graph.config.ts`
+  - `src/data/zones/*.zone.ts`
 - **DEPENDENCIES**: `entity-system`, `core-services`
 
 ---
@@ -18,77 +19,71 @@
 **ANALYSIS**
 
 **PURPOSE**:
-- This system manages the game world environment. It supports a hybrid architecture of statically defined "Sectors" (Hubs, specific levels) and procedurally generated dungeons. It manages entity persistence across sector transitions and handles environmental effects.
+- This system manages the game world environment using a **Hierarchical Graph** structure. It supports a mix of static, hand-crafted sectors (Hubs, Story Segments) and procedurally generated instances (Dungeons). It manages zone transitions, state persistence, and entity instantiation.
 
 **CORE_CONCEPTS**:
-- **Sector Architecture**: The world is divided into Sectors, identified by a `SectorId` (e.g., 'HUB', 'SECTOR_1').
-- **World Management**: `WorldManagerService` is a high-level facade that abstracts the difference between loading a static sector and generating a procedural floor.
-- **Static Loading**: `SectorLoaderService` loads pre-defined layouts from `maps.config.ts`. These definitions include walls, static NPCs, exits, and zone themes.
-- **Procedural Generation**: `WorldGeneratorService` is used when a Sector requires dynamic generation (e.g., specific dungeon depths or radiant mission zones). It generates rooms, corridors, and spawns based on difficulty.
-- **State Persistence**: `WorldStateService` acts as an in-memory cache. When the player leaves a sector, the current state of dynamic entities (health, position) is snapshot. When returning, this snapshot is restored, ensuring the world feels persistent. Static entities (decorations) are re-loaded from config to save memory.
-- **World Container**: `WorldService` holds the active state: the `player`, the `entities` list, `camera`, and `currentZone`.
+- **Zone Architecture**: The world is defined as a graph of `ZoneTemplate` objects. Each zone has metadata, geometry (walls), and entity definitions.
+- **Zone Manager**: `ZoneManagerService` is the central orchestrator. It handles the transition logic: saving the current zone, cleaning up, and loading the new zone.
+- **Loading Strategies**: The system uses the Strategy Pattern to load zones differently based on their type:
+  - **`StaticZoneLoader`**: Loads fixed geometry from a `ZoneTemplate`. Used for Hubs and specific story locations.
+  - **`ProceduralZoneLoader`**: Delegates to `WorldGeneratorService` to create a fresh layout on the fly. Used for 'Instanced' zones.
+- **Hierarchy & Graph**: `ZoneHierarchyManagerService` queries `WORLD_GRAPH` to determine parent/child relationships (e.g., `HUB` -> `SECTOR_9_N`). This structure informs transition sounds and map logic.
+- **State Persistence**: `WorldStateService` acts as the memory bank.
+  - **Persistent Zones**: (e.g., Hubs) retain their state indefinitely.
+  - **Checkpoints**: Retain state for the session but may reset on death.
+  - **Instanced**: Are generated fresh every entry.
+- **Chunk Management**: `ChunkManagerService` (used by `StaticZoneLoader`) spatially partitions static geometry (walls) for optimized rendering culling.
 
 **KEY_INTERACTIONS**:
-- **Input**: `GameEngineService` calls `world.loadSector(id)`.
-- **Output**: Populates `WorldService.entities` for `RenderService` and `EntityUpdateService` to consume.
-- **State Mutation**: `WorldService` mutates the active entity list. `WorldStateService` stores/retrieves snapshots.
+- **Input**: `GameEngineService` calls `zoneManager.transitionToZone(id)`.
+- **Output**: Populates `WorldService.entities`, `WorldService.staticDecorations`, and `SpatialHashService`.
+- **State Mutation**: `WorldService` holds the *active* simulation state. `WorldStateService` holds the *serialized* state of inactive zones.
 
 **HEURISTICS_AND_PATTERNS**:
-- **Strategy Pattern**: The loading logic differentiates between static and dynamic generation strategies.
-- **Flyweight/Caching**: Static decorations are not fully serialized in save states; they are reloaded from the static config to reduce save file size, while only dynamic/changed entities are persisted.
+- **Strategy Pattern**: Decouples the "how" of loading a zone (Static vs Procedural) from the "when" (Transition logic).
+- **Data-Driven Design**: The world structure is defined entirely in configuration files (`src/data/`), making it easy to add new content without changing logic.
 
 ---
 
 **API_REFERENCE**
 
-### `src/game/world/world.service.ts`
+### `src/game/world/zone-manager.service.ts`
 
-#### `WorldService`
-
-**PUBLIC_PROPERTIES**:
-- `player`: `Entity`
-- `entities`: `Entity[]` - Dynamic entities (enemies, projectiles).
-- `staticDecorations`: `Entity[]` - optimized list for non-interactive objects.
-- `camera`: `Camera`
+#### `ZoneManagerService`
 
 **PUBLIC_METHODS**:
-- `loadSector(sectorId: SectorId)`:
-  - **Description**: Orchestrates the loading process.
-  - **Logic**:
-    1. Checks `WorldStateService` for a saved snapshot of the sector.
-    2. If found, restores dynamic entities from snapshot and loads static geometry from `SectorLoader`.
-    3. If not found, triggers a fresh load via `SectorLoader` (which may delegate to `WorldGenerator`).
-- `cleanup()`: Removes dead entities.
-
-### `src/game/world/world-manager.service.ts`
-
-#### `WorldManagerService`
-
-**PUBLIC_METHODS**:
-- `loadContent(type: 'SECTOR' | 'PROCEDURAL', id: string | number)`: Dispatches the load request to either `SectorLoader` or `WorldGenerator` via `WorldService`.
-
-### `src/game/world/sector-loader.service.ts`
-
-#### `SectorLoaderService`
-
-**PUBLIC_METHODS**:
-- `loadSector(world: WorldService, sectorId: string)`:
-  - **Description**: Looks up the `SectorDefinition` in `maps.config.ts`. Instantiates walls, exits, and initial entities into the `world`.
-- `loadStaticDecorationsOnly(...)`: Helper to reload only the visual layer when restoring a save state.
-
-### `src/game/world/world-generator.service.ts`
-
-#### `WorldGeneratorService`
-
-**PUBLIC_METHODS**:
-- `generate(depth: number)`:
-  - **Description**: Creates a procedural layout (rooms/corridors) for generic dungeon sectors.
+- `transitionToZone(targetZoneId: string, spawnOverride?: {x, y})`:
+  - **Description**: The primary entry point for moving the player.
+  - **Flow**:
+    1. Triggers `WorldStateService` to snapshot the current zone.
+    2. Clears the `WorldService` entity lists and Spatial Hash.
+    3. Selects the appropriate strategy (`Static` or `Procedural`) based on the target zone's config.
+    4. Executes the strategy to populate the world.
+    5. Updates `PlayerService` location and triggers discovery events.
+- `initWorld(startZoneId: string)`: Bootstraps the game into a specific zone (usually 'HUB').
 
 ### `src/game/world/world-state.service.ts`
 
 #### `WorldStateService`
 
 **PUBLIC_METHODS**:
-- `saveSector(id: SectorId, entities: Entity[])`: Creates a snapshot of dynamic entities.
-- `loadSector(id: SectorId)`: Returns the hydrated list of entities from the snapshot.
-- `hasSector(id: SectorId)`: Checks if a snapshot exists.
+- `saveSector(id: string, entities: Entity[])`: Filters and serializes dynamic entities. It respects `persistenceTag` properties to determine what should be saved.
+- `loadSector(id: string)`: Returns the hydrated list of entities from the snapshot.
+- `hasSector(id: string)`: Checks if a snapshot exists.
+
+### `src/game/world/zone-hierarchy-manager.service.ts`
+
+#### `ZoneHierarchyManagerService`
+
+**PUBLIC_METHODS**:
+- `getParent(zoneId)`, `getChildren(zoneId)`, `getSiblings(zoneId)`: Navigates the `WORLD_GRAPH`.
+- `getPathToRoot(zoneId)`: Returns the breadcrumb trail back to the root zone.
+
+### `src/game/world/world.service.ts`
+
+#### `WorldService`
+
+**PUBLIC_PROPERTIES**:
+- `currentZone`: `Signal<Zone>` - The active zone configuration.
+- `entities`: `Entity[]` - The active list of updating entities.
+- `staticDecorations`: `Entity[]` - Optimized list for non-interactive objects (rendered but not updated).

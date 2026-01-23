@@ -1,19 +1,21 @@
-
-import { Component, inject, signal, computed, output, ViewChildren, QueryList, ElementRef } from '@angular/core';
+import { Component, inject, signal, computed, output, ViewChildren, QueryList, ElementRef, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { InventoryService } from '../game/inventory.service';
 import { PlayerService } from '../game/player/player.service';
-import { CraftingService } from '../game/crafting.service';
+import { CraftingService, AugmentDef } from '../game/crafting.service';
 import { Item } from '../models/item.models';
 import { ItemIconComponent } from './item-icon.component';
 import { TooltipService } from '../services/tooltip.service';
 import { TutorialService } from '../services/tutorial.service';
+
+type CraftMode = 'TUNE' | 'AUGMENT';
 
 @Component({
   selector: 'app-inventory',
   standalone: true,
   imports: [CommonModule, ItemIconComponent],
   templateUrl: './inventory.component.html',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
     .custom-scrollbar::-webkit-scrollbar { width: 4px; }
     .custom-scrollbar::-webkit-scrollbar-track { background: #18181b; }
@@ -39,20 +41,20 @@ export class InventoryComponent {
   
   // UI State
   showCrafting = signal(false);
+  craftMode = signal<CraftMode>('TUNE');
   selectedCraftItem = signal<Item | null>(null);
 
-  // Drag State for Mobile/Desktop
+  // Drag State
   draggedItem = signal<{item: Item, from: 'bag'|'equipment', fromIndex?: number, fromSlot?: string} | null>(null);
   dragOverSlot = signal<{type: 'bag'|'equipment', index?: number, slot?: string} | null>(null);
   
-  // Ghost Element
   ghostPos = signal({x: 0, y: 0});
   isTouchDragging = signal(false);
   
   private bagRects: DOMRect[] = [];
   private equipRects: { slot: string, rect: DOMRect }[] = [];
   private holdTimer: any;
-  private readonly HOLD_THRESHOLD = 250; // ms
+  private readonly HOLD_THRESHOLD = 250; 
   private hasDragStarted = false;
   private lastTapTime = 0;
   private lastTapId = '';
@@ -64,6 +66,7 @@ export class InventoryComponent {
   toggleCrafting() {
       this.showCrafting.update(v => !v);
       this.selectedCraftItem.set(null);
+      this.craftMode.set('TUNE');
   }
 
   selectForCrafting(item: Item) {
@@ -71,6 +74,8 @@ export class InventoryComponent {
           this.selectedCraftItem.set(item);
       }
   }
+
+  // --- Actions ---
 
   doReroll() {
       const item = this.selectedCraftItem();
@@ -82,7 +87,20 @@ export class InventoryComponent {
       if (item) this.crafting.upgradeItem(item);
   }
 
-  // --- HTML5 DRAG EVENTS (Desktop) ---
+  doAugment(aug: AugmentDef) {
+      const item = this.selectedCraftItem();
+      if (item) this.crafting.installAugment(item, aug);
+  }
+
+  getValidAugments(item: Item): AugmentDef[] {
+      return this.crafting.getValidAugments(item);
+  }
+
+  setCraftMode(mode: CraftMode) {
+      this.craftMode.set(mode);
+  }
+
+  // --- HTML5 DRAG EVENTS ---
 
   onDragStart(event: DragEvent, data: {item: Item, from: 'bag'|'equipment', fromIndex?: number, fromSlot?: string}) {
       this.draggedItem.set(data);
@@ -122,7 +140,7 @@ export class InventoryComponent {
       this.dragOverSlot.set(null);
   }
 
-  // --- TOUCH EVENTS (Mobile) ---
+  // --- TOUCH EVENTS ---
 
   onTouchStart(event: TouchEvent, data: {item: Item, from: 'bag'|'equipment', fromIndex?: number, fromSlot?: string}) {
       event.preventDefault();
@@ -131,7 +149,6 @@ export class InventoryComponent {
       this.hasDragStarted = false;
       this.ghostPos.set({x: touch.clientX, y: touch.clientY});
 
-      // Start hold timer
       this.holdTimer = setTimeout(() => {
           this.startTouchDrag(data, touch);
       }, this.HOLD_THRESHOLD);
@@ -187,7 +204,6 @@ export class InventoryComponent {
       clearTimeout(this.holdTimer);
 
       if (!this.hasDragStarted && data) {
-          // If in crafting mode, tap selects
           if (this.showCrafting()) {
               this.selectedCraftItem.set(data.item);
               return;

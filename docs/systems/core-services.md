@@ -2,7 +2,7 @@
 
 **META**
 - **ID**: `core-services`
-- **LAST_UPDATED**: `2026-01-26T10:00:00Z`
+- **LAST_UPDATED**: `2026-01-29T15:00:00Z`
 - **PRIMARY_FILES**:
   - `src/game/game-engine.service.ts`
   - `src/game/time.service.ts`
@@ -10,6 +10,7 @@
   - `src/services/input-buffer.service.ts`
   - `src/services/input-validator.service.ts`
   - `src/core/persistence.service.ts`
+  - `src/services/indexed-db.service.ts`
   - `src/services/sound.service.ts`
   - `src/services/haptic.service.ts`
 - **DEPENDENCIES**: `world-system`, `entity-system`, `player-system`, `ui-system`
@@ -31,14 +32,16 @@
   - `InputService`: Captures raw browser events (keyboard, mouse, touch, gamepad).
   - `InputBufferService`: Queues actions (like attacks) for short durations to allow for "early" presses during animations to register, improving game feel.
   - `InputValidatorService`: Sanitizes input vectors (e.g., from physics or joystick) to ensure they are finite and clamped, preventing crashes due to `NaN` propagation.
-- **State Serialization**: The `PersistenceService` acts as a facade for saving and loading. It coordinates with other services to gather serializable data and stores it in `localStorage`.
+- **State Serialization**:
+  - `PersistenceService`: Acts as the high-level facade for saving and loading. It gathers data from all subsystems (`Player`, `Inventory`, `WorldState`, etc.).
+  - `IndexedDbService`: Provides the low-level asynchronous interface to the browser's IndexedDB, allowing for larger save files (binary data, extensive world state) than `localStorage`.
 - **Procedural Audio**: The `SoundService` uses the Web Audio API to synthesize sound effects dynamically.
 - **Haptics**: `HapticService` interfaces with the `navigator.vibrate` API to provide tactile feedback for key game events.
 
 **KEY_INTERACTIONS**:
 - **Input**: `InputService` consumes DOM events. `PlayerControlService` reads from `InputBufferService`.
 - **Output**: `SoundService` and `HapticService` provide feedback. `GameEngineService` drives `RenderService`.
-- **State Mutation**: `TimeService` updates `globalTime`. `PersistenceService` snapshots state.
+- **State Mutation**: `TimeService` updates `globalTime`. `PersistenceService` snapshots state to `IndexedDbService`.
 
 **HEURISTICS_AND_PATTERNS**:
 - **Singleton Services**: All services are `providedIn: 'root'`.
@@ -59,7 +62,7 @@
 **PUBLIC_METHODS**:
 - `init(canvas: HTMLCanvasElement)`: Starts the loop.
 - `startGame(isNew: boolean)`: Bootstraps a session (new or loaded).
-- `changeFloor(direction: string)`: Handles transition between Sectors. Saves state of current sector, loads/generates next.
+- `changeFloor(targetZoneId: string, spawnOverride?)`: Orchestrates the transition between zones via `ZoneManagerService`.
 
 ### `src/game/time.service.ts`
 
@@ -89,19 +92,19 @@
 **PUBLIC_METHODS**:
 - `setJoystick(x: number, y: number)`: Updates input vector from touch UI.
 
-### `src/services/input-buffer.service.ts`
+### `src/services/indexed-db.service.ts`
 
-#### `InputBufferService`
+#### `IndexedDbService`
 
 **PUBLIC_METHODS**:
-- `addCommand(type, angle, priority)`: Adds a combat command to the short-term queue.
-- `consumeCommand()`: Returns the highest priority command if valid.
+- `save(key: string, data: any)`: Asynchronously writes the save object to the `gameState` store.
+- `load(key: string)`: Asynchronously retrieves the save object.
+- `clear()`: Wipes the database.
 
 ### `src/core/persistence.service.ts`
 
 #### `PersistenceService`
 
 **PUBLIC_METHODS**:
-- `saveGame()`: Serializes state from Player, World, Inventory, etc.
-- `loadGame()`: Deserializes state and restores service data.
-- `resetGame()`: Wipes save data.
+- `saveGame()`: Serializes state from Player, World, Inventory, etc., and pushes to DB.
+- `loadGame()`: Pulls from DB, deserializes, and restores service data. Handles migration from `localStorage` if necessary.

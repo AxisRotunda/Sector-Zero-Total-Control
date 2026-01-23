@@ -16,6 +16,10 @@ export class ChunkManagerService {
   
   // Cache the last visible set to avoid re-aggregating every frame if camera hasn't moved much
   private lastVisibleEntities: Entity[] = [];
+  
+  // Reusable buffer to avoid allocating a new Array every frame when cache misses
+  private resultBuffer: Entity[] = [];
+  
   private lastCheckX = -99999;
   private lastCheckY = -99999;
   private readonly CACHE_DIST_SQ = 100 * 100; // Only re-query if camera moved > 100 units
@@ -23,6 +27,7 @@ export class ChunkManagerService {
   reset() {
     this.chunks.clear();
     this.lastVisibleEntities = [];
+    this.resultBuffer = [];
     this.lastCheckX = -99999;
   }
 
@@ -52,7 +57,9 @@ export class ChunkManagerService {
     }
 
     const visibleKeys = this.calculateVisibleChunkKeys(cam, canvasWidth, canvasHeight);
-    const entities: Entity[] = [];
+    
+    // Clear buffer without deallocation
+    this.resultBuffer.length = 0;
 
     for (const key of visibleKeys) {
       const chunk = this.chunks.get(key);
@@ -60,17 +67,21 @@ export class ChunkManagerService {
         // Fast Array Copy
         const len = chunk.length;
         for (let i = 0; i < len; i++) {
-            entities.push(chunk[i]);
+            this.resultBuffer.push(chunk[i]);
         }
       }
     }
     
     // Update cache
-    this.lastVisibleEntities = entities;
+    // We must clone the buffer to a new array for cache storage, as resultBuffer is reused
+    // However, typically the consumer (RenderService) iterates immediately.
+    // To be safe for cache logic, we slice.
+    this.lastVisibleEntities = this.resultBuffer.slice();
+    
     this.lastCheckX = cam.x;
     this.lastCheckY = cam.y;
 
-    return entities;
+    return this.lastVisibleEntities;
   }
 
   private getChunkKey(x: number, y: number): string {

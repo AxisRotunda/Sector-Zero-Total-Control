@@ -101,6 +101,17 @@ export const HUB_ZONE: ZoneTemplate = {
       ...shop.entities,
       ...training.entities,
 
+      // --- PROPAGANDA DECORATIONS ---
+      { type: 'DECORATION', subType: 'BANNER', x: -820, y: -200, data: { z: 150, color: '#06b6d4' } },
+      { type: 'DECORATION', subType: 'BANNER', x: 820, y: -200, data: { z: 150, color: '#06b6d4' } },
+      { type: 'DECORATION', subType: 'BANNER', x: -820, y: 200, data: { z: 150, color: '#06b6d4' } },
+      { type: 'DECORATION', subType: 'BANNER', x: 820, y: 200, data: { z: 150, color: '#06b6d4' } },
+      
+      { type: 'DECORATION', subType: 'HOLO_SIGN', x: 0, y: 300, data: { z: 150, label: 'OBEY', color: '#06b6d4' } },
+      { type: 'DECORATION', subType: 'HOLO_SIGN', x: 0, y: -300, data: { z: 150, label: 'REPORT', color: '#06b6d4' } },
+      { type: 'DECORATION', subType: 'HOLO_SIGN', x: -600, y: 0, data: { z: 150, label: 'ORDER', color: '#06b6d4' } },
+      { type: 'DECORATION', subType: 'HOLO_SIGN', x: 600, y: 0, data: { z: 150, label: 'DELAY', color: '#06b6d4' } },
+
       // --- STATION VISUALS ---
       // Floor Platform (Walkable Area)
       { type: 'DECORATION', subType: 'RUG', x: 0, y: -700, data: { width: 800, height: 200, color: '#1e293b' } },

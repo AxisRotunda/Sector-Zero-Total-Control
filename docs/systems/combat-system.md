@@ -1,11 +1,15 @@
+
 # SYSTEM: Combat System
 
 **META**
 - **ID**: `combat-system`
-- **LAST_UPDATED**: `2025-05-21T17:00:00Z`
+- **LAST_UPDATED**: `2026-01-30T10:00:00Z`
 - **PRIMARY_FILES**:
   - `src/systems/combat.service.ts`
   - `src/systems/status-effect.service.ts`
+  - `src/systems/collision.service.ts`
+  - `src/game/player/player-abilities.service.ts`
+  - `src/game/time.service.ts`
 - **DEPENDENCIES**: `player-system`, `world-system`, `entity-system`, `item-inventory-system`, `core-services`
 
 ---
@@ -13,24 +17,101 @@
 **ANALYSIS**
 
 **PURPOSE**:
-- This system is the definitive authority on combat resolution. It calculates damage, processes hits, applies status effects, and handles the consequences of an entity's death (XP, loot, etc.). It integrates player stats, enemy stats, and environmental factors into a cohesive ruleset.
+- The definitive authority on combat resolution. It calculates damage (mitigation, crits), processes hits (collision to effect), applies status effects (resistances), and manages the "Game Feel" via Hit-Stop.
 
-**CORE_CONCEPTS**:
-- **Hit Processing**: The `processHit` method is the core of the system. It is called by `CollisionService` when a hitbox overlaps a valid target. It performs all calculations in a specific order: armor reduction, critical hit check, damage application, knockback, and status effect application.
-- **Armor Penetration (AP)**: AP is a flat stat sourced from the player's skill tree and equipment. When a player-sourced hitbox hits an enemy, the AP value is subtracted from the target's armor *before* the damage reduction formula is applied: `EffectiveArmor = Max(0, TargetArmor - AttackerArmorPen)`.
-- **Individual Hit-Stop**: To add weight to impacts, `processHit` sets a `hitStopFrames` value on the target entity. The `EntityUpdateService` will then pause that specific entity's logic for the duration, creating a satisfying stutter on hit without freezing the whole game.
-- **Status Effect Application & Resistance**: `processHit` checks the hitbox for status effects to apply. Before applying, it checks the target's `resistances` property. A resistance value (e.g., `resistances: { burn: 0.5 }`) acts as a multiplier on the duration/intensity of the incoming effect.
-- **Death Logic**: When an entity's HP drops to zero, `killEnemy` or `destroyObject` is called. These methods handle awarding XP and credits, triggering mission objectives, and initiating loot drops.
-- **Enemy Equipment Drops**: `killEnemy` now inspects the `equipment` property of the defeated enemy. It then has a chance to drop the specific items the enemy was using, rather than always generating new loot.
+**ARCHITECTURE FLOW**:
+```mermaid
+Input -> PlayerControlService -> PlayerAbilitiesService -> HITBOX Spawning
+                                        |
+World Update Loop -> Physics/Collision Check <-> Spatial Hash
+                                        |
+                                Collision Detected
+                                        |
+CollisionService -> CombatService.processHit(hitbox, target)
+                                        |
+                                1. Calc Crit & Multipliers
+                                2. Apply Weakness
+                                3. Subtract Armor Pen
+                                4. Apply DR Formula
+                                5. Apply Status (w/ Resistances)
+                                6. Trigger Hit-Stop (Global + Local)
+                                7. Check Death
+```
 
-**KEY_INTERACTIONS**:
-- **Input**: `CollisionService` calls `processHit` when a valid combat collision occurs.
-- **Output**: Dispatches floating text events via `EventBusService`. Creates `PICKUP` entities via `WorldService`. Modifies player state (HP, XP, credits) via `PlayerService`.
-- **State Mutation**: Directly mutates the `hp`, `vx`, `vy`, and `status` properties of target entities. Sets entity `state` to `DEAD`.
+**CORE SUBSYSTEMS**:
 
-**HEURISTICS_AND_PATTERNS**:
-- **Centralized Rules Engine**: All core combat calculations are centralized in this service, ensuring consistent rule application across the game.
-- **Event-Driven Feedback**: Rather than directly manipulating UI, the service dispatches events (e.g., for floating text), decoupling combat logic from its presentation.
+### 1. The Damage Pipeline (`calculateMitigatedDamage`)
+
+Damage is processed in a strictly ordered pipeline to ensure predictable scaling.
+
+1.  **Incoming Base Damage**: From `hitbox.damageValue` or Weapon Stats.
+2.  **Critical Roll**:
+    *   `chance = source.critChance` (or Player Stats).
+    *   `if (random < chance) damage *= 1.5`.
+3.  **Vulnerability (Weakness)**:
+    *   If target has `weakness` status: `damage *= (1 + weakness.damageReduction)`.
+4.  **Armor Mitigation**:
+    *   **Armor Penetration**: `effectiveArmor = max(0, target.armor * (1 - weakness.armorReduction) - source.armorPen)`.
+    *   **Diminishing Returns Formula**:
+        ```typescript
+        reduction = effectiveArmor / (effectiveArmor + (10 * damage));
+        ```
+        *Example: 50 Armor vs 10 Damage = 50 / (50 + 100) = 33% reduction.*
+    *   **Hard Cap**: Reduction is clamped at **90%**.
+    *   `finalDamage = damage * (1 - reduction)`.
+
+### 2. Hitbox Lifecycle & filtering
+
+*   **Spawning**: Created via `EntityPoolService` (usually `HITBOX` type).
+*   **Filtering**: To prevent a single sword swing from damaging an enemy 60 times a second, every Hitbox entity maintains a `hitIds: Set<number>`.
+    *   When `CollisionService` detects an overlap, it checks `hitbox.hitIds.has(target.id)`.
+    *   If false, it processes the hit and adds `target.id` to the set.
+*   **Cleanup**:
+    *   **Melee**: Have a `timer` property (e.g., 12 frames). Removed when timer <= 0.
+    *   **Projectiles**: Destroyed immediately upon impact (`timer = 0`) unless they have a `pierce` property (not currently implemented).
+
+### 3. Attack State Machine (Player)
+
+The player's melee combat is governed by a frame-locked state machine in `PlayerControlService`.
+
+| State | Frames | Description | Input Allowed? |
+| :--- | :--- | :--- | :--- |
+| **STARTUP** | 0 - 2 | Telegraphing animation. No hitbox. | Buffered Only |
+| **ACTIVE** | 3 - 5 | **Hitbox Spawned**. Damage window. | Buffered Only |
+| **RECOVERY**| 6 - 8 | Animation follow-through. | **Yes (Combo)** |
+
+*   **Combos**: Input during `RECOVERY` triggers the next stage of the combo chain (0 -> 1 -> 2 -> 0).
+*   **Data**:
+    *   **Stage 1**: 1.0x Dmg, small knockback.
+    *   **Stage 2**: 1.2x Dmg, medium knockback.
+    *   **Stage 3**: 2.5x Dmg, heavy knockback + Stun.
+
+### 4. Status Effects & Resistances
+
+Status effects are objects stored on the `Entity.status` property.
+
+*   **Application Logic**:
+    *   `incomingDuration = baseDuration * target.resistances[type]`.
+    *   **Merge Strategy**:
+        *   `STUN/SLOW`: `max(currentDuration, newDuration)`.
+        *   `DOTS` (Poison/Burn): Overwrite if `newDuration > currentDuration`.
+*   **Tick Logic (`StatusEffectService`)**:
+    *   **Poison**: 30 tick rate.
+    *   **Burn**: 30 tick rate.
+    *   **Bleed**: 30 tick rate. Damage scales: `dps * stacks`.
+
+### 5. Hit-Stop (Game Feel)
+
+Two distinct systems work in tandem to sell impact:
+
+1.  **Global Hit-Stop (`TimeService`)**:
+    *   Pauses the **entire game loop** (physics, AI, rendering updates) for a few frames (3-10).
+    *   Triggered on heavy hits or crits.
+    *   Result: Everything freezes, emphasizing the moment of impact.
+2.  **Local Hit-Stun (`Entity.hitStopFrames`)**:
+    *   Pauses **only the specific entity** for a duration.
+    *   Entity cannot move or attack.
+    *   Result: The enemy flinches/freezes while the player can continue moving (after the global stop ends).
 
 ---
 
@@ -41,21 +122,13 @@
 #### `CombatService`
 
 **PUBLIC_METHODS**:
-- `processHit(hitbox: Entity, target: Entity)`:
-  - **Description**: The main entry point for resolving a single instance of damage.
-  - **Logic Flow**: Calculates effective armor, applies damage, checks for crits, applies knockback, sets individual hit-stop frames, and applies status effects considering resistances.
-- `killEnemy(e: Entity)`:
-  - **Description**: Handles all logic for when an enemy dies.
-  - **Side Effects**: Awards XP/credits to the player, updates mission progress, and triggers loot drop logic, including a chance for equipped items to drop.
-- `destroyObject(e: Entity)`:
-  - **Description**: Handles logic for destructible objects, such as explosive barrels.
-- `updatePickup(e: Entity)`:
-  - **Description**: Manages the behavior of loot pickups, causing them to magnetize towards the player when nearby.
+- `processHit(hitbox: Entity, target: Entity)`: The atomic unit of combat. Resolves one interaction.
+- `applyDirectDamage(attacker, target, val)`: Used for contact damage (walking into enemies).
+- `killEnemy(e)`: Handles XP, loot generation, and equipped item drops.
 
-### `src/systems/status-effect.service.ts`
+### `src/game/player/player-abilities.service.ts`
 
-#### `StatusEffectService`
+#### `PlayerAbilitiesService`
 
 **PUBLIC_METHODS**:
-- `processStatusEffects(e: Entity, globalTime: number)`:
-  - **Description**: Called every frame for each entity by `EntityUpdateService`. It decrements timers on active status effects and applies their periodic effects (e.g., damage-over-time for poison/burn).
+- `spawnPrimaryAttackHitbox(player)`: Calculates reach/damage based on equipped weapon and combo index, then spawns the `HITBOX` entity into the world.

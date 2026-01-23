@@ -17,7 +17,6 @@ import { EventBusService } from '../core/events/event-bus.service';
 import { GameEvents } from '../core/events/game-events';
 import { TimeService } from '../game/time.service';
 import { HapticService } from '../services/haptic.service';
-import { UiPanelService } from '../services/ui-panel.service';
 
 @Injectable({ providedIn: 'root' })
 export class CombatService {
@@ -33,7 +32,6 @@ export class CombatService {
   private eventBus = inject(EventBusService);
   private timeService = inject(TimeService);
   private haptic = inject(HapticService);
-  private uiService = inject(UiPanelService);
 
   /**
    * Main entry point for Hitbox-based collisions.
@@ -233,8 +231,8 @@ export class CombatService {
   }
 
   private applyStatusEffects(source: Entity, target: Entity) {
-      const apply = (type: 'stun'|'slow'|'burn'|'poison'|'weakness', effect: any) => {
-          const res = target.resistances?.[type] || 1.0;
+      const apply = (type: 'stun'|'slow'|'burn'|'poison'|'weakness'|'bleed', effect: any) => {
+          const res = target.resistances?.[type as keyof typeof target.resistances] || 1.0;
           if (res <= 0 || !effect) return;
 
           // Merge Logic
@@ -264,6 +262,7 @@ export class CombatService {
       apply('weakness', source.status.weakness); 
       apply('burn', source.status.burn); 
       apply('poison', source.status.poison);
+      apply('bleed', source.status.bleed);
   }
 
   public killEnemy(e: Entity) {

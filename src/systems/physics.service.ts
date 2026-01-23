@@ -17,6 +17,7 @@ export class PhysicsService {
   private readonly SPATIAL_BUFFER_RATIO = 1.5;
   private readonly COLLISION_QUERY_RATIO = 1.5; // Proportional buffer for collision checks
   private readonly MIN_SEPARATION_FORCE = 0.01;
+  private readonly MAX_SEPARATION_NEIGHBORS = 6; // Cap neighbors for O(1) local avoidance cost
 
   public updateEntityPhysics(e: Entity, stats?: { speed: number }, inputVec?: { x: number, y: number }): boolean {
     const ACCELERATION = 2.0; 
@@ -45,7 +46,10 @@ export class PhysicsService {
         const queryRadius = e.radius * this.SPATIAL_BUFFER_RATIO;
         const neighbors = this.spatialHash.query(e.x, e.y, queryRadius, zoneId);
         
+        let processedNeighbors = 0;
+
         for (const n of neighbors) {
+            if (processedNeighbors >= this.MAX_SEPARATION_NEIGHBORS) break;
             if (n.id === e.id || n.state === 'DEAD' || n.type === 'WALL' || n.type === 'DECORATION' || n.type === 'PICKUP') continue;
             
             const minDist = e.radius + n.radius;
@@ -64,6 +68,7 @@ export class PhysicsService {
 
                 e.vx += px;
                 e.vy += py;
+                processedNeighbors++;
             }
         }
     }

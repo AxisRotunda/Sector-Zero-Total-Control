@@ -1,5 +1,5 @@
 
-import { Component, inject, output, computed, signal, OnDestroy } from '@angular/core';
+import { Component, inject, output, computed, signal, OnDestroy, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MissionService } from '../game/mission.service';
 import { SkillTreeService } from '../game/skill-tree.service';
@@ -17,6 +17,7 @@ import { ICONS } from '../config/icons.config';
   selector: 'app-hud',
   standalone: true,
   imports: [CommonModule, MapComponent, TutorialOverlayComponent, GlitchTextComponent],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="absolute inset-0 z-40 flex flex-col pointer-events-none pt-safe pb-safe pl-safe pr-safe font-mono">
         

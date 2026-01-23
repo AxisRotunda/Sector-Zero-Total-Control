@@ -62,6 +62,8 @@ export class PlayerControlService {
         this.cameraService.update();
         this.updatePlayerAnimation(player);
 
+        let isMoving = false;
+
         // Movement Physics
         if (player.state !== 'ATTACK') {
             // Reset attack state if not attacking
@@ -71,7 +73,7 @@ export class PlayerControlService {
             const prevVx = player.vx;
             const prevVy = player.vy;
             
-            const isMoving = this.physics.updateEntityPhysics(player, stats, this.input.inputVector);
+            isMoving = this.physics.updateEntityPhysics(player, stats, this.input.inputVector);
             
             // Haptic feedback for sudden stops (wall hits)
             if (Math.hypot(this.input.inputVector.x, this.input.inputVector.y) > 0.5) {
@@ -90,7 +92,19 @@ export class PlayerControlService {
             }
         }
 
-        if (this.input.aimAngle !== null && player.state !== 'ATTACK') player.angle = this.input.aimAngle;
+        // ROTATION LOGIC
+        if (player.state !== 'ATTACK') {
+            if (this.input.aimAngle !== null) {
+                // Priority: Manual Aim (Right Stick / Mouse)
+                player.angle = this.input.aimAngle;
+            } else if (isMoving) {
+                // Fallback: Face Movement Direction (Left Stick)
+                // This ensures player doesn't "moonwalk" or punch air sideways
+                const moveAngle = Math.atan2(player.vy, player.vx);
+                // Simple lerp for smoothness could go here, but instant snap is snappier for gameplay
+                player.angle = moveAngle;
+            }
+        }
 
         // Delegate Interaction Logic
         this.interaction.update(player, globalTime);
@@ -108,12 +122,33 @@ export class PlayerControlService {
         if (this.input.isDown('SKILL_4')) this.inputBuffer.addCommand('OVERLOAD', this.input.aimAngle ?? undefined, 3);
         
         const manualAttack = this.input.isAttackPressed || this.input.isDown('ATTACK');
-        if (manualAttack) this.inputBuffer.addCommand('PRIMARY', this.input.aimAngle ?? undefined, 1);
+        
+        if (manualAttack) {
+            let targetAngle = this.input.aimAngle;
+            
+            // AUTO-TARGETING
+            // If the player presses attack WITHOUT aiming (aimAngle is null),
+            // find the nearest valid target and snap angle to them.
+            if (targetAngle === null) {
+                const autoTarget = this.findBestTarget(player);
+                if (autoTarget) {
+                    targetAngle = Math.atan2(autoTarget.y - player.y, autoTarget.x - player.x);
+                } else if (Math.hypot(player.vx, player.vy) > 0.1) {
+                    // If no target but moving, attack in movement direction
+                    targetAngle = Math.atan2(player.vy, player.vx);
+                } else {
+                    // Absolute fallback
+                    targetAngle = player.angle;
+                }
+            }
+            
+            this.inputBuffer.addCommand('PRIMARY', targetAngle ?? undefined, 1);
+        }
 
         const autoCombat = this.playerService.autoCombatEnabled();
         
         // Auto-combat check
-        if (autoCombat && !this.activeInteractable() && player.state !== 'ATTACK') {
+        if (autoCombat && !this.activeInteractable() && player.state !== 'ATTACK' && !manualAttack) {
              const nextCmd = this.inputBuffer.peekCommand();
              if (!nextCmd || nextCmd.priority <= 1) {
                  this.handleAutoAttack(player);
@@ -131,18 +166,53 @@ export class PlayerControlService {
 
                 this.inputBuffer.consumeCommand();
                 
+                // If command has a specific angle (from manual aim or auto-target), use it.
+                // Otherwise default to current player facing.
                 let targetAngle = cmd.angle ?? player.angle;
-                // Auto-aim if stick is pushed but no mouse/stick aim
-                if (cmd.type === 'PRIMARY' && cmd.angle === undefined && Math.hypot(this.input.inputVector.x, this.input.inputVector.y) > 0.1) {
-                    targetAngle = Math.atan2(this.input.inputVector.y, this.input.inputVector.x);
-                }
+                
                 this.playerService.useSkill(cmd.type, targetAngle);
             }
         }
     }
 
+    private findBestTarget(player: Entity): Entity | null {
+        const zoneId = this.world.currentZone().id;
+        const range = 450; // Scan range for auto-target
+        const candidates = this.spatialHash.query(player.x, player.y, range, zoneId);
+        
+        let best: Entity | null = null;
+        let minScore = Infinity;
+        
+        for (const e of candidates) {
+            if (e.id === player.id) continue;
+            if (e.state === 'DEAD') continue;
+            // Prioritize Enemies over Crates
+            if (!isEnemy(e) && !isDestructible(e)) continue;
+            
+            const dist = Math.hypot(e.x - player.x, e.y - player.y);
+            
+            // Score Calculation
+            // Lower score is better
+            let score = dist;
+            
+            // Angle bias: Prefer targets in front of player
+            const angleToTarget = Math.atan2(e.y - player.y, e.x - player.x);
+            const angleDiff = Math.abs(angleToTarget - player.angle);
+            // Penalize targets behind
+            if (angleDiff > Math.PI / 2) score += 200; 
+            
+            // Bias towards Enemies over Objects
+            if (isDestructible(e)) score += 100;
+
+            if (score < minScore) {
+                minScore = score;
+                best = e;
+            }
+        }
+        return best;
+    }
+
     private handleAutoAttack(player: Entity) {
-         // CRITICAL FIX: Use current zoneId for spatial queries
          const zoneId = this.world.currentZone().id;
          const nearbyTargets = this.spatialHash.query(player.x, player.y, BALANCE.COMBAT.AUTO_ATTACK_RANGE, zoneId);
          

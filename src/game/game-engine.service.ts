@@ -15,6 +15,7 @@ import { TimeService } from './time.service';
 import { MapService } from '../services/map.service';
 import { ZoneManagerService } from './world/zone-manager.service';
 import { LightingService } from '../systems/rendering/lighting.service';
+import { GameStateService } from './game-state.service';
 
 @Injectable({
   providedIn: 'root'
@@ -37,8 +38,10 @@ export class GameEngineService {
   private mapService = inject(MapService);
   private zoneManager = inject(ZoneManagerService);
   private lighting = inject(LightingService);
+  private gameState = inject(GameStateService);
 
-  isInMenu = signal(true);
+  // Expose the signal reference directly so components binding to `game.isInMenu` still work
+  isInMenu = this.gameState.isInMenu;
 
   init(canvas: HTMLCanvasElement) {
     this.renderer.init(canvas);

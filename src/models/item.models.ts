@@ -1,3 +1,4 @@
+
 export type Rarity = 'COMMON' | 'UNCOMMON' | 'RARE' | 'BLACK_MARKET';
 export type ItemType = 'WEAPON' | 'ARMOR' | 'IMPLANT' | 'STIM' | 'PSI_BLADE' | 'AMULET' | 'RING';
 export type ItemShape = 'sword' | 'shield' | 'chip' | 'syringe' | 'psiBlade' | 'amulet' | 'ring';
@@ -24,9 +25,9 @@ export const UNARMED_WEAPON: Item = {
   level: 1,
   color: '#fbbf24', // Gold
   stats: {
-    dmg: 6,        // Slight buff
+    dmg: 8,        // Buffed from 6
     spd: 2.0,      // Very fast base speed
-    reach: 35,     // Short range requiring positioning
+    reach: 75,     // Buffed from 35/45 to 75
     crit: 15,      // High base crit (Martial precision)
     ls: 0,
     armorPen: 5    // Innate armor piercing (Targeting weak points)

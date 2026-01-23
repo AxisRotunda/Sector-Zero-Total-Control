@@ -24,7 +24,8 @@ export class TextureGeneratorService {
       void: null,
       circuit: null,
       plating: null,
-      ice: null
+      ice: null,
+      vanguard: null // New Propaganda Pattern
   };
 
   constructor() {
@@ -111,7 +112,7 @@ export class TextureGeneratorService {
           ctx.beginPath(); ctx.arc(10, 90, 2, 0, Math.PI*2); ctx.fill();
       });
 
-      // 8. Ice (Frozen) - Jagged Cracks
+      // 8. Ice (Frozen)
       this.patterns.ice = createPattern(128, 128, (ctx) => {
           ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
           ctx.lineWidth = 1;
@@ -123,6 +124,30 @@ export class TextureGeneratorService {
           }
           ctx.fillStyle = 'rgba(200, 230, 255, 0.1)';
           ctx.fillRect(0, 0, 128, 128);
+      });
+
+      // 9. Vanguard Propaganda (The Eye/Triangle)
+      this.patterns.vanguard = createPattern(200, 200, (ctx) => {
+          // Subtle tiling of the Vanguard Sigil
+          ctx.strokeStyle = 'rgba(6, 182, 212, 0.15)'; // Cyan low opacity
+          ctx.lineWidth = 2;
+          
+          // Triangle
+          ctx.beginPath();
+          ctx.moveTo(100, 50);
+          ctx.lineTo(150, 150);
+          ctx.lineTo(50, 150);
+          ctx.closePath();
+          ctx.stroke();
+          
+          // Eye Center
+          ctx.beginPath();
+          ctx.arc(100, 115, 10, 0, Math.PI * 2);
+          ctx.stroke();
+
+          // Barcode Lines
+          ctx.fillStyle = 'rgba(6, 182, 212, 0.05)';
+          ctx.fillRect(50, 160, 100, 5);
       });
   }
 
@@ -139,7 +164,8 @@ export class TextureGeneratorService {
           case 'VOID':
               return { ...base, pattern: this.patterns.void, edgeColor: '#581c87', erosionLevel: 0.3, rimLight: true, overlayColor: '#a855f7', detailStyle: 'GLYPHS' };
           case 'FROZEN':
-              return { ...base, pattern: this.patterns.ice, edgeColor: '#bae6fd', erosionLevel: 0.2, rimLight: true, fillOpacity: 0.8, detailStyle: 'PLATING', overlayColor: '#e0f2fe' };
+              // Frozen now uses Vanguard Sigil pattern to show their dominance in the Hub
+              return { ...base, pattern: this.patterns.vanguard, edgeColor: '#bae6fd', erosionLevel: 0.2, rimLight: true, fillOpacity: 0.8, detailStyle: 'PLATING', overlayColor: '#e0f2fe' };
           case 'INDUSTRIAL':
           default:
               return { ...base, pattern: this.patterns.plating, edgeColor: '#000000', erosionLevel: 0.1, rimLight: false, detailStyle: 'RIVETS' };

@@ -1,6 +1,6 @@
 
 <div class="fixed inset-0 font-mono text-zinc-300 select-none overflow-hidden touch-none"
-     [class.cursor-none]="input.usingKeyboard() && !ui.isInventoryOpen() && !ui.isSkillsOpen() && !ui.isShopOpen() && !ui.isAbilitiesOpen() && !ui.isCodexOpen() && !ui.isJournalOpen() && !game.isInMenu() && !mapService.isFullMapOpen() && !mapService.isSettingsOpen() && !ui.isWorldMapOpen()"
+     [class.cursor-none]="ui.shouldHideCursor()"
      (touchstart)="handleGlobalTouch($event)">
   
   <canvas #gameCanvas class="absolute top-0 left-0 w-full h-full block bg-zinc-950"></canvas>
@@ -62,7 +62,7 @@
                (openJournal)="ui.openPanel('JOURNAL')"
                (openShop)="ui.openPanel('SHOP')"></app-hud>
 
-      @if (!ui.isSkillsOpen() && !ui.isShopOpen() && !ui.isAbilitiesOpen() && !ui.isCodexOpen() && !ui.isJournalOpen() && !mapService.isFullMapOpen() && !mapService.isSettingsOpen() && !ui.isWorldMapOpen()) {
+      @if (!ui.isAnyPanelOpen() && !mapService.isFullMapOpen() && !mapService.isSettingsOpen()) {
           
           <!-- DYNAMIC JOYSTICK ZONE (LEFT HALF) -->
           <div class="absolute top-20 bottom-0 left-0 w-1/2 z-10">

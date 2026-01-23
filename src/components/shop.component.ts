@@ -1,5 +1,5 @@
 
-import { Component, inject, output, signal, computed } from '@angular/core';
+import { Component, inject, output, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ShopService } from '../services/shop.service';
 import { InventoryService } from '../game/inventory.service';
@@ -17,6 +17,7 @@ type InventoryMode = 'SELL' | 'SALVAGE';
   selector: 'app-shop',
   standalone: true,
   imports: [CommonModule, ItemIconComponent, GlitchTextComponent],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="absolute inset-0 z-50 bg-black/95 backdrop-blur-md flex items-center justify-center animate-in fade-in p-0 md:p-4" (touchstart)="$event.stopPropagation()">
         

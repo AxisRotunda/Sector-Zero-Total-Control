@@ -2,67 +2,44 @@
 
 **META**
 - **ID**: `overview`
-- **LAST_UPDATED**: `2026-01-26T10:00:00Z`
-- **DESCRIPTION**: This is the central entry point for all system documentation for the "Sector Zero: Total Control" project. It provides a high-level summary and links to detailed, machine-parsable documents for each subsystem.
+- **LAST_UPDATED**: `2026-01-29T14:30:00Z`
+- **DESCRIPTION**: Central entry point for all system documentation. Sector Zero is a hard-realism isometric dystopian ARPG built using Zoneless Angular and a custom Canvas rendering engine.
 
 ---
 
-## 1. Project Guides
+## 1. Project Philosophy
+Sector Zero focuses on "The Inversion"—a narrative and mechanical descent from the decaying physical surface into a digital/metaphysical singularity. 
 
-These documents provide high-level, contextual information about the project's structure and features.
+### Technical Stack
+- **Framework**: Angular v20+ (Zoneless / Signal-based state).
+- **Rendering**: HTML5 Canvas with Isometric projection and procedural texture generation.
+- **Persistence**: IndexedDB for high-capacity state saving.
+- **Logic**: Strategy-pattern AI and ECS-lite entity updates.
+
+## 2. Core Documentation Index
 
 - **[Project Structure](./project-structure.md)**
-  - A complete breakdown of the project's folder and file layout, with descriptions for each file's purpose.
-
+  - Current file layout and architectural boundaries.
 - **[Feature Breakdown](./features.md)**
-  - A human-oriented guide that maps major game features (e.g., "Player Movement", "Loot Drops") to the specific services and components responsible for their implementation.
-
+  - Maps gameplay features to code implementations.
 - **[Feature Status](./feature-status.md)**
-  - A checklist tracking the implementation status of planned and requested features.
+  - Checklist for implementation milestones.
+- **[Issue Tracker](./issue-tracker.md) (NEW)**
+  - Log of persistent technical debt and known bugs.
+- **[Changelog](./changelog.md) (NEW)**
+  - Project history and links to the Git repository.
 
-- **[World Lore](./lore/)**
-  - The canonical source for all in-game lore, character backstories, and narrative text. The documents within this directory define the metaphysical and political landscape of the game world.
+## 3. Specialized System Deep-Dives
 
-## 2. Core Systems Documentation
-
-These documents provide deep, specific, and structured information about each of the game's primary systems. They are designed for AI agent consumption.
-
-- **[Core Services & Game Loop](./systems/core-services.md)**
-  - **Covers**: `GameEngineService`, `TimeService`, `InputService`, `InputBufferService`, `PersistenceService`, `SoundService`.
-  - **Summary**: Manages the main game loop, time (delta, slow-mo, hit-stop), user input (including buffering), saving/loading, and audio/haptic feedback.
-
-- **[Entity System](./systems/entity-system.md)**
-  - **Covers**: `EntityUpdateService`, `EntityPoolService`, `SpawnerService`, `NpcUpdateService`, `game.models.ts`.
-  - **Summary**: Defines all game objects (`Entity`), manages their lifecycle via object pooling, and orchestrates per-frame updates for spawners and environmental hazards.
-
-- **[Player System](./systems/player-system.md)**
-  - **Covers**: `PlayerService` (Facade) and its sub-modules (`PlayerStatsService`, `PlayerProgressionService`, `PlayerAbilitiesService`).
-  - **Summary**: A comprehensive, reactive model of the player, handling stats, progression (XP/level), abilities, and status.
-
-- **[World & Environment System](./systems/world-system.md)**
-  - **Covers**: `WorldService`, `WorldManagerService`, `SectorLoaderService`, `WorldGeneratorService`, `WorldStateService`.
-  - **Summary**: Manages a hybrid world of static and procedural levels. Handles level loading, state persistence between visits, camera, and environmental effects.
-
-- **[AI System](./systems/ai-system.md)**
-  - **Covers**: `AiService`, `SquadAiService`.
-  - **Summary**: Governs enemy behavior using a strategy pattern. Features squad-based coordination, tactical roles (Support), cover-seeking, and status resistances.
-
-- **[Combat System](./systems/combat-system.md)**
-  - **Covers**: `CombatService`, `StatusEffectService`.
-  - **Summary**: Handles all damage calculations, armor penetration, individual hit-stop, status effect application, and entity death logic (loot, XP).
-
-- **[Physics & Collision System](./systems/physics-collision.md)**
-  - **Covers**: `PhysicsService`, `CollisionService`, `SpatialHashService`.
-  - **Summary**: Manages entity movement, friction, wall sliding, and efficient broad-phase collision detection using a spatial hash grid.
-
+- **[Zone & World System](./systems/world-system.md)**
+  - **Covers**: `ZoneManager`, `WorldGraph`, `SectorLoader`.
+  - **Summary**: Manages a hierarchical graph of persistent static sectors and instanced procedural dungeons.
 - **[Render System](./systems/render-system.md)**
-  - **Covers**: `RenderService` and all sub-renderers (e.g., `FloorRenderer`, `UnitRenderer`, `EffectRenderer`, `SpriteCacheService`).
-  - **Summary**: Draws everything to the canvas, handling isometric projection, z-sorting, procedural sprite rendering, and performance optimizations like caching.
-
-- **[Item & Inventory System](./systems/item-inventory-system.md)**
-  - **Covers**: `InventoryService`, `CraftingService`, `ItemGeneratorService`, `ItemAffixService`, `ShopService`, `item.models.ts`.
-  - **Summary**: Defines the item economy, including procedural loot generation, inventory/equipment management, item modification (crafting), and shop logic.
-
-- **[UI System](./systems/ui-system.md)**
-  - **Covers**: All Angular components, `UiPanelService`, `DialogueService`.
-  - **Summary**: Manages all user interface elements, from the main HUD and menus to pop-up panels (Inventory, Journal, Codex) and interactive dialogue.
+  - **Covers**: `LightingRenderer`, `StructureRenderer`, `FloorCache`.
+  - **Summary**: Handles isometric projection, Z-sorting, and the dynamic Global Illumination pass.
+- **[Combat & AI](./systems/ai-system.md)**
+  - **Covers**: `AiService`, `SquadAi`, `CombatService`.
+  - **Summary**: Governs tactical squad behaviors and the individual hit-stop combat feel.
+- **[Mobile UX](./systems/mobile-ux.md)**
+  - **Covers**: `JoystickComponent`, `HapticService`, `InputBuffer`.
+  - **Summary**: Optimization of ARPG controls for touch interfaces.

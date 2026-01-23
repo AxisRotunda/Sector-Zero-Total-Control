@@ -20,6 +20,8 @@ export class StructureRendererService {
       if (e.subType === 'BARRIER') { this.drawEnergyBarrier(ctx, e); return; }
       if (e.subType === 'CABLE') { this.drawCable(ctx, e); return; }
       if (e.subType === 'DYNAMIC_GLOW') { this.drawDynamicGlow(ctx, e); return; }
+      if (e.subType === 'BANNER') { this.drawBanner(ctx, e); return; }
+      if (e.subType === 'HOLO_SIGN') { this.drawHoloSign(ctx, e); return; }
       
       const theme = zone ? zone.theme : 'INDUSTRIAL';
       const structureType = e.subType || 'WALL';
@@ -64,7 +66,7 @@ export class StructureRendererService {
       }
 
       // --- STATIC CACHED STRUCTURES ---
-      const cacheKey = `STRUCT_${structureType}_${w}_${d}_${h}_${e.color}_${theme}_${e.locked}_${detailStyle}_v9`;
+      const cacheKey = `STRUCT_${structureType}_${w}_${d}_${h}_${e.color}_${theme}_${e.locked}_${detailStyle}_v10`;
       
       const isoBounds = this.calculateIsoBounds(w, d, h);
       const padding = 120;
@@ -99,7 +101,110 @@ export class StructureRendererService {
       ctx.drawImage(sprite, Math.floor(pos.x - anchorX), Math.floor(pos.y - anchorY)); 
   }
 
-  // --- NEW RENDERERS ---
+  // --- NEW RENDERERS: PROPAGANDA & BANNERS ---
+
+  private drawBanner(ctx: CanvasRenderingContext2D, e: Entity) {
+      const w = e.width || 60;
+      const h = e.height || 180;
+      const pos = IsoUtils.toIso(e.x, e.y, e.z || 200);
+      
+      ctx.save();
+      ctx.translate(pos.x, pos.y);
+      
+      const wind = Math.sin(Date.now() * 0.002 + e.id) * 5;
+      
+      // Banner Cloth
+      ctx.fillStyle = e.color || '#06b6d4';
+      ctx.beginPath();
+      ctx.moveTo(-w/2, 0);
+      ctx.lineTo(w/2, 0);
+      ctx.lineTo(w/2 + wind, h);
+      ctx.lineTo(0, h - 20); // Pointed bottom
+      ctx.lineTo(-w/2 + wind, h);
+      ctx.closePath();
+      ctx.fill();
+      
+      // Shadow/Fold
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(0, h-20);
+      ctx.lineTo(10 + wind, h);
+      ctx.lineTo(10, 0);
+      ctx.fill();
+
+      // Vanguard Symbol (The Eye)
+      if (e.color === '#06b6d4') { // Only on Vanguard Blue banners
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(0, 40);
+          ctx.lineTo(15, 70);
+          ctx.lineTo(-15, 70);
+          ctx.closePath();
+          ctx.stroke();
+          
+          ctx.beginPath();
+          ctx.arc(0, 58, 4, 0, Math.PI * 2);
+          ctx.stroke();
+      }
+
+      // Bar
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(-w/2 - 5, -5, w + 10, 8);
+
+      ctx.restore();
+  }
+
+  private drawHoloSign(ctx: CanvasRenderingContext2D, e: Entity) {
+      const w = e.width || 120;
+      const h = e.height || 60;
+      const pos = IsoUtils.toIso(e.x, e.y, e.z || 150);
+      
+      ctx.save();
+      ctx.translate(pos.x, pos.y);
+      
+      const flicker = Math.random() > 0.95 ? 0.2 : 1.0;
+      ctx.globalAlpha = 0.8 * flicker;
+      ctx.globalCompositeOperation = 'screen';
+      
+      // Screen Glow
+      ctx.fillStyle = e.color || '#ef4444';
+      ctx.shadowColor = e.color || '#ef4444';
+      ctx.shadowBlur = 15;
+      
+      // Isometric plane for screen
+      ctx.transform(1, -0.2, 0, 1, 0, 0); 
+      ctx.fillRect(-w/2, -h/2, w, h);
+      
+      // Scanlines
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      for(let i=0; i<h; i+=4) {
+          ctx.fillRect(-w/2, -h/2 + i, w, 2);
+      }
+      
+      // Text / Propaganda
+      if (e.data?.label) {
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = '#fff';
+          ctx.font = 'bold 20px monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          
+          // Glitch text offset
+          const offsetX = Math.random() > 0.9 ? Math.random() * 4 - 2 : 0;
+          ctx.fillText(e.data.label, offsetX, 0);
+      }
+
+      // Border
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(-w/2, -h/2, w, h);
+
+      ctx.restore();
+  }
+
+  // --- EXISTING METHODS ---
 
   private renderMaglevTrain(ctx: any, e: Entity, w: number, d: number, h: number, ax: number, ay: number) {
       ctx.translate(ax, ay);
@@ -112,11 +217,7 @@ export class StructureRendererService {
       // Front and Back faces
       const noseL = p(-halfW, -halfD + 40, 20); // Hovering
       const noseR = p(halfW, -halfD + 40, 20);
-      const tailL = p(-halfW, halfD - 40, 20);
-      const tailR = p(halfW, halfD - 40, 20);
-      
       const noseTop = p(0, -halfD, h);
-      const tailTop = p(0, halfD, h);
       
       // Main Hull Color
       const metallic = ctx.createLinearGradient(noseL.x, noseL.y, noseTop.x, noseTop.y);
@@ -162,7 +263,6 @@ export class StructureRendererService {
 
       // Glowing Strip (Windows)
       const stripZ = h * 0.6;
-      const stripH = 15;
       const winStart = p(halfW + 1, halfD, stripZ);
       const winEnd = p(halfW + 1, -halfD, stripZ);
       
@@ -226,8 +326,6 @@ export class StructureRendererService {
       ctx.translate(-ax, -ay);
   }
 
-  // --- EXISTING METHODS (Shortened for brevity, mostly unchanged logic) ---
-  
   drawFloorDecoration(ctx: CanvasRenderingContext2D, e: Entity) {
       const config = DECORATIONS[e.subType || ''] || { width: 40, depth: 40, height: 40, baseColor: '#333' };
       const w = e.width || config.width; 
@@ -266,7 +364,7 @@ export class StructureRendererService {
       ctx.restore();
   }
 
-  // ... [Animated Gate, Prismatic Monolith, & Render Prism Logic preserved] ...
+  // --- ANIMATED GATE & MONOLITH ---
   
   private drawAnimatedGate(ctx: CanvasRenderingContext2D, e: Entity, w: number, d: number, h: number, theme: string, visuals: ThemeVisuals) {
       const openness = e.openness || 0; 
@@ -493,7 +591,8 @@ export class StructureRendererService {
       ctx.restore();
   }
 
-  // --- EXISTING RENDERERS ---
+  // --- SUB-STRUCTURE RENDERERS ---
+  
   drawEnergyBarrier(ctx: CanvasRenderingContext2D, e: Entity) {
       const h = e.height || 80; const w = e.width || 100; const pos = IsoUtils.toIso(e.x, e.y, 0);
       ctx.save(); ctx.translate(pos.x, pos.y);
