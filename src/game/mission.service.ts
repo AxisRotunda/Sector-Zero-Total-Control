@@ -1,10 +1,11 @@
 
-import { Injectable, signal, computed, inject, effect } from '@angular/core';
+import { Injectable, signal, computed, inject, effect, OnDestroy } from '@angular/core';
 import { NarrativeService } from './narrative.service';
 import { EventBusService } from '../core/events/event-bus.service';
-import { GameEvents } from '../core/events/game-events';
+import { GameEvents, EnemyKillPayload, ItemCollectPayload } from '../core/events/game-events';
 import { MapService } from '../services/map.service';
 import { PlayerService } from './player/player.service';
+import { Subscription } from 'rxjs';
 
 export type MissionType = 'KILL' | 'COLLECT' | 'INTERACT' | 'TALK' | 'REACH_EXIT';
 export type MissionCategory = 'MAIN' | 'SIDE' | 'RADIANT';
@@ -29,11 +30,12 @@ export interface Mission {
 }
 
 @Injectable({ providedIn: 'root' })
-export class MissionService {
+export class MissionService implements OnDestroy {
   private narrative = inject(NarrativeService);
   private eventBus = inject(EventBusService);
   private mapService = inject(MapService);
   private player = inject(PlayerService);
+  private subscriptions: Subscription[] = [];
 
   activeMissions = signal<Mission[]>([]);
   completedMissionIds = signal<Set<string>>(new Set());
@@ -60,6 +62,16 @@ export class MissionService {
       effect(() => {
           this.updateMapMarkers();
       });
+
+      // Subscribe to events
+      this.subscriptions.push(
+          this.eventBus.on(GameEvents.ENEMY_KILLED).subscribe((p: EnemyKillPayload) => this.onEnemyKill(p.type)),
+          this.eventBus.on(GameEvents.ITEM_COLLECTED).subscribe((p: ItemCollectPayload) => this.onCollect(p.itemId))
+      );
+  }
+
+  ngOnDestroy() {
+      this.subscriptions.forEach(s => s.unsubscribe());
   }
 
   cycleTracked() {

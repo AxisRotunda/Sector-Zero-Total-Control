@@ -50,6 +50,7 @@ export class JoystickComponent {
 
   onTouchStart(e: TouchEvent) {
     e.preventDefault(); 
+    e.stopPropagation(); // Stop bubbling to prevent triggering global click logic
     const touch = e.changedTouches[0];
     
     this.isActive.set(true);
@@ -64,6 +65,7 @@ export class JoystickComponent {
 
   onTouchMove(e: TouchEvent) {
     e.preventDefault(); 
+    e.stopPropagation();
     if (!this.isActive()) return;
 
     const touch = e.changedTouches[0];
@@ -75,6 +77,7 @@ export class JoystickComponent {
 
   onTouchEnd(e: TouchEvent) {
     e.preventDefault();
+    e.stopPropagation();
     this.reset();
   }
 

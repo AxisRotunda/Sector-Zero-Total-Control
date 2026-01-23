@@ -54,6 +54,7 @@ export class EntityPoolService {
           e.aiRole = undefined;
           e.zoneId = undefined; 
           e.persistenceTag = undefined; // Reset Tag
+          if (e.hitIds) e.hitIds.clear(); // Reset Hit Memory
         },
         100 
       ));

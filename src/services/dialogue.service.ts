@@ -1,7 +1,8 @@
 
 import { Injectable, signal, inject, OnDestroy } from '@angular/core';
 import { NarrativeService } from '../game/narrative.service';
-import { PlayerService } from '../game/player/player.service';
+import { PlayerProgressionService } from '../game/player/player-progression.service';
+import { PlayerStatsService } from '../game/player/player-stats.service';
 import { MissionService } from '../game/mission.service';
 import { SoundService } from './sound.service';
 import { DialogueNode, DialogueOption, DialogueAction, Requirement, Faction } from '../models/narrative.models';
@@ -10,7 +11,8 @@ import { DIALOGUES } from '../config/narrative.config';
 @Injectable({ providedIn: 'root' })
 export class DialogueService implements OnDestroy {
   private narrative = inject(NarrativeService);
-  private player = inject(PlayerService);
+  private progression = inject(PlayerProgressionService);
+  private stats = inject(PlayerStatsService);
   private mission = inject(MissionService);
   private sound = inject(SoundService);
 
@@ -110,10 +112,10 @@ export class DialogueService implements OnDestroy {
           let met = false;
           switch (req.type) {
               case 'CREDITS':
-                  met = this.player.progression.credits() >= (req.value as number);
+                  met = this.progression.credits() >= (req.value as number);
                   break;
               case 'STAT':
-                  const stats = this.player.stats.playerStats();
+                  const stats = this.stats.playerStats();
                   const statVal = (stats as any)[req.target] || 0;
                   met = statVal >= (req.value as number);
                   break;
@@ -136,10 +138,10 @@ export class DialogueService implements OnDestroy {
       actions.forEach(act => {
           switch (act.type) {
               case 'ADD_CREDITS':
-                  this.player.progression.gainCredits(act.value as number);
+                  this.progression.gainCredits(act.value as number);
                   break;
               case 'HEAL':
-                  this.player.stats.playerHp.set(this.player.stats.playerStats().hpMax);
+                  this.stats.playerHp.set(this.stats.playerStats().hpMax);
                   break;
               case 'SET_FLAG':
                   this.narrative.setFlag(act.target!, act.value as boolean);

@@ -1,7 +1,8 @@
 
 import { Injectable, inject } from '@angular/core';
 import { Entity } from '../models/game.models';
-import { PlayerService } from '../game/player/player.service';
+import { PlayerStatsService } from '../game/player/player-stats.service';
+import { PlayerProgressionService } from '../game/player/player-progression.service';
 import { WorldService } from '../game/world/world.service';
 import { SoundService } from '../services/sound.service';
 import * as BALANCE from '../config/balance.config';
@@ -9,7 +10,6 @@ import * as CONFIG from '../config/game.config';
 import { isDestructible, isEnemy } from '../utils/type-guards';
 import { EntityPoolService } from '../services/entity-pool.service';
 import { InventoryService } from '../game/inventory.service';
-import { MissionService } from '../game/mission.service';
 import { ParticleService } from './particle.service';
 import { ItemGeneratorService } from '../services/item-generator.service';
 import { NarrativeService } from '../game/narrative.service';
@@ -21,36 +21,46 @@ import { UiPanelService } from '../services/ui-panel.service';
 
 @Injectable({ providedIn: 'root' })
 export class CombatService {
-  private player = inject(PlayerService);
+  private stats = inject(PlayerStatsService);
+  private progression = inject(PlayerProgressionService);
   private world = inject(WorldService);
   private sound = inject(SoundService);
   private entityPool = inject(EntityPoolService);
   private inventory = inject(InventoryService);
-  private mission = inject(MissionService);
   private particleService = inject(ParticleService);
   private itemGenerator = inject(ItemGeneratorService);
   private narrative = inject(NarrativeService);
   private eventBus = inject(EventBusService);
   private timeService = inject(TimeService);
   private haptic = inject(HapticService);
-  private uiService = inject(UiPanelService); // Use UiPanelService or EventBus for notification
+  private uiService = inject(UiPanelService);
 
   public processHit(hitbox: Entity, target: Entity): void {
-    // DIAGNOSTIC LOG START
+    
+    // DIAGNOSTIC LOG: Collision Death Certificate
     if (hitbox.source === 'PLAYER' && target.type === 'ENEMY') {
-        console.log('💥 Enemy Hit!', {
-            targetId: target.id,
+        console.log('💥 COLLISION DETECTED:', {
+            hitboxId: hitbox.id,
+            enemyId: target.id,
+            distance: Math.hypot(hitbox.x - target.x, hitbox.y - target.y),
+            combinedRadius: hitbox.radius + target.radius,
+            hitboxDamageProps: {
+                hp: hitbox.hp,
+                damage: (hitbox as any).damage,
+                attackPower: (hitbox as any).attackPower,
+                dmg: (hitbox as any).dmg
+            },
             enemyHPBefore: target.hp,
-            hitboxDamage: hitbox.hp,
-            resultHP: target.hp - hitbox.hp,
             isHitStunned: target.isHitStunned
         });
     }
-    // DIAGNOSTIC LOG END
 
     if (target.hitFlash > 0 || target.isHitStunned) return;
-    const playerStats = this.player.playerStats();
-    let dmg = hitbox.hp;
+    const playerStats = this.stats.playerStats();
+    
+    // ROBUST DAMAGE READING: Try all possible properties
+    let dmg = hitbox.hp || (hitbox as any).damage || (hitbox as any).attackPower || (hitbox as any).dmg || 0;
+    
     let armorMultiplier = 1;
     if (target.status.weakness) armorMultiplier = 1 - target.status.weakness.armorReduction;
     
@@ -64,7 +74,7 @@ export class CombatService {
     const isCrit = (hitbox.source === 'PLAYER' || hitbox.source === 'PSIONIC') && (Math.random() * 100 < playerStats.crit);
     if (isCrit) { 
         dmg *= BALANCE.COMBAT.CRIT_MULTIPLIER; 
-        this.player.addShake(BALANCE.SHAKE.CRIT); 
+        this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: BALANCE.SHAKE.CRIT });
         this.timeService.triggerSlowMo(100, 0.2); 
         this.haptic.impactHeavy();
     } else {
@@ -74,6 +84,15 @@ export class CombatService {
     target.hp -= dmg; target.hitFlash = 10;
     target.hitStopFrames = (isCrit || dmg > 50) ? BALANCE.ENEMY_AI.HIT_STOP_FRAMES_HEAVY : BALANCE.ENEMY_AI.HIT_STOP_FRAMES_LIGHT;
     target.isHitStunned = true;
+    
+    // Log result
+    if (hitbox.source === 'PLAYER' && target.type === 'ENEMY') {
+        console.log('✅ DAMAGE APPLIED:', {
+            damageValue: dmg,
+            enemyHPAfter: target.hp,
+            enemyStillAlive: target.hp > 0
+        });
+    }
 
     let knockback = hitbox.knockbackForce ?? BALANCE.COMBAT.KNOCKBACK_FORCE;
     const dx = target.x - hitbox.x;
@@ -127,7 +146,7 @@ export class CombatService {
     this.timeService.triggerHitStop(stopDuration);
 
     if (hitbox.source === 'PLAYER' && playerStats.lifesteal > 0) {
-        this.player.playerHp.update(h => Math.min(playerStats.hpMax, h + dmg * (playerStats.lifesteal / 100)));
+        this.stats.playerHp.update(h => Math.min(playerStats.hpMax, h + dmg * (playerStats.lifesteal / 100)));
     }
 
     this.world.spawnFloatingText(target.x, target.y - 40, Math.floor(dmg).toString(), isCrit ? '#f97316' : '#fff', isCrit ? 30 : 20);
@@ -153,12 +172,15 @@ export class CombatService {
 
       // Rewards (Skip in Training)
       if (!isTraining) {
-          this.player.gainXp(e.xpValue);
-          this.mission.onEnemyKill(e.subType || '');
+          this.progression.gainXp(e.xpValue);
+          
+          // Use EventBus instead of MissionService directly
+          this.eventBus.dispatch({ type: GameEvents.ENEMY_KILLED, payload: { type: e.subType || '' } });
+
           if (e.subType && this.narrative.discoverEntity(e.subType)) {
               this.eventBus.dispatch({ type: GameEvents.FLOATING_TEXT_SPAWN, payload: { onPlayer: true, yOffset: -120, text: "DATABASE UPDATED", color: '#06b6d4', size: 20 } });
           }
-          this.player.gainCredits(Math.floor(e.xpValue * 0.5 * (0.8 + Math.random() * 0.4)));
+          this.progression.gainCredits(Math.floor(e.xpValue * 0.5 * (0.8 + Math.random() * 0.4)));
           
           const isBoss = e.subType === 'BOSS';
           if (Math.random() < (isBoss ? 1.0 : CONFIG.LOOT_CHANCES.ENEMY_DROP)) {
@@ -234,14 +256,15 @@ export class CombatService {
   }
 
   private spawnLoot(x: number, y: number, source: 'ENEMY' | 'CRATE' | 'BOSS') {
-    const loot = this.itemGenerator.generateLoot({ level: this.player.level(), difficulty: this.world.currentZone().difficultyMult, rarityBias: source === 'BOSS' ? 0.6 : (source === 'CRATE' ? 0.2 : 0), source: source });
+    const loot = this.itemGenerator.generateLoot({ level: this.progression.level(), difficulty: this.world.currentZone().difficultyMult, rarityBias: source === 'BOSS' ? 0.6 : (source === 'CRATE' ? 0.2 : 0), source: source });
     this.dropSpecificItem(x, y, loot);
   }
 
   public destroyObject(e: Entity) {
       e.state = 'DEAD';
       if (e.subType === 'BARREL') {
-          this.sound.play('EXPLOSION'); this.player.addShake(BALANCE.SHAKE.EXPLOSION);
+          this.sound.play('EXPLOSION'); 
+          this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: BALANCE.SHAKE.EXPLOSION });
           this.particleService.addParticles({
               x: e.x, y: e.y, z: 10, color: '#ef4444', count: 30, speed: 8, size: 4, type: 'square',
               emitsLight: true // Added light emission
@@ -265,7 +288,11 @@ export class CombatService {
         if (dist < 30) {
              if(this.inventory.addItem(e.itemData!)) {
                  this.world.spawnFloatingText(player.x, player.y - 60, e.itemData?.name || 'ITEM', e.itemData?.color || '#fff', 16);
-                 this.mission.onCollect(e.itemData?.id); this.sound.play('POWERUP'); e.hp = 0;
+                 
+                 // Use EventBus instead of MissionService directly
+                 this.eventBus.dispatch({ type: GameEvents.ITEM_COLLECTED, payload: { itemId: e.itemData?.id || '' } });
+                 
+                 this.sound.play('POWERUP'); e.hp = 0;
              }
         }
     }
