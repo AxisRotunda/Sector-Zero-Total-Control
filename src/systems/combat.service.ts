@@ -36,6 +36,18 @@ export class CombatService {
   private uiService = inject(UiPanelService); // Use UiPanelService or EventBus for notification
 
   public processHit(hitbox: Entity, target: Entity): void {
+    // DIAGNOSTIC LOG START
+    if (hitbox.source === 'PLAYER' && target.type === 'ENEMY') {
+        console.log('💥 Enemy Hit!', {
+            targetId: target.id,
+            enemyHPBefore: target.hp,
+            hitboxDamage: hitbox.hp,
+            resultHP: target.hp - hitbox.hp,
+            isHitStunned: target.isHitStunned
+        });
+    }
+    // DIAGNOSTIC LOG END
+
     if (target.hitFlash > 0 || target.isHitStunned) return;
     const playerStats = this.player.playerStats();
     let dmg = hitbox.hp;

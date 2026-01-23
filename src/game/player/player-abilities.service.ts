@@ -217,6 +217,19 @@ export class PlayerAbilitiesService {
           damage += stats.damage; 
       }
 
+      // DIAGNOSTIC LOG START
+      if (isUnarmed) {
+          console.log('🥊 Spawning Unarmed Hitbox:', {
+              isUnarmed: true,
+              weaponId: weapon?.id,
+              baseDamage: weapon?.stats?.['dmg'],
+              level: this.progression.level(),
+              calculatedDamage: damage,
+              playerStats: stats
+          });
+      }
+      // DIAGNOSTIC LOG END
+
       let dmgMult = 1.0;
       const baseKb = 8;
       const kbMult = 4;
@@ -258,6 +271,10 @@ export class PlayerAbilitiesService {
       hitbox.knockbackForce = knockback;
       hitbox.status.stun = stun;
       
+      // DIAGNOSTIC LOG START
+      if (isUnarmed) console.log('✅ Hitbox spawned with HP (Damage):', hitbox.hp);
+      // DIAGNOSTIC LOG END
+
       this.world.entities.push(hitbox);
       this.haptic.impactMedium();
       
