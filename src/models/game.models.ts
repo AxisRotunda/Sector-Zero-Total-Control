@@ -51,6 +51,7 @@ export interface Entity extends Volumetric {
   xpValue: number;
   itemData?: Item;
   trail?: {x: number, y: number, alpha: number}[];
+  weaponTrail?: {x: number, y: number, angle: number, alpha: number}[]; // New: Weapon trail for swings
   status: {
       stun: number;
       slow: number;

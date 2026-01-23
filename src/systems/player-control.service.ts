@@ -16,6 +16,7 @@ import { InputBufferService } from '../services/input-buffer.service';
 import { HapticService } from '../services/haptic.service';
 import { CameraService } from '../game/camera.service';
 import { InteractionService } from '../services/interaction.service';
+import { InventoryService } from '../game/inventory.service';
 
 @Injectable({ providedIn: 'root' })
 export class PlayerControlService {
@@ -32,11 +33,15 @@ export class PlayerControlService {
     private haptic = inject(HapticService);
     private cameraService = inject(CameraService);
     private interaction = inject(InteractionService);
+    private inventory = inject(InventoryService);
 
     // Proxy signals for UI consumption
     nearbyInteractable = this.interaction.nearbyInteractable;
     activeInteractable = this.interaction.activeInteractable;
     requestedFloorChange = this.interaction.requestedFloorChange;
+
+    // Explicit Attack State Machine
+    private attackState: 'IDLE' | 'STARTUP' | 'ACTIVE' | 'RECOVERY' = 'IDLE';
 
     update(globalTime: number) {
         const player = this.world.player;
@@ -58,6 +63,9 @@ export class PlayerControlService {
 
         // Movement Physics
         if (player.state !== 'ATTACK') {
+            // Reset attack state if not attacking
+            this.attackState = 'IDLE'; 
+            
             const stats = this.playerService.playerStats();
             const prevVx = player.vx;
             const prevVy = player.vy;
@@ -112,7 +120,7 @@ export class PlayerControlService {
         }
 
         // Chaining Logic: Allow input consumption during recovery or if not attacking
-        const canInterrupt = player.state === 'ATTACK' && player.animPhase === 'recovery';
+        const canInterrupt = player.state === 'ATTACK' && this.attackState === 'RECOVERY';
         
         if (player.state !== 'ATTACK' || canInterrupt) {
             const cmd = this.inputBuffer.peekCommand();
@@ -158,13 +166,23 @@ export class PlayerControlService {
     }
 
     private updatePlayerAnimation(player: Entity) {
+        // Calculate Speed based on Weapon Stats
+        const weapon = this.inventory.equipped().weapon;
+        const weaponSpeed = weapon?.stats?.['spd'] || 1.0;
         // Faster animations for later combo steps
         const comboSpeedMult = player.comboIndex === 2 ? 0.7 : (player.comboIndex === 1 ? 0.85 : 1.0);
+        const attackSpeedStat = this.playerService.stats.playerStats().speed * 0.1; // Minor impact from Agility
         
+        const baseSpeed = 3;
+        // Formula: Higher speed stat -> Lower duration
+        const attackFrameDuration = Math.max(1, Math.floor(baseSpeed / (weaponSpeed + attackSpeedStat) * comboSpeedMult));
+
         const IDLE_FRAME_DURATION = 12; const IDLE_FRAMES = 4;
         const MOVE_FRAME_DURATION = 6; const MOVE_FRAMES = 6;
-        const ATTACK_FRAME_DURATION = Math.max(1, Math.floor(3 * comboSpeedMult)); 
-        const ATTACK_STARTUP_FRAMES = 2; const ATTACK_ACTIVE_FRAMES = 3; const ATTACK_TOTAL_FRAMES = 9;
+        
+        const ATTACK_STARTUP_FRAMES = 2; 
+        const ATTACK_ACTIVE_FRAMES = 3; 
+        const ATTACK_TOTAL_FRAMES = 9;
         
         player.animFrameTimer++;
         switch (player.state) {
@@ -179,22 +197,38 @@ export class PlayerControlService {
                 } 
                 break;
             case 'ATTACK':
-                if (player.animFrameTimer >= ATTACK_FRAME_DURATION) {
+                if (player.animFrameTimer >= attackFrameDuration) {
                     player.animFrameTimer = 0; player.animFrame++;
-                    if (player.animFrame < ATTACK_STARTUP_FRAMES) player.animPhase = 'startup';
-                    else if (player.animFrame < ATTACK_STARTUP_FRAMES + ATTACK_ACTIVE_FRAMES) {
-                        if (player.animPhase !== 'active') {
-                            this.playerService.abilities.spawnPrimaryAttackHitbox(player);
-                        }
-                        player.animPhase = 'active';
-                    } else player.animPhase = 'recovery';
                     
+                    // --- ATTACK STATE MACHINE ---
+                    
+                    // 1. Initial State
+                    if (player.animFrame === 0) {
+                        this.attackState = 'STARTUP';
+                        player.animPhase = 'startup';
+                    }
+                    
+                    // 2. Startup -> Active (Hitbox Spawn)
+                    else if (this.attackState === 'STARTUP' && player.animFrame >= ATTACK_STARTUP_FRAMES) {
+                        this.attackState = 'ACTIVE';
+                        player.animPhase = 'active';
+                        // Frame-Locked Hitbox Spawn
+                        this.playerService.abilities.spawnPrimaryAttackHitbox(player);
+                    }
+                    
+                    // 3. Active -> Recovery
+                    else if (this.attackState === 'ACTIVE' && player.animFrame >= ATTACK_STARTUP_FRAMES + ATTACK_ACTIVE_FRAMES) {
+                        this.attackState = 'RECOVERY';
+                        player.animPhase = 'recovery';
+                    }
+                    
+                    // 4. End of Animation
                     if (player.animFrame >= ATTACK_TOTAL_FRAMES) { 
                         player.state = 'IDLE'; 
                         player.animFrame = 0; 
                         player.animPhase = undefined;
-                        // Don't reset comboIndex here immediately to allow slight grace, but usually handled by AbilityService logic
-                        // Actually, if we finish animation without chaining, combo drops.
+                        this.attackState = 'IDLE';
+                        // If we didn't chain, reset combo
                         player.comboIndex = 0;
                         this.playerService.abilities.currentCombo.set(0);
                     }

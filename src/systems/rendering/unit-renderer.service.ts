@@ -5,6 +5,7 @@ import { Item } from '../../models/item.models';
 import { InventoryService } from '../../game/inventory.service';
 import { IsoUtils } from '../../utils/iso-utils';
 import { InteractionService } from '../../services/interaction.service';
+import { PlayerStatsService } from '../../game/player/player-stats.service';
 
 interface StatusIcon { type: 'poison' | 'burn' | 'stun' | 'weakness' | 'slow' | 'bleed'; timer: number; maxTimer: number; icon: string; color: string; }
 
@@ -12,6 +13,7 @@ interface StatusIcon { type: 'poison' | 'burn' | 'stun' | 'weakness' | 'slow' | 
 export class UnitRendererService {
   private inventory = inject(InventoryService);
   private interaction = inject(InteractionService);
+  private playerStats = inject(PlayerStatsService);
   
   // Reusable vectors to prevent GC thrashing in the render loop
   private _iso = { x: 0, y: 0 };
@@ -22,6 +24,27 @@ export class UnitRendererService {
   private _cos = 0;
   private _sin = 0;
 
+  // Optimization: Angle Lookup Table
+  private angleCache = new Map<number, { sin: number, cos: number }>();
+
+  constructor() {
+      // Pre-compute trig for 360 degrees in 5-degree steps
+      for (let angle = 0; angle < 360; angle += 5) {
+          const rad = angle * Math.PI / 180;
+          this.angleCache.set(angle, {
+              sin: Math.sin(rad),
+              cos: Math.cos(rad)
+          });
+      }
+  }
+
+  private getCachedTrig(rad: number) {
+      const deg = Math.round((rad * 180 / Math.PI));
+      const normalized = (deg % 360 + 360) % 360;
+      const snapped = Math.round(normalized / 5) * 5;
+      return this.angleCache.get(snapped) || { sin: Math.sin(rad), cos: Math.cos(rad) };
+  }
+
   drawHumanoid(ctx: CanvasRenderingContext2D, e: Entity) {
       const isPlayer = e.type === 'PLAYER'; 
       const isGuard = e.subType === 'GUARD'; 
@@ -31,15 +54,42 @@ export class UnitRendererService {
       const isStunned = e.status.stun > 0;
       const primaryColor = isHit ? '#ffffff' : (isGuard ? '#3b82f6' : e.color);
       
-      // Compute Trig once per entity
-      this._cos = Math.cos(e.angle);
-      this._sin = Math.sin(e.angle);
+      // Use cached trig
+      const trig = this.getCachedTrig(e.angle);
+      this._cos = trig.cos;
+      this._sin = trig.sin;
 
       // Animation State
       let rArmAngle = 0; let lArmAngle = 0; let legCycle = 0; let bodyTwist = 0; let bodyZ = 0; let headZ = 0; let rHandReach = 0;
       
       if (e.state === 'ATTACK' && isPlayer) {
           const phase = e.animPhase; const frame = e.animFrame;
+          
+          // Attack Telegraphing (Red Arc) during Startup
+          if (phase === 'startup') {
+              const reach = 80; // Approximate visual reach
+              IsoUtils.toIso(e.x, e.y, 0, this._iso);
+              ctx.save();
+              ctx.translate(this._iso.x, this._iso.y);
+              ctx.scale(1, 0.5); // Iso flattening
+              ctx.rotate(e.angle);
+              
+              ctx.globalAlpha = 0.3;
+              ctx.strokeStyle = '#ef4444';
+              ctx.lineWidth = 3;
+              ctx.beginPath();
+              ctx.arc(0, 0, reach, -Math.PI/3, Math.PI/3);
+              ctx.stroke();
+              
+              // Fill sector
+              ctx.fillStyle = 'rgba(239, 68, 68, 0.1)';
+              ctx.beginPath();
+              ctx.moveTo(0,0);
+              ctx.arc(0, 0, reach, -Math.PI/3, Math.PI/3);
+              ctx.fill();
+              ctx.restore();
+          }
+
           if (phase === 'startup') { const p = frame / 1; rArmAngle = p * (-Math.PI / 1.4); bodyTwist = p * -0.3; bodyZ = p * -2; } 
           else if (phase === 'active') { const p = (frame - 2) / 2; rArmAngle = (-Math.PI / 1.4) + p * (Math.PI / 1.4 + Math.PI / 3); bodyTwist = -0.3 + p * 0.7; rHandReach = p * 15; bodyZ = -2 + p * 2; } 
           else if (phase === 'recovery') { const p = (frame - 5) / 3; rArmAngle = (Math.PI / 3) - p * (Math.PI / 3 - Math.PI / 8); bodyTwist = 0.4 - p * 0.3; rHandReach = 15 - p * 10; bodyZ = 0; }
@@ -98,8 +148,6 @@ export class UnitRendererService {
       };
 
       // --- VISUAL INTERACTION INDICATOR ---
-      // If this unit is the active interactable target, draw a ring at feet
-      // This provides feedback in the World space, not just UI
       const activeTarget = this.interaction.activeInteractable();
       if (activeTarget && activeTarget.id === e.id) {
           IsoUtils.toIso(e.x, e.y, 0, this._iso);
@@ -136,7 +184,6 @@ export class UnitRendererService {
       const hips = legTransform(0, 0, legLen, this._iso); 
       const lExt = Math.sin(legCycle) * 10;
       
-      // Reuse _isoLeg for left foot, then right foot
       const pFootL = legTransform(5, lExt, 0, this._isoLeg);
       
       ctx.beginPath(); 
@@ -181,7 +228,6 @@ export class UnitRendererService {
       ctx.fillStyle = isHit ? '#fff' : (e.type === 'PLAYER' ? '#0ea5e9' : (isGuard ? '#93c5fd' : (isNPC ? '#e4e4e7' : '#b91c1c'))); 
       if (isCitizen) ctx.fillStyle = '#a1a1aa';
       
-      // Head bob/glitch
       if (isStunned && Math.random() > 0.7) {
           ctx.fillStyle = Math.random() > 0.5 ? '#f0f' : '#0ff';
       }
@@ -199,18 +245,19 @@ export class UnitRendererService {
       const pHandR = transformToIso(-8 + Math.sin(rArmAngle)*10, 5 + Math.cos(rArmAngle)*reach, shoulderZ - 10, this._iso);
       ctx.beginPath(); ctx.moveTo(pRShoulder.x, pRShoulder.y); ctx.lineTo(pHandR.x, pHandR.y); ctx.stroke();
 
-      if (!isNPC) { this.drawWeapon(ctx, pHandR, rArmAngle, equippedWeapon, e.angle + bodyTwist, isHit); }
+      if (!isNPC) { 
+          // Use Entity's weaponTrail storage
+          if (!e.weaponTrail) e.weaponTrail = [];
+          this.drawWeapon(ctx, pHandR, rArmAngle, equippedWeapon, e.angle + bodyTwist, isHit, e.weaponTrail, isPlayer); 
+      }
       
-      // Restore Glitch State
       if (isStunned) {
           ctx.restore();
       }
 
       this.drawStatusIndicators(ctx, e, pHead.x, pHead.y - 25);
       
-      // Health Bar
       if (e.type === 'ENEMY' && e.hp < e.maxHp) {
-          // Reuse _iso for bar position
           IsoUtils.toIso(e.x, e.y, e.z + 60, this._iso);
           ctx.fillStyle = '#000'; ctx.fillRect(this._iso.x - 15, this._iso.y, 30, 4);
           ctx.fillStyle = e.hp / e.maxHp > 0.5 ? '#22c55e' : '#ef4444'; ctx.fillRect(this._iso.x - 14, this._iso.y + 1, 28 * (e.hp/e.maxHp), 2);
@@ -220,7 +267,6 @@ export class UnitRendererService {
 
   drawNPC(ctx: CanvasRenderingContext2D, e: Entity) {
       if (e.subType === 'TRADER' || e.subType === 'MEDIC') {
-          // Reusing this._iso to avoid alloc
           IsoUtils.toIso(e.x + 20, e.y + 20, 0, this._iso);
           ctx.save(); ctx.translate(this._iso.x, this._iso.y); 
           ctx.fillStyle = '#27272a'; ctx.fillRect(-20, -20, 40, 30); 
@@ -236,7 +282,6 @@ export class UnitRendererService {
       ctx.save(); ctx.translate(this._iso.x, this._iso.y);
       let icon = '?'; if (e.subType === 'MEDIC') icon = '✚'; if (e.subType === 'TRADER') icon = '$'; if (e.subType === 'HANDLER') icon = '!';
       
-      // Make prompts bounce more noticeably to draw attention
       const bounce = Math.sin(Date.now() * 0.008) * 8; 
       ctx.translate(0, bounce - 25);
       
@@ -250,14 +295,83 @@ export class UnitRendererService {
       ctx.restore();
   }
 
-  private drawWeapon(ctx: CanvasRenderingContext2D, handPos: {x: number, y: number}, armAngle: number, item: Item | null, facingAngle: number, isHit: boolean) {
-      ctx.save(); ctx.translate(handPos.x, handPos.y);
+  private drawWeapon(ctx: CanvasRenderingContext2D, handPos: {x: number, y: number}, armAngle: number, item: Item | null, facingAngle: number, isHit: boolean, trail: any[], isPlayer: boolean) {
+      ctx.save(); 
+      ctx.translate(handPos.x, handPos.y);
       const isoRotation = Math.atan2(Math.sin(facingAngle), Math.cos(facingAngle));
-      ctx.rotate(isoRotation + armAngle);
-      if (armAngle > Math.PI/4 && item && item.shape !== 'psiBlade') { ctx.fillStyle = `${item.color}40`; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-10, 30); ctx.lineTo(20, 30); ctx.fill(); }
-      if (item && item.shape === 'psiBlade') { ctx.globalCompositeOperation = 'screen'; ctx.shadowBlur = 15; ctx.shadowColor = item.color; }
+      const rotateAngle = isoRotation + armAngle;
+      ctx.rotate(rotateAngle);
+
+      // --- WEAPON TRAIL LOGIC ---
+      if (item && armAngle > -Math.PI / 1.4 && armAngle < Math.PI / 2) {
+          // Calculate weapon tip position in screen space
+          const tipLen = 45;
+          const tipX = handPos.x + Math.cos(rotateAngle) * tipLen;
+          const tipY = handPos.y + Math.sin(rotateAngle) * tipLen;
+          
+          trail.push({ x: tipX, y: tipY, angle: rotateAngle, alpha: 0.8 });
+      } else {
+          // Clear trail if idle
+          if (trail.length > 0) trail.length = 0; // Clear without GC
+      }
+
+      // Decay trails
+      if (trail.length > 0) {
+          // Restore context to draw trails in world space
+          ctx.restore();
+          ctx.save(); // New save for trails
+          
+          const trailColor = item?.color || '#fff';
+          for (let i = trail.length - 1; i >= 0; i--) {
+              const t = trail[i];
+              t.alpha *= 0.8;
+              if (t.alpha < 0.1) {
+                  trail.splice(i, 1);
+                  continue;
+              }
+              
+              ctx.globalAlpha = t.alpha;
+              ctx.strokeStyle = trailColor;
+              ctx.lineWidth = 2;
+              ctx.beginPath();
+              // Draw line from hand (approx) to tip history
+              // Note: Hand moved, so this is an approximation connecting previous points
+              // Ideally connect point i to point i-1
+              if (i > 0) {
+                  const prev = trail[i-1];
+                  ctx.moveTo(prev.x, prev.y);
+                  ctx.lineTo(t.x, t.y);
+                  ctx.stroke();
+              }
+          }
+          ctx.restore();
+          
+          // Re-apply weapon transform
+          ctx.save();
+          ctx.translate(handPos.x, handPos.y);
+          ctx.rotate(rotateAngle);
+      }
+
+      // --- DYNAMIC PSI GLOW ---
+      if (item && item.shape === 'psiBlade') { 
+          ctx.globalCompositeOperation = 'screen'; 
+          
+          if (isPlayer) {
+              const psiEnergy = this.playerStats.psionicEnergy();
+              const maxPsi = this.playerStats.maxPsionicEnergy();
+              const ratio = psiEnergy / maxPsi;
+              
+              ctx.shadowBlur = 5 + (ratio * 20); 
+              ctx.shadowColor = `hsl(180, 100%, ${50 + ratio * 50}%)`; // Brighter when full
+          } else {
+              ctx.shadowBlur = 10; 
+              ctx.shadowColor = item.color;
+          }
+      }
+
       const color = isHit ? '#fff' : (item ? item.color : '#52525b');
       ctx.fillStyle = color; ctx.strokeStyle = '#000'; ctx.lineWidth = 1;
+      
       if (!item) { ctx.beginPath(); ctx.arc(0, 0, 4, 0, Math.PI*2); ctx.fill(); } 
       else {
           switch (item.shape) {

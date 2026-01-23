@@ -59,7 +59,13 @@ class SpatialHash {
     const startY = Math.floor((y - radius) / this.cellSize);
     const endX = Math.floor((x + radius) / this.cellSize);
     const endY = Math.floor((y + radius) / this.cellSize);
-    return this.queryInternal(startX, startY, endX, endY, zoneId);
+    const results = this.queryInternal(startX, startY, endX, endY, zoneId);
+    
+    // Strict filtering to ensure no cross-zone leakage
+    if (zoneId) {
+        return results.filter(e => e.zoneId === zoneId || !e.zoneId);
+    }
+    return results;
   }
 
   queryRect(minX: number, minY: number, maxX: number, maxY: number, zoneId?: string): Entity[] {
@@ -107,9 +113,6 @@ class SpatialHash {
         if (this.dynamicGrids.has('GLOBAL')) processGridMap(this.dynamicGrids.get('GLOBAL')!);
         if (this.staticGrids.has('GLOBAL')) processGridMap(this.staticGrids.get('GLOBAL')!);
     }
-
-    // In a "Soft Boundary" system, we might also query sibling zones here
-    // For MVP, we assume rigid query per zone unless 'GLOBAL' is used.
 
     return this.queryResult.slice(0, count);
   }

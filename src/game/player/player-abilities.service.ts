@@ -43,14 +43,22 @@ export class PlayerAbilitiesService {
     const cds = this.cooldowns();
 
     if (skill === 'PRIMARY') {
+        // NOTE: The hitbox spawning is now delegated to the PlayerControlService animation loop
+        // This function sets up the STATE for the attack.
         const canCombo = player.state === 'ATTACK' && player.animPhase === 'recovery';
         
         if (cds.primary > 0 && !canCombo) return;
         
+        // Don't increment combo here immediately for the entity prop, wait until hitbox logic needs it or just set it up.
+        // Actually, we set it up here so the animation loop knows which animation to play.
         let newComboIndex = 0;
         if (canCombo) {
             newComboIndex = (this.currentCombo() + 1) % this.MAX_COMBO;
+        } else {
+            // Reset if not chaining
+            newComboIndex = 0;
         }
+        
         this.currentCombo.set(newComboIndex);
         player.comboIndex = newComboIndex;
 
@@ -178,23 +186,30 @@ export class PlayerAbilitiesService {
 
   spawnPrimaryAttackHitbox(player: Entity) {
       const stats = this.stats.playerStats();
-      let reach = BALANCE.ABILITIES.PRIMARY_REACH_BASE + (stats.damage * BALANCE.ABILITIES.PRIMARY_REACH_DMG_SCALE);
+      const weapon = this.inventory.equipped().weapon;
+      
+      // Calculate Reach based on Item Stats
+      const baseReach = weapon?.stats?.['reach'] || 60; // Default if not present
+      const reachScale = weapon?.shape === 'psiBlade' ? 1.2 : 1.0;
+      let reach = (baseReach + (stats.damage * 0.3)) * reachScale;
+
       let dmgMult = 1.0;
-      let knockback = 5;
+      const baseKb = 8;
+      const kbMult = 4;
       let color = '#f97316';
       let stun = 0;
 
       // Combo scaling
       const combo = player.comboIndex || 0;
+      const knockback = baseKb + (combo * kbMult);
+
       if (combo === 1) {
           reach *= 1.2;
           dmgMult = 1.2;
-          knockback = 10;
           color = '#fb923c';
       } else if (combo === 2) {
           reach *= 1.5;
           dmgMult = 2.0;
-          knockback = 25;
           stun = 15;
           color = '#ea580c';
       }
@@ -218,7 +233,11 @@ export class PlayerAbilitiesService {
       hitbox.status.stun = stun;
       
       this.world.entities.push(hitbox);
-      this.haptic.impactMedium(); 
+      this.haptic.impactMedium();
+      
+      // Increment Combo AFTER spawning, for the next attack
+      player.comboIndex = (combo + 1) % this.MAX_COMBO;
+      this.currentCombo.set(player.comboIndex);
   }
 
   reset() { this.cooldowns.set({ primary: 0, secondary: 0, dash: 0, utility: 0 }); this.currentCombo.set(0); }
