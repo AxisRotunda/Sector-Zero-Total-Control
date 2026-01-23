@@ -15,10 +15,11 @@ export class ChunkManagerService {
   private chunks = new Map<string, Entity[]>();
   
   // Cache the last visible set to avoid re-aggregating every frame if camera hasn't moved much
-  private lastVisibleEntities: Entity[] = [];
+  private lastVisibleCount = 0;
   
   // Reusable buffer to avoid allocating a new Array every frame when cache misses
-  private resultBuffer: Entity[] = [];
+  // Pre-allocate to a reasonable size to avoid initial resizing
+  private resultBuffer: Entity[] = new Array(1000);
   
   private lastCheckX = -99999;
   private lastCheckY = -99999;
@@ -26,8 +27,8 @@ export class ChunkManagerService {
 
   reset() {
     this.chunks.clear();
-    this.lastVisibleEntities = [];
-    this.resultBuffer = [];
+    this.lastVisibleCount = 0;
+    // Don't clear buffer to keep allocation, just reset logical count logic
     this.lastCheckX = -99999;
   }
 
@@ -48,40 +49,40 @@ export class ChunkManagerService {
   /**
    * Returns all entities in chunks visible to the camera.
    * This is the "Culling" phase.
+   * Returns a shared buffer reference and a count. Do NOT modify the buffer.
    */
-  getVisibleStaticEntities(cam: Camera, canvasWidth: number, canvasHeight: number): Entity[] {
+  getVisibleStaticEntities(cam: Camera, canvasWidth: number, canvasHeight: number): { buffer: Entity[], count: number } {
     // Optimization: Return cached list if camera hasn't moved significantly
     const distSq = (cam.x - this.lastCheckX)**2 + (cam.y - this.lastCheckY)**2;
-    if (distSq < this.CACHE_DIST_SQ && this.lastVisibleEntities.length > 0) {
-        return this.lastVisibleEntities;
+    if (distSq < this.CACHE_DIST_SQ && this.lastVisibleCount > 0) {
+        return { buffer: this.resultBuffer, count: this.lastVisibleCount };
     }
 
     const visibleKeys = this.calculateVisibleChunkKeys(cam, canvasWidth, canvasHeight);
     
-    // Clear buffer without deallocation
-    this.resultBuffer.length = 0;
+    let count = 0;
 
     for (const key of visibleKeys) {
       const chunk = this.chunks.get(key);
       if (chunk) {
-        // Fast Array Copy
         const len = chunk.length;
+        // Ensure buffer size
+        if (count + len > this.resultBuffer.length) {
+            this.resultBuffer.length = (count + len) * 1.5;
+        }
+        
+        // Fast Array Copy
         for (let i = 0; i < len; i++) {
-            this.resultBuffer.push(chunk[i]);
+            this.resultBuffer[count++] = chunk[i];
         }
       }
     }
     
-    // Update cache
-    // We must clone the buffer to a new array for cache storage, as resultBuffer is reused
-    // However, typically the consumer (RenderService) iterates immediately.
-    // To be safe for cache logic, we slice.
-    this.lastVisibleEntities = this.resultBuffer.slice();
-    
+    this.lastVisibleCount = count;
     this.lastCheckX = cam.x;
     this.lastCheckY = cam.y;
 
-    return this.lastVisibleEntities;
+    return { buffer: this.resultBuffer, count };
   }
 
   private getChunkKey(x: number, y: number): string {

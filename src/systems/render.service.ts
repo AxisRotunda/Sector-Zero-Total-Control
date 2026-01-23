@@ -55,7 +55,9 @@ export class RenderService {
   private camCenter = { x: 0, y: 0 };
 
   private renderList: (Entity | Particle)[] = [];
-  private staticEntities: Entity[] = []; 
+  
+  // Optimization: No longer copying static entities to a local array
+  // We access the ChunkManager buffer directly
 
   init(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -149,7 +151,9 @@ export class RenderService {
     this.drawGeometry(this.renderList, zone);
 
     // 6. Occlusion / X-Ray Pass
-    this.drawOcclusion(player, this.staticEntities);
+    // We need to pass the static list source to check occlusion properly
+    const { buffer, count } = this.chunkManager.getVisibleStaticEntities(cam, w, h);
+    this.drawOcclusion(player, buffer, count);
 
     // 7. Visual Effects
     this.effectRenderer.drawGlobalEffects(this.ctx, this.renderList as Entity[], player, zone, rainDrops);
@@ -289,10 +293,11 @@ export class RenderService {
   ) {
       this.renderList.length = 0;
       
-      this.staticEntities = this.chunkManager.getVisibleStaticEntities(cam, w, h);
-      const sLen = this.staticEntities.length;
-      for (let i = 0; i < sLen; i++) {
-          this.renderList.push(this.staticEntities[i]);
+      // OPTIMIZED: Use Zero-Alloc ChunkManager API
+      const { buffer: staticBuffer, count: staticCount } = this.chunkManager.getVisibleStaticEntities(cam, w, h);
+      
+      for (let i = 0; i < staticCount; i++) {
+          this.renderList.push(staticBuffer[i]);
       }
       
       const visibleDynamic = this.spatialHash.queryRect(frustum.minX, frustum.minY, frustum.maxX, frustum.maxY, zone.id);
@@ -373,9 +378,9 @@ export class RenderService {
       }
   }
 
-  private drawOcclusion(player: Entity, staticEntities: Entity[]) {
+  private drawOcclusion(player: Entity, staticEntities: Entity[], count: number) {
       if (!this.ctx) return;
-      if (this.checkOcclusion(player, staticEntities)) {
+      if (this.checkOcclusion(player, staticEntities, count)) {
           this.ctx.save();
           this.ctx.globalAlpha = 0.3;
           this.ctx.globalCompositeOperation = 'source-over'; 
@@ -397,14 +402,13 @@ export class RenderService {
       }
   }
 
-  private checkOcclusion(player: Entity, staticEntities: Entity[]): boolean {
+  private checkOcclusion(player: Entity, staticEntities: Entity[], count: number): boolean {
       const margin = 20;
       const px = player.x;
       const py = player.y;
       const pDepth = px + py;
 
-      const len = staticEntities.length;
-      for (let i = 0; i < len; i++) {
+      for (let i = 0; i < count; i++) {
           const e = staticEntities[i];
           if ((e.type === 'WALL' || (e.type === 'DECORATION' && (e.height || 0) > 80))) {
               const eDepth = e.x + e.y;

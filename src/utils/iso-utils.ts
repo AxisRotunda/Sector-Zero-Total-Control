@@ -13,12 +13,17 @@ export const IsoUtils = {
     return out;
   },
 
-  fromIso: (screenX: number, screenY: number) => {
+  /**
+   * Converts Screen (Isometric) to World (Cartesian).
+   * @param screenX Screen X
+   * @param screenY Screen Y
+   * @param out Optional vector to store result in, avoiding allocation.
+   */
+  fromIso: (screenX: number, screenY: number, out: {x: number, y: number} = {x:0, y:0}) => {
     const y = screenY; 
     const x = screenX; 
-    return {
-      x: y + 0.5 * x,
-      y: y - 0.5 * x
-    };
+    out.x = y + 0.5 * x;
+    out.y = y - 0.5 * x;
+    return out;
   }
 };

@@ -12,6 +12,9 @@ export class LightingRendererService {
   private canvas: HTMLCanvasElement | OffscreenCanvas | null = null;
   private ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null = null;
   
+  // Sprite Optimization: Cached radial gradient image
+  private lightSprite: HTMLCanvasElement | OffscreenCanvas | null = null;
+  
   private _iso = { x: 0, y: 0 }; 
   
   // Cache for rgba strings to avoid allocation
@@ -24,13 +27,39 @@ export class LightingRendererService {
 
     if (typeof OffscreenCanvas !== 'undefined') {
       this.canvas = new OffscreenCanvas(w, h);
+      this.lightSprite = new OffscreenCanvas(256, 256);
     } else {
       this.canvas = document.createElement('canvas');
       this.canvas.width = w;
       this.canvas.height = h;
+      this.lightSprite = document.createElement('canvas');
+      this.lightSprite.width = 256;
+      this.lightSprite.height = 256;
     }
     
     this.ctx = this.canvas.getContext('2d') as any;
+    
+    // Pre-render the Light Sprite
+    this.renderLightSprite();
+  }
+
+  private renderLightSprite() {
+      if (!this.lightSprite) return;
+      const ctx = this.lightSprite.getContext('2d') as CanvasRenderingContext2D;
+      const w = this.lightSprite.width;
+      const h = this.lightSprite.height;
+      const cx = w/2;
+      const cy = h/2;
+      const radius = w/2;
+
+      // Draw standard white falloff
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+      grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+      grad.addColorStop(0.2, 'rgba(255, 255, 255, 0.8)');
+      grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, w, h);
   }
 
   resize(width: number, height: number) {
@@ -73,23 +102,34 @@ export class LightingRendererService {
     ctx.scale(cam.zoom * scale, cam.zoom * scale);
     ctx.translate(-this._iso.x, -this._iso.y);
 
-    // CUTOUTS
+    // CUTOUTS - Use destination-out to punch through darkness
+    // Optimization: Use Sprite for cutouts (much faster than gradients)
     ctx.globalCompositeOperation = 'destination-out';
 
-    this.drawRadialGradient(ctx, player.x, player.y, player.z, 350, 1.0, '#ffffff');
+    // Player cutout
+    this.drawLightSprite(ctx, player.x, player.y, player.z, 350, 1.0);
 
     const visibleLights = this.lightingService.visibleLights;
-    for (const light of visibleLights) {
-        this.drawRadialGradient(ctx, light.x, light.y, light.z || 0, light.radius, light.intensity, '#ffffff');
+    const len = visibleLights.length;
+    for (let i = 0; i < len; i++) {
+        const light = visibleLights[i];
+        this.drawLightSprite(ctx, light.x, light.y, light.z || 0, light.radius, light.intensity);
     }
 
     // --- PASS 2: EMISSIVE LIGHTS (Color) ---
     ctx.globalCompositeOperation = 'lighter'; 
 
-    for (const light of visibleLights) {
+    for (let i = 0; i < len; i++) {
+        const light = visibleLights[i];
         if (light.color === '#ffffff' || light.color === '#000000') continue; 
         
-        this.drawRadialGradient(ctx, light.x, light.y, light.z || 0, light.radius * 0.8, light.intensity * 0.6, light.color);
+        // For colored lights, we still use gradients or can tint sprites?
+        // Canvas 'lighter' blends colors additively.
+        // Drawing a sprite is still faster than creating a gradient.
+        // We can draw the sprite, but setting its color is tricky without cache.
+        // Fallback to Gradient for COLORED lights (fewer of them) or use a colored rect with mask.
+        // Gradient is acceptable here as it's a smaller subset than "all lights".
+        this.drawColoredLight(ctx, light.x, light.y, light.z || 0, light.radius * 0.8, light.intensity * 0.6, light.color);
     }
 
     ctx.restore();
@@ -106,8 +146,21 @@ export class LightingRendererService {
     mainCtx.restore();
   }
 
-  private drawRadialGradient(ctx: any, x: number, y: number, z: number, radius: number, intensity: number, color: string) {
+  private drawLightSprite(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, x: number, y: number, z: number, radius: number, intensity: number) {
+      if (!this.lightSprite) return;
       IsoUtils.toIso(x, y, z, this._iso);
+      
+      const size = radius * 2;
+      ctx.globalAlpha = intensity;
+      ctx.drawImage(this.lightSprite, this._iso.x - radius, this._iso.y - radius, size, size);
+      ctx.globalAlpha = 1.0;
+  }
+
+  private drawColoredLight(ctx: any, x: number, y: number, z: number, radius: number, intensity: number, color: string) {
+      IsoUtils.toIso(x, y, z, this._iso);
+      
+      // Optimization: Check bounds before creating gradient (Simple Culling)
+      // Though Service culls, transform might move it off screen? Service culling accounts for that.
       
       const grad = ctx.createRadialGradient(this._iso.x, this._iso.y, radius * 0.1, this._iso.x, this._iso.y, radius);
       

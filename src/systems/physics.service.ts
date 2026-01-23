@@ -130,15 +130,15 @@ export class PhysicsService {
       const { buffer, count } = this.spatialHash.queryFast(e.x, e.y, queryRadius, zoneId); 
       
       // Check Static Entities via Chunk Manager (Wall Optimization)
-      const nearbyStatic = this.chunkManager.getVisibleStaticEntities(
+      // Pass safe defaults for zoom/screen size, as physics doesn't care about culling
+      const { buffer: staticBuffer, count: staticCount } = this.chunkManager.getVisibleStaticEntities(
           { x: e.x, y: e.y, zoom: 1 } as any, 
-          200, 200 
+          1000, 1000 
       );
 
       // 1. Static Check (Walls)
-      const lenStatic = nearbyStatic.length;
-      for (let i = 0; i < lenStatic; i++) {
-          const obs = nearbyStatic[i];
+      for (let i = 0; i < staticCount; i++) {
+          const obs = staticBuffer[i];
           if (obs.type === 'WALL') {
               if (obs.locked === false) continue; 
 
