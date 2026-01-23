@@ -67,8 +67,14 @@ export const DAMAGE_TYPES = {
   // Resistances (Flat for phys, % for others)
   RESISTANCES: {
     TRASH: { physical: 0, fire: 0, cold: 0, lightning: 0, chaos: -0.25 },
-    ELITE: { physical: 10, fire: 0.2, cold: 0.2, lightning: 0.2, chaos: 0 },
-    BOSS: { physical: 50, fire: 0.4, cold: 0.4, lightning: 0.4, chaos: 0.2 }
+    ELITE: { physical: 100, fire: 0.2, cold: 0.2, lightning: 0.2, chaos: 0 },
+    BOSS: { physical: 500, fire: 0.4, cold: 0.4, lightning: 0.4, chaos: 0.2 }
+  },
+  // Level scaling parameters
+  LEVEL_SCALING: {
+    BASE_DAMAGE: 10,           // Starting damage at level 1
+    PER_LEVEL: 2.5,            // Linear scaling per level
+    QUADRATIC_FACTOR: 0.1      // Level^2 scaling (makes high level dangerous)
   }
 } as const;
 

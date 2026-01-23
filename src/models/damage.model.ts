@@ -47,6 +47,8 @@ export interface DamageConversion {
   physicalToCold?: number;
   physicalToLightning?: number;
   physicalToChaos?: number;
+  fireToCold?: number;
+  coldToFire?: number;
 }
 
 export function createEmptyDamagePacket(): DamagePacket {
@@ -74,10 +76,11 @@ export const DAMAGE_TYPE_COLORS = {
 } as const;
 
 export const RESISTANCE_CAPS = {
+  physical: 0.90, // Cap physical reduction at 90%
   fire: 0.75,
   cold: 0.75,
   lightning: 0.75,
-  chaos: 0.75
+  chaos: 0.90     // Higher cap for chaos
 } as const;
 
-export const RESISTANCE_FLOOR = -1.0; 
+export const RESISTANCE_FLOOR = -1.0;

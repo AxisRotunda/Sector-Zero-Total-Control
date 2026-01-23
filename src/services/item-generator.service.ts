@@ -1,8 +1,15 @@
+
 import { Injectable, inject } from '@angular/core';
 import { Item, ItemType, Rarity, ItemShape } from '../models/item.models';
 import { ItemAffixService } from './item-affix.service';
 import { IdGeneratorService } from '../utils/id-generator.service';
 import * as LOOT from '../config/loot.config';
+import {
+  DamagePacket,
+  Penetration,
+  DamageConversion,
+  createEmptyDamagePacket
+} from '../models/damage.model';
 
 export interface LootContext {
   level: number;
@@ -11,6 +18,7 @@ export interface LootContext {
   forceType?: ItemType;
   source?: 'ENEMY' | 'CRATE' | 'BOSS';
   luck?: number;
+  weaponType?: string; // e.g. PLASMA_RIFLE
 }
 
 @Injectable({
@@ -32,9 +40,23 @@ export class ItemGeneratorService {
     const stats: { [key: string]: number } = {};
     const scale = level * difficulty * (1 + rarityTier * 0.5);
 
+    // Base Stat Generation
     for (const key in baseStats) {
       const variance = 0.8 + Math.random() * 0.4;
       stats[key] = Math.floor(baseStats[key] * (1 + (scale * 0.15)) * variance);
+    }
+
+    // Special handling for Weapon Damage Packets
+    let damagePacket: DamagePacket | undefined;
+    let penetration: Penetration | undefined;
+    let damageConversion: DamageConversion | undefined;
+
+    if (type === 'WEAPON') {
+        damagePacket = this.generateWeaponDamage(level, context.weaponType, rarity);
+        penetration = this.rollPenetration(rarity);
+        damageConversion = this.rollConversion(rarity);
+        // Legacy stat for UI compat until fully migrated
+        stats['dmg'] = damagePacket.physical + damagePacket.fire + damagePacket.cold + damagePacket.lightning + damagePacket.chaos;
     }
 
     const baseNames: { [key in ItemType]: string } = {
@@ -68,12 +90,19 @@ export class ItemGeneratorService {
         }
     }
 
-    return {
+    // Return extended Item interface (requires update to item.models.ts or flexible typing)
+    const item: any = {
       id: this.idGenerator.generateStringId(),
       name, type, rarity, level: Math.floor(level),
       stats, color: this.getRarityColor(rarity),
       shape, stack, maxStack
     };
+
+    if (damagePacket) item.damagePacket = damagePacket;
+    if (penetration) item.penetration = penetration;
+    if (damageConversion) item.damageConversion = damageConversion;
+
+    return item;
   }
 
   private rollRarity(level: number, bias: number, source?: string): Rarity {
@@ -114,5 +143,113 @@ export class ItemGeneratorService {
   private getShapeForType(type: ItemType): ItemShape {
       const map: { [key in ItemType]: ItemShape } = { 'WEAPON': 'sword', 'ARMOR': 'shield', 'IMPLANT': 'chip', 'STIM': 'syringe', 'PSI_BLADE': 'psiBlade', 'AMULET': 'amulet', 'RING': 'ring' };
       return map[type];
+  }
+
+  /**
+   * Generates weapon damage packet based on weapon archetype.
+   */
+  private generateWeaponDamage(
+    level: number,
+    weaponType?: string,
+    rarity?: string
+  ): DamagePacket {
+    const baseDamage = 5 + (level * 3) + (level * level * 0.2);
+    const packet = createEmptyDamagePacket();
+
+    // Weapon type damage distributions
+    switch (weaponType) {
+      case 'KINETIC_RIFLE':
+        packet.physical = Math.floor(baseDamage * 1.0);
+        break;
+
+      case 'PLASMA_RIFLE':
+        packet.physical = Math.floor(baseDamage * 0.4);
+        packet.fire = Math.floor(baseDamage * 0.6);
+        break;
+
+      case 'CRYO_RIFLE':
+        packet.physical = Math.floor(baseDamage * 0.3);
+        packet.cold = Math.floor(baseDamage * 0.7);
+        break;
+
+      case 'SHOCK_RIFLE':
+        packet.physical = Math.floor(baseDamage * 0.2);
+        packet.lightning = Math.floor(baseDamage * 0.8);
+        break;
+
+      case 'VOID_RIFLE':
+        packet.physical = Math.floor(baseDamage * 0.3);
+        packet.chaos = Math.floor(baseDamage * 0.7);
+        break;
+
+      default:
+        // Hybrid weapon - random distribution
+        const roll = Math.random();
+        if (roll < 0.5) {
+          packet.physical = Math.floor(baseDamage);
+        } else {
+          packet.physical = Math.floor(baseDamage * 0.5);
+          packet.fire = Math.floor(baseDamage * 0.5);
+        }
+    }
+
+    // Rarity damage boost
+    const rarityMult = this.getRarityMultiplier(rarity);
+    packet.physical = Math.floor(packet.physical * rarityMult);
+    packet.fire = Math.floor(packet.fire * rarityMult);
+    packet.cold = Math.floor(packet.cold * rarityMult);
+    packet.lightning = Math.floor(packet.lightning * rarityMult);
+    packet.chaos = Math.floor(packet.chaos * rarityMult);
+
+    return packet;
+  }
+
+  /**
+   * Rolls for penetration modifier (rare on high-tier items).
+   */
+  private rollPenetration(rarity?: string): Penetration | undefined {
+    const chance = rarity === 'BLACK_MARKET' ? 0.5 : rarity === 'RARE' ? 0.2 : 0;
+    
+    if (Math.random() < chance) {
+      const penValue = 0.1 + (Math.random() * 0.2); // 10-30% penetration
+
+      return {
+        physical: Math.random() < 0.5 ? penValue : 0,
+        fire: Math.random() < 0.3 ? penValue : 0,
+        cold: Math.random() < 0.3 ? penValue : 0,
+        lightning: Math.random() < 0.3 ? penValue : 0,
+        chaos: Math.random() < 0.2 ? penValue : 0
+      };
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Rolls for damage conversion (very rare, unique items only).
+   */
+  private rollConversion(rarity?: string): DamageConversion | undefined {
+    if (rarity !== 'BLACK_MARKET') return undefined;
+    if (Math.random() > 0.3) return undefined;
+
+    const conversions: DamageConversion[] = [
+      { physicalToFire: 0.5 },
+      { physicalToCold: 0.5 },
+      { physicalToLightning: 0.5 },
+      { physicalToChaos: 0.3 },
+      { fireToCold: 0.4 },
+      { coldToFire: 0.4 }
+    ];
+
+    return conversions[Math.floor(Math.random() * conversions.length)];
+  }
+
+  private getRarityMultiplier(rarity?: string): number {
+    switch (rarity) {
+      case 'BLACK_MARKET': return 2.0;
+      case 'RARE': return 1.5;
+      case 'UNCOMMON': return 1.2;
+      default: return 1.0;
+    }
   }
 }

@@ -55,6 +55,7 @@ export interface Entity extends Volumetric {
   hp: number;
   maxHp: number;
   armor: number; // Legacy Physical Armor Value
+  level?: number; // Entity Level
   
   // Combat Stats (Explicit)
   damageValue?: number; // Legacy Flat Damage

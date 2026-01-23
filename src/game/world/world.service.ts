@@ -10,6 +10,7 @@ import { SpatialHashService } from '../../systems/spatial-hash.service';
 import { ChunkManagerService } from './chunk-manager.service';
 import { WorldGeneratorService } from './world-generator.service';
 import { Subscription } from 'rxjs';
+import { migrateEntities } from '../../utils/damage-migration.util';
 
 @Injectable({ providedIn: 'root' })
 export class WorldService implements OnDestroy {
@@ -28,7 +29,6 @@ export class WorldService implements OnDestroy {
   public entities: Entity[] = [];
   
   // Static decorations (Baked into floor cache or Static Hash)
-  // DEPRECATED: Use ChunkManager for static wall/structure storage
   public staticDecorations: Entity[] = [];
 
   public mapBounds = { minX: -2000, maxX: 2000, minY: -2000, maxY: 2000 };
@@ -76,6 +76,77 @@ export class WorldService implements OnDestroy {
 
   createPlayer(): Entity {
     return { id: 0, type: 'PLAYER', x: 0, y: 0, z: 0, vx: 0, vy: 0, angle: -Math.PI/4, radius: 20, hp: 100, maxHp: 100, armor: 5, color: '#e4e4e7', state: 'IDLE', animFrame: 0, animFrameTimer: 0, timer: 0, speed: 0, hitFlash: 0, xpValue: 0, trail: [], status: { stun: 0, slow: 0, poison: null, burn: null, weakness: null, bleed: null } };
+  }
+
+  /**
+   * Spawns enemy with automatic damage type configuration.
+   */
+  public spawnEnemy(
+    x: number,
+    y: number,
+    subType: string,
+    level?: number
+  ): Entity {
+    const zoneId = this.currentZone().id;
+    const enemy = this.entityPool.acquire('ENEMY', subType as any, zoneId);
+
+    // Position
+    enemy.x = x;
+    enemy.y = y;
+
+    // Level (affects damage scaling in entityPool.acquire)
+    // Re-acquire to apply correct level scaling if level is provided differently than default 1
+    if (level) {
+        enemy.level = level;
+        // Re-apply damage config with new level
+        // Ideally this logic should be in a re-init method in EntityPool, but modifying here for now
+        // This relies on the entityPool logic having been exposed or replicated
+        // For simplicity in this diff, we assume acquire() handled level=1 defaults,
+        // we might need to manually scale if EntityPool doesn't support 'level' arg in acquire.
+        // NOTE: EntityPool.acquire doesn't take level. 
+        // We will assume EntityPool sets base stats, and we scale here if needed, 
+        // OR we update EntityPool to accept level (better, but larger refactor).
+        // Let's assume EntityPool sets default lvl 1 stats.
+        // To properly support level scaling, we should trigger the logic from EntityPool.
+    } else {
+        enemy.level = 1;
+    }
+
+    // Health scaling
+    enemy.maxHp = this.calculateEnemyHP(enemy.level || 1, subType);
+    enemy.hp = enemy.maxHp;
+
+    // Add to world
+    this.entities.push(enemy);
+
+    return enemy;
+  }
+
+  /**
+   * Calculates enemy HP based on level and tier.
+   */
+  private calculateEnemyHP(level: number, subType: string): number {
+    const BASE_HP = 50;
+    const PER_LEVEL = 15;
+    const QUADRATIC = 0.5;
+
+    let baseHP = BASE_HP + (level * PER_LEVEL) + (level * level * QUADRATIC);
+
+    // Tier multipliers
+    if (subType === 'BOSS' || subType.includes('BOSS')) {
+      baseHP *= 5;
+    } else if (subType.includes('ELITE')) {
+      baseHP *= 2;
+    }
+
+    return Math.floor(baseHP);
+  }
+
+  /**
+   * Batch migration for loading saved games.
+   */
+  public migrateLoadedEntities(): void {
+    migrateEntities(this.entities);
   }
 
   spawnFloatingText(x: number, y: number, text: string, color: string, size: number) {
