@@ -13,6 +13,9 @@ export class LightingRendererService {
   private ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null = null;
   
   private _iso = { x: 0, y: 0 }; 
+  
+  // Cache for rgba strings to avoid allocation
+  private colorCache = new Map<string, string>();
 
   init(width: number, height: number) {
     const scale = RENDER_CONFIG.LIGHTING.RESOLUTION_SCALE;
@@ -58,11 +61,8 @@ export class LightingRendererService {
     const gi = this.lightingService.globalAmbient();
 
     // --- PASS 1: AMBIENT OCCLUSION (Darkness) ---
-    // Reset composite
     ctx.globalCompositeOperation = 'source-over';
     
-    // Fill with Global Ambient color/intensity
-    // We construct the rgba manually to ensure the alpha (intensity) is respected
     ctx.fillStyle = this.hexToRgba(gi.ambientColor, gi.intensity);
     ctx.fillRect(0, 0, w, h);
 
@@ -73,27 +73,22 @@ export class LightingRendererService {
     ctx.scale(cam.zoom * scale, cam.zoom * scale);
     ctx.translate(-this._iso.x, -this._iso.y);
 
-    // CUTOUTS: Remove darkness where there is "Vision"
+    // CUTOUTS
     ctx.globalCompositeOperation = 'destination-out';
 
-    // Player Vision (White light = full transparency in destination-out)
     this.drawRadialGradient(ctx, player.x, player.y, player.z, 350, 1.0, '#ffffff');
 
-    // Light Sources (Vision contribution)
     const visibleLights = this.lightingService.visibleLights;
     for (const light of visibleLights) {
-        // Draw the "hole" in the darkness
         this.drawRadialGradient(ctx, light.x, light.y, light.z || 0, light.radius, light.intensity, '#ffffff');
     }
 
     // --- PASS 2: EMISSIVE LIGHTS (Color) ---
-    // Now we add color ON TOP of the darkness/world using additive blending
-    ctx.globalCompositeOperation = 'lighter'; // Additive blending
+    ctx.globalCompositeOperation = 'lighter'; 
 
     for (const light of visibleLights) {
-        if (light.color === '#ffffff' || light.color === '#000000') continue; // Skip pure white/black in emissive pass
+        if (light.color === '#ffffff' || light.color === '#000000') continue; 
         
-        // Draw the colored glow
         this.drawRadialGradient(ctx, light.x, light.y, light.z || 0, light.radius * 0.8, light.intensity * 0.6, light.color);
     }
 
@@ -103,11 +98,9 @@ export class LightingRendererService {
     mainCtx.save();
     mainCtx.resetTransform(); 
     
-    // Upscale smooth
     mainCtx.imageSmoothingEnabled = true;
     mainCtx.imageSmoothingQuality = 'medium';
     
-    // Draw the lightmap over the game world
     mainCtx.drawImage(this.canvas, 0, 0, screenWidth, screenHeight);
     
     mainCtx.restore();
@@ -116,10 +109,8 @@ export class LightingRendererService {
   private drawRadialGradient(ctx: any, x: number, y: number, z: number, radius: number, intensity: number, color: string) {
       IsoUtils.toIso(x, y, z, this._iso);
       
-      // Create gradient from center (intense) to edge (transparent)
       const grad = ctx.createRadialGradient(this._iso.x, this._iso.y, radius * 0.1, this._iso.x, this._iso.y, radius);
       
-      // Color parsing handles hex/rgb to apply intensity to alpha
       const c = this.hexToRgba(color, intensity);
       const transparent = this.hexToRgba(color, 0);
 
@@ -133,6 +124,15 @@ export class LightingRendererService {
   }
 
   private hexToRgba(hex: string, alpha: number): string {
+      // Create cache key based on color and alpha
+      // Alpha is rounded to 2 decimals to improve cache hit rate
+      const alphaFixed = alpha.toFixed(2);
+      const key = hex + '_' + alphaFixed;
+      
+      if (this.colorCache.has(key)) {
+          return this.colorCache.get(key)!;
+      }
+
       let r = 0, g = 0, b = 0;
       if (hex.length === 4) {
           r = parseInt(hex[1] + hex[1], 16);
@@ -143,6 +143,15 @@ export class LightingRendererService {
           g = parseInt(hex.substring(3, 5), 16);
           b = parseInt(hex.substring(5, 7), 16);
       }
-      return `rgba(${r},${g},${b},${alpha})`;
+      
+      const val = `rgba(${r},${g},${b},${alphaFixed})`;
+      
+      // Limit cache size to prevent memory leak over long sessions
+      if (this.colorCache.size > 200) {
+          this.colorCache.clear();
+      }
+      
+      this.colorCache.set(key, val);
+      return val;
   }
 }

@@ -4,15 +4,16 @@ import { Entity } from '../models/game.models';
 
 class SpatialHash {
   // Map<ZoneId, Map<CellKey, Entity[]>>
-  // We partition grids by zoneId to allow overlapping coordinates in different zones (instanced dungeons)
   private dynamicGrids = new Map<string, Map<number, Entity[]>>();
   private staticGrids = new Map<string, Map<number, Entity[]>>();
   
-  private queryResult: Entity[] = [];
+  // Shared buffer for queries to avoid allocation
+  public queryResult: Entity[] = [];
   private queryIdCounter = 0;
   
   constructor(public cellSize: number) {
-      this.queryResult.length = 2000; 
+      // Pre-allocate a large buffer
+      this.queryResult = new Array(2000);
   }
 
   private getKey(x: number, y: number): number { return ((x & 0xFFFF) << 16) | (y & 0xFFFF); }
@@ -54,21 +55,42 @@ class SpatialHash {
     }
   }
   
+  /**
+   * Standard query returning a new Array (Legacy/Safe)
+   */
   query(x: number, y: number, radius: number, zoneId?: string): Entity[] {
+    const count = this.performQuery(x, y, radius, zoneId);
+    return this.queryResult.slice(0, count);
+  }
+
+  /**
+   * Zero-allocation query. Returns direct reference to shared buffer.
+   * WARNING: Data in buffer is valid only until next query call.
+   */
+  queryFast(x: number, y: number, radius: number, zoneId?: string): { buffer: Entity[], count: number } {
+      const count = this.performQuery(x, y, radius, zoneId);
+      return { buffer: this.queryResult, count };
+  }
+
+  queryRect(minX: number, minY: number, maxX: number, maxY: number, zoneId?: string): Entity[] {
+    const count = this.performQueryRect(minX, minY, maxX, maxY, zoneId);
+    return this.queryResult.slice(0, count);
+  }
+
+  queryRectFast(minX: number, minY: number, maxX: number, maxY: number, zoneId?: string): { buffer: Entity[], count: number } {
+      const count = this.performQueryRect(minX, minY, maxX, maxY, zoneId);
+      return { buffer: this.queryResult, count };
+  }
+
+  private performQuery(x: number, y: number, radius: number, zoneId?: string): number {
     const startX = Math.floor((x - radius) / this.cellSize);
     const startY = Math.floor((y - radius) / this.cellSize);
     const endX = Math.floor((x + radius) / this.cellSize);
     const endY = Math.floor((y + radius) / this.cellSize);
-    const results = this.queryInternal(startX, startY, endX, endY, zoneId);
-    
-    // Strict filtering to ensure no cross-zone leakage
-    if (zoneId) {
-        return results.filter(e => e.zoneId === zoneId || !e.zoneId);
-    }
-    return results;
+    return this.queryInternal(startX, startY, endX, endY, zoneId);
   }
 
-  queryRect(minX: number, minY: number, maxX: number, maxY: number, zoneId?: string): Entity[] {
+  private performQueryRect(minX: number, minY: number, maxX: number, maxY: number, zoneId?: string): number {
     const startX = Math.floor(minX / this.cellSize);
     const startY = Math.floor(minY / this.cellSize);
     const endX = Math.floor(maxX / this.cellSize);
@@ -76,11 +98,13 @@ class SpatialHash {
     return this.queryInternal(startX, startY, endX, endY, zoneId);
   }
 
-  private queryInternal(startX: number, startY: number, endX: number, endY: number, targetZoneId?: string): Entity[] {
+  private queryInternal(startX: number, startY: number, endX: number, endY: number, targetZoneId?: string): number {
     this.queryIdCounter++;
     let count = 0;
 
-    // Helper to process a specific grid map
+    // Expand buffer if needed (rare)
+    if (this.queryResult.length < 2000) this.queryResult.length = 2000;
+
     const processGridMap = (gridMap: Map<number, Entity[]>) => {
         for (let j = startY; j <= endY; j++) {
             for (let i = startX; i <= endX; i++) {
@@ -92,8 +116,16 @@ class SpatialHash {
                         const e = cell[k];
                         if (e.lastQueryId !== this.queryIdCounter) {
                             e.lastQueryId = this.queryIdCounter;
-                            if (count < this.queryResult.length) {
-                                this.queryResult[count++] = e;
+                            
+                            // Specific filtering logic can go here if needed
+                            // For now, filtering happens in return or check
+                            if ((!targetZoneId || e.zoneId === targetZoneId || !e.zoneId)) {
+                                if (count >= this.queryResult.length) {
+                                    this.queryResult.push(e);
+                                } else {
+                                    this.queryResult[count] = e;
+                                }
+                                count++;
                             }
                         }
                     }
@@ -102,19 +134,17 @@ class SpatialHash {
         }
     };
 
-    // Process specified zone
     if (targetZoneId) {
         if (this.dynamicGrids.has(targetZoneId)) processGridMap(this.dynamicGrids.get(targetZoneId)!);
         if (this.staticGrids.has(targetZoneId)) processGridMap(this.staticGrids.get(targetZoneId)!);
     } 
     
-    // Always process 'GLOBAL' zone (shared entities) if it exists
     if (targetZoneId !== 'GLOBAL') {
         if (this.dynamicGrids.has('GLOBAL')) processGridMap(this.dynamicGrids.get('GLOBAL')!);
         if (this.staticGrids.has('GLOBAL')) processGridMap(this.staticGrids.get('GLOBAL')!);
     }
 
-    return this.queryResult.slice(0, count);
+    return count;
   }
 }
 
@@ -134,7 +164,13 @@ export class SpatialHashService {
   
   query(x: number, y: number, radius: number, zoneId?: string): Entity[] { return this.hash.query(x, y, radius, zoneId); }
   
+  queryFast(x: number, y: number, radius: number, zoneId?: string) { return this.hash.queryFast(x, y, radius, zoneId); }
+
   queryRect(minX: number, minY: number, maxX: number, maxY: number, zoneId?: string): Entity[] {
       return this.hash.queryRect(minX, minY, maxX, maxY, zoneId);
+  }
+
+  queryRectFast(minX: number, minY: number, maxX: number, maxY: number, zoneId?: string) {
+      return this.hash.queryRectFast(minX, minY, maxX, maxY, zoneId);
   }
 }

@@ -15,9 +15,9 @@ export class PhysicsService {
 
   // Optimization constants
   private readonly SPATIAL_BUFFER_RATIO = 1.5;
-  private readonly COLLISION_QUERY_RATIO = 1.5; // Proportional buffer for collision checks
+  private readonly COLLISION_QUERY_RATIO = 1.5; 
   private readonly MIN_SEPARATION_FORCE = 0.01;
-  private readonly MAX_SEPARATION_NEIGHBORS = 6; // Cap neighbors for O(1) local avoidance cost
+  private readonly MAX_SEPARATION_NEIGHBORS = 6; 
 
   public updateEntityPhysics(e: Entity, stats?: { speed: number }, inputVec?: { x: number, y: number }): boolean {
     const ACCELERATION = 2.0; 
@@ -39,16 +39,18 @@ export class PhysicsService {
         }
     }
 
-    // 1.5 Separation / Steering Behaviors
+    // 1.5 Separation / Steering Behaviors (Zero-Alloc)
     if ((e.type === 'ENEMY' || e.type === 'PLAYER') && e.state !== 'DEAD') {
         const zoneId = this.world.currentZone().id;
-        // Optimization: Use proportional buffer instead of hardcoded +20/+50
         const queryRadius = e.radius * this.SPATIAL_BUFFER_RATIO;
-        const neighbors = this.spatialHash.query(e.x, e.y, queryRadius, zoneId);
+        
+        // Use Fast Query
+        const { buffer, count } = this.spatialHash.queryFast(e.x, e.y, queryRadius, zoneId);
         
         let processedNeighbors = 0;
 
-        for (const n of neighbors) {
+        for (let i = 0; i < count; i++) {
+            const n = buffer[i];
             if (processedNeighbors >= this.MAX_SEPARATION_NEIGHBORS) break;
             if (n.id === e.id || n.state === 'DEAD' || n.type === 'WALL' || n.type === 'DECORATION' || n.type === 'PICKUP') continue;
             
@@ -63,7 +65,6 @@ export class PhysicsService {
                 const px = (e.x - n.x) * pushStrength * force;
                 const py = (e.y - n.y) * pushStrength * force;
                 
-                // Optimization: Early exit for negligible forces
                 if (Math.abs(px) < this.MIN_SEPARATION_FORCE && Math.abs(py) < this.MIN_SEPARATION_FORCE) continue;
 
                 e.vx += px;
@@ -82,7 +83,7 @@ export class PhysicsService {
     const isMoving = Math.abs(e.vx) > 0.1 || Math.abs(e.vy) > 0.1;
     if (!isMoving) return false;
 
-    // 3. Sub-stepping for Collision Stability & Wall Sliding
+    // 3. Sub-stepping
     const r = e.radius || 20;
     const speed = Math.hypot(e.vx, e.vy);
     const steps = Math.ceil(speed / (r * 0.5));
@@ -123,16 +124,15 @@ export class PhysicsService {
       const radius = e.radius || 20;
       const zoneId = this.world.currentZone().id;
       
-      // Optimization: Dynamic query buffer based on entity size
       const queryRadius = radius * this.COLLISION_QUERY_RATIO;
       
-      // Check Dynamic Entities via Spatial Hash
-      const nearbyDynamic = this.spatialHash.query(e.x, e.y, queryRadius, zoneId); 
+      // Use Fast Query for Dynamic
+      const { buffer, count } = this.spatialHash.queryFast(e.x, e.y, queryRadius, zoneId); 
       
-      // Check Static Entities via Chunk Manager
+      // Check Static Entities via Chunk Manager (Wall Optimization)
       const nearbyStatic = this.chunkManager.getVisibleStaticEntities(
           { x: e.x, y: e.y, zoom: 1 } as any, 
-          200, 200 // Small query window
+          200, 200 
       );
 
       // 1. Static Check (Walls)
@@ -140,14 +140,11 @@ export class PhysicsService {
       for (let i = 0; i < lenStatic; i++) {
           const obs = nearbyStatic[i];
           if (obs.type === 'WALL') {
-              if (obs.locked === false) continue; // Skip open doors
+              if (obs.locked === false) continue; 
 
-              // Dimensions: Priority to Depth (Y-axis in collision/render)
-              // Standardized Logic: Explicit Depth > Explicit Width > Default 40
               const colW = obs.width || 40;
               const colD = obs.depth ?? (obs.width || 40);
 
-              // AABB vs Circle
               const halfW = colW / 2;
               const halfD = colD / 2;
               
@@ -164,10 +161,9 @@ export class PhysicsService {
           }
       }
 
-      // 2. Dynamic Check (Destructibles)
-      const lenDynamic = nearbyDynamic.length;
-      for (let i = 0; i < lenDynamic; i++) {
-          const obs = nearbyDynamic[i];
+      // 2. Dynamic Check (Destructibles) via Buffer
+      for (let i = 0; i < count; i++) {
+          const obs = buffer[i];
           if (obs.id === e.id) continue;
           
           if (isDestructible(obs) && obs.state !== 'DEAD') {

@@ -65,14 +65,19 @@ export class AiService {
   }
 
   private updateSeekCover(enemy: Entity, player: Entity, dist: number, angle: number) {
-      const walls = this.spatialHash.query(enemy.x, enemy.y, BALANCE.ENEMY_AI.COVER_SEEK_DISTANCE, enemy.zoneId);
+      // Use queryFast
+      const { buffer, count } = this.spatialHash.queryFast(enemy.x, enemy.y, BALANCE.ENEMY_AI.COVER_SEEK_DISTANCE, enemy.zoneId);
+      
       let bestCover: Entity | null = null; let bestDist = Infinity;
-      for (const w of walls) {
+      
+      for (let i = 0; i < count; i++) {
+          const w = buffer[i];
           if (w.type === 'WALL') {
               const d = Math.hypot(w.x - enemy.x, w.y - enemy.y);
               if (d < bestDist) { bestDist = d; bestCover = w; }
           }
       }
+
       if (bestCover) {
           const anglePlayerToWall = Math.atan2(bestCover.y - player.y, bestCover.x - player.x);
           const coverX = bestCover.x + Math.cos(anglePlayerToWall) * 60; const coverY = bestCover.y + Math.sin(anglePlayerToWall) * 60;
@@ -110,7 +115,6 @@ export class AiService {
   private checkMeleeAttack(enemy: Entity, player: Entity, dist: number, angle: number) {
       if (dist < player.radius + enemy.radius) {
          let damage = (enemy.equipment?.weapon?.stats['dmg'] || 8) * this.world.currentZone().difficultyMult;
-         // Apply Combat Pipeline
          this.combat.applyDirectDamage(enemy, player, damage);
          enemy.vx -= Math.cos(angle) * 15; enemy.vy -= Math.sin(angle) * 15;
      }
@@ -143,18 +147,15 @@ export class AiService {
             enemy.timer = 0; this.sound.play('SHOOT');
             let damage = 40 * this.world.currentZone().difficultyMult;
             
-            // Pass zoneId to projectile
             const projectile = this.entityPool.acquire('HITBOX', undefined, enemy.zoneId);
             projectile.source = 'ENEMY'; projectile.x = enemy.x; projectile.y = enemy.y; projectile.z = 10;
             projectile.vx = Math.cos(angle) * 15; projectile.vy = Math.sin(angle) * 15;
             projectile.angle = angle; projectile.radius = 8; 
             
-            // New strict damage prop
             projectile.damageValue = damage; 
             
             projectile.color = '#a855f7'; projectile.state = 'ATTACK'; projectile.timer = 60;
             
-            // Pass weakness if present
             if (enemy.status.weakness) {
                 projectile.status.weakness = { ...enemy.status.weakness };
             }
