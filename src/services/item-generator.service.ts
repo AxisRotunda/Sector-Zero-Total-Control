@@ -105,6 +105,58 @@ export class ItemGeneratorService {
     return item;
   }
 
+  generateTestWeapon(archetype: string): Item {
+      const level = 5;
+      const stats: any = { dmg: 0, crit: 5 };
+      const packet = createEmptyDamagePacket();
+      let name = 'Test Weapon';
+      let color = '#fff';
+
+      switch(archetype) {
+          case 'PLASMA':
+              name = 'Sim-Plasma Rifle';
+              packet.fire = 30;
+              stats.dmg = 30;
+              color = '#f97316';
+              break;
+          case 'CRYO':
+              name = 'Sim-Cryo Emitter';
+              packet.cold = 30;
+              stats.dmg = 30;
+              color = '#3b82f6';
+              break;
+          case 'VOID':
+              name = 'Sim-Void Blade';
+              packet.chaos = 35;
+              stats.dmg = 35;
+              color = '#a855f7';
+              break;
+          case 'KINETIC':
+          default:
+              name = 'Sim-Kinetic Driver';
+              packet.physical = 30;
+              stats.dmg = 30;
+              stats.armorPen = 20; // 20% pen
+              color = '#a1a1aa';
+              break;
+      }
+
+      return {
+          id: `TEST_${Date.now()}`,
+          name,
+          type: 'WEAPON',
+          shape: 'sword',
+          rarity: 'RARE',
+          level,
+          stats,
+          color,
+          stack: 1,
+          maxStack: 1,
+          damagePacket: packet,
+          penetration: archetype === 'KINETIC' ? { physical: 0.2, fire:0, cold:0, lightning:0, chaos:0 } : undefined
+      };
+  }
+
   private rollRarity(level: number, bias: number, source?: string): Rarity {
     let weights = { ...LOOT.RARITY_WEIGHTS };
     const effectiveBias = bias + (source === 'BOSS' ? 0.5 : 0);

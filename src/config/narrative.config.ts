@@ -112,6 +112,11 @@ export const ZONE_LORE: Record<string, ZoneLore> = {
 };
 
 export const ENTITY_LORE: Record<string, EntityLore> = {
+    'DUMMY': {
+        id: 'DUMMY', name: 'Training Construct', type: 'OBJECT',
+        description: 'A hardened data-block used for ballistics testing. It registers pain but does not scream.',
+        stats: { hp: 'Infinite', threat: 'LOW' }
+    },
     'GRUNT': {
         id: 'GRUNT', name: 'Security Enforcer', type: 'ENEMY',
         description: 'Standard-issue corporate security. Mass-produced bio-shells with limited cognition.',
@@ -447,26 +452,45 @@ export const DIALOGUES: Record<string, DialogueNode> = {
         options: [{ text: 'Disengage.', nextId: undefined }]
     },
 
-    // --- OTHER ---
-    'generic_guard': { id: 'generic_guard', speaker: 'Vanguard Unit', factionId: 'VANGUARD', text: "Move along, Operative. Perimeter is secure.", options: [{ text: "Acknowledged.", nextId: undefined }] },
-    'prisoner_bark': { id: 'prisoner_bark', speaker: 'Detained Citizen', factionId: 'REMNANT', mood: 'AFRAID', text: "I didn't do anything! I just had a high bio-reading! Please, tell them I'm clean!", options: [{ text: "Not my problem.", nextId: undefined }] },
-    'refugee_context': { id: 'refugee_context', speaker: 'Displaced Citizen', text: "We came from Sector 9... the ash storms got too bad. Then the machines... they just stopped recognizing us as human.", options: [{ text: 'Stay safe.', nextId: undefined }] },
-    'citizen_bark': { id: 'citizen_bark', speaker: 'Refugee', text: "We've been waiting for processing for three days... water rations are gone.", options: [{ text: "Move along.", nextId: undefined }] },
-    
-    // Training Terminal (Existing)
+    // --- EXPANDED TRAINING & ARMORY ---
     'training_terminal': {
         id: 'training_terminal', speaker: 'SYSTEM', factionId: 'VANGUARD', mood: 'DIGITAL',
-        text: '>> NEURAL SIMULATION CHAMBER v4.12\n>> SELECT COMBAT PROTOCOL',
+        text: '>> NEURAL SIMULATION CHAMBER v5.0\n>> WELCOME, OPERATIVE.\n>> SELECT MODULE:',
         options: [
-          { text: '[TRIAL_01: GRUNT SUPPRESSION]', nextId: 'confirm_trial_01' },
-          { text: '[TRIAL_02: STALKER ENGAGEMENT]', nextId: 'confirm_trial_02', reqs: [{ type: 'FLAG', target: 'TRAINING_LVL1_COMPLETE', value: true }] },
-          { text: '[RESET SIMULATION]', nextId: 'reset_confirm', reqs: [{ type: 'FLAG', target: 'TRAINING_ACTIVE', value: true }] },
+          { text: '[ARMORY]', nextId: 'training_armory' },
+          { text: '[COMBAT TRIALS]', nextId: 'training_combat' },
+          { text: '[RESET ROOM]', nextId: 'reset_confirm', style: 'AGGRESSIVE', reqs: [{ type: 'FLAG', target: 'TRAINING_ACTIVE', value: true }] },
           { text: '[EXIT]', nextId: undefined }
         ]
     },
-    'confirm_trial_01': { id: 'confirm_trial_01', speaker: 'SYSTEM', mood: 'DIGITAL', text: '>> INITIALIZING HOSTILE MEMORY ECHOES\n>> 6x GRUNT UNITS LOADING...', options: [{ text: '[COMMENCE]', nextId: 'in_progress', actions: [{ type: 'SET_FLAG', target: 'TRAINING_LVL1_ACTIVE', value: true }, { type: 'SET_FLAG', target: 'TRAINING_ACTIVE', value: true }] }, { text: '[ABORT]', nextId: 'training_terminal' }] },
-    'confirm_trial_02': { id: 'confirm_trial_02', speaker: 'SYSTEM', mood: 'DIGITAL', text: '>> INITIALIZING ADVANCED PROTOCOLS\n>> 2x STALKER UNITS LOADING...', options: [{ text: '[COMMENCE]', nextId: 'in_progress', actions: [{ type: 'SET_FLAG', target: 'TRAINING_LVL2_ACTIVE', value: true }, { type: 'SET_FLAG', target: 'TRAINING_ACTIVE', value: true }] }, { text: '[ABORT]', nextId: 'training_terminal' }] },
-    'reset_confirm': { id: 'reset_confirm', speaker: 'SYSTEM', mood: 'DIGITAL', text: '>> WARNING: RESETTING WILL PURGE ACTIVE ENTITIES\n>> CONFIRM ACTION?', options: [{ text: '[CONFIRM RESET]', nextId: 'training_terminal', actions: [{ type: 'SET_FLAG', target: 'TRAINING_ACTIVE', value: false }, { type: 'SET_FLAG', target: 'TRAINING_LVL1_ACTIVE', value: false }, { type: 'SET_FLAG', target: 'TRAINING_LVL2_ACTIVE', value: false }, { type: 'SET_FLAG', target: 'RESET_ZONE_ENTITIES', value: true }] }, { text: '[CANCEL]', nextId: 'training_terminal' }] },
-    'in_progress': { id: 'in_progress', speaker: 'SYSTEM', mood: 'DIGITAL', text: '>> SIMULATION RUNNING\n>> TERMINATE ALL HOSTILES TO PROCEED', options: [{ text: '[ACKNOWLEDGE]', nextId: undefined }] },
-    'generic': { id: 'generic', speaker: 'Unknown', text: "...", options: [{ text: "Leave", nextId: undefined }] }
+    'training_armory': {
+        id: 'training_armory', speaker: 'SYSTEM', mood: 'DIGITAL',
+        text: '>> VANGUARD ARMORY DATABASE ACCESSED.\n>> SELECT WEAPON PATTERN FOR MATERIALIZATION:',
+        options: [
+            { text: '[KINETIC] Standard Rifle', nextId: 'training_armory', actions: [{type: 'GIVE_ITEM', target: 'TEST_KINETIC'}] },
+            { text: '[PLASMA] Thermal Caster', nextId: 'training_armory', actions: [{type: 'GIVE_ITEM', target: 'TEST_PLASMA'}] },
+            { text: '[CRYO] Zero Emitter', nextId: 'training_armory', actions: [{type: 'GIVE_ITEM', target: 'TEST_CRYO'}] },
+            { text: '[VOID] Chaos Blade', nextId: 'training_armory', actions: [{type: 'GIVE_ITEM', target: 'TEST_VOID'}] },
+            { text: '<< BACK', nextId: 'training_terminal' }
+        ]
+    },
+    'training_combat': {
+        id: 'training_combat', speaker: 'SYSTEM', mood: 'DIGITAL',
+        text: '>> SELECT THREAT PROFILE:',
+        options: [
+            { text: '[TARGET DUMMY] (No Threat)', nextId: 'training_combat', actions: [{type: 'SET_FLAG', target: 'TRAINING_SPAWN_DUMMY', value: true}, {type: 'SET_FLAG', target: 'TRAINING_ACTIVE', value: true}] },
+            { text: '[GRUNT WAVE] (Swarm)', nextId: 'training_combat', actions: [{type: 'SET_FLAG', target: 'TRAINING_SPAWN_GRUNT', value: true}, {type: 'SET_FLAG', target: 'TRAINING_ACTIVE', value: true}] },
+            { text: '[HEAVY UNIT] (Armor Test)', nextId: 'training_combat', actions: [{type: 'SET_FLAG', target: 'TRAINING_SPAWN_HEAVY', value: true}, {type: 'SET_FLAG', target: 'TRAINING_ACTIVE', value: true}] },
+            { text: '<< BACK', nextId: 'training_terminal' }
+        ]
+    },
+    'reset_confirm': { id: 'reset_confirm', speaker: 'SYSTEM', mood: 'DIGITAL', text: '>> WARNING: RESETTING WILL PURGE ACTIVE ENTITIES\n>> CONFIRM ACTION?', options: [{ text: '[CONFIRM RESET]', nextId: 'training_terminal', actions: [{ type: 'SET_FLAG', target: 'TRAINING_ACTIVE', value: false }, { type: 'SET_FLAG', target: 'RESET_ZONE_ENTITIES', value: true }] }, { text: '[CANCEL]', nextId: 'training_terminal' }] },
+
+    'generic': { id: 'generic', speaker: 'Unknown', text: "...", options: [{ text: "Leave", nextId: undefined }] },
+    
+    // NPC BARKS
+    'prisoner_bark': { id: 'prisoner_bark', speaker: 'Detained Citizen', factionId: 'REMNANT', mood: 'AFRAID', text: "I didn't do anything! I just had a high bio-reading! Please, tell them I'm clean!", options: [{ text: "Not my problem.", nextId: undefined }] },
+    'refugee_context': { id: 'refugee_context', speaker: 'Displaced Citizen', text: "We came from Sector 9... the ash storms got too bad. Then the machines... they just stopped recognizing us as human.", options: [{ text: 'Stay safe.', nextId: undefined }] },
+    'citizen_bark': { id: 'citizen_bark', speaker: 'Refugee', text: "We've been waiting for processing for three days... water rations are gone.", options: [{ text: "Move along.", nextId: undefined }] },
+    'generic_guard': { id: 'generic_guard', speaker: 'Vanguard Unit', factionId: 'VANGUARD', text: "Move along, Operative. Perimeter is secure.", options: [{ text: "Acknowledged.", nextId: undefined }] }
 };

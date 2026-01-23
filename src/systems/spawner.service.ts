@@ -19,20 +19,43 @@ export class SpawnerService {
 
   updateSpawner(s: Entity) {
       // Check Narrative Trigger (for training zones)
-      if (s.data?.triggerFlag && !this.narrative.getFlag(s.data.triggerFlag)) {
-          return;
+      let oneShot = false;
+      if (s.data?.triggerFlag) {
+          if (!this.narrative.getFlag(s.data.triggerFlag)) {
+              return;
+          }
+          // If flag is true, we proceed to spawn
+          // If it is a "One-Shot" spawner (indicated by data), we turn the flag off immediately
+          // Default behavior is to keep spawning while flag is true, unless we enforce consumption here.
+          // For training room buttons, we WANT consumption.
+          oneShot = true; 
       }
 
       if (!s.spawnedIds) s.spawnedIds = [];
+      
+      // Cleanup dead children
       s.spawnedIds = s.spawnedIds.filter(id => { const child = this.world.entities.find(e => e.id === id); return child && child.state !== 'DEAD'; });
+      
       if (s.timer > 0) s.timer--;
       else {
           const max = s.spawnMax || 1;
+          // If oneShot is active, we ignore the max cap if we want to allow user to spam buttons, 
+          // OR we respect it. For training, let's respect it but reset timer instantly.
+          
           if (s.spawnedIds.length < max) {
               const squadId = this.idGenerator.generateNumericId();
               const batchSize = Math.min(3, max - s.spawnedIds.length);
+              
               for(let i=0; i<batchSize; i++) this.spawnFrom(s, squadId, i, batchSize);
+              
               s.timer = s.spawnCooldown || 600;
+
+              // CONSUME FLAG
+              if (oneShot && s.data?.triggerFlag) {
+                  this.narrative.setFlag(s.data.triggerFlag, false);
+                  // Reset timer so it can happen again immediately if flag set again
+                  s.timer = 0; 
+              }
           }
       }
   }
@@ -51,6 +74,13 @@ export class SpawnerService {
       if (subType === 'HEAVY') { stats = { hp: 150 * difficulty, speed: 1.5, radius: 35, color: '#f59e0b', xpValue: 90 * difficulty, armor: 15 * difficulty }; aggro = 400; equipmentChance = 0.5; statusResistances = { stun: 0.5, poison: 1.2 }; }
       if (subType === 'BOSS') { stats = { hp: 400 * difficulty, speed: 4.5, radius: 30, color: '#dc2626', xpValue: 300 * difficulty, armor: 30 * difficulty }; aggro = 500; equipmentChance = 1.0; statusResistances = { stun: 0.2, burn: 0.5 }; }
       if (subType === 'GRUNT') { stats = { hp: 40 * difficulty, speed: 2.0, radius: 18, color: '#a1a1aa', xpValue: 20 * difficulty }; }
+      
+      // Training Dummy
+      if (subType === 'DUMMY') {
+          stats = { hp: 10000, speed: 0, radius: 30, color: '#cbd5e1', xpValue: 0, armor: 5 };
+          aggro = 0;
+          equipmentChance = 0;
+      }
 
       // CRITICAL: Inherit zone ID from spawner
       const enemy = this.entityPool.acquire('ENEMY', subType, spawner.zoneId);
@@ -59,7 +89,10 @@ export class SpawnerService {
       enemy.x = spawner.x + Math.cos(angle) * dist; enemy.y = spawner.y + Math.sin(angle) * dist; enemy.homeX = spawner.x; enemy.homeY = spawner.y;
       enemy.aggroRadius = aggro; enemy.maxHp = stats.hp!; enemy.hp = stats.hp!; enemy.attackTimer = Math.random() * 100; enemy.statusResistances = statusResistances;
       
-      if (total > 1) {
+      // Override for Dummy
+      if (subType === 'DUMMY') {
+          enemy.aiRole = 'SUPPORT'; // Passive
+      } else if (total > 1) {
           enemy.squadId = squadId; this.squadAi.registerMember(enemy);
           if (index === 0 && Math.random() > 0.7 && subType !== 'BOSS') { enemy.aiRole = 'SUPPORT'; enemy.color = '#34d399'; } else enemy.aiRole = 'ATTACKER';
       }

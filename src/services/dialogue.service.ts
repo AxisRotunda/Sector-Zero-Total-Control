@@ -9,6 +9,8 @@ import { DialogueNode, DialogueOption, DialogueAction, Requirement, Faction } fr
 import { DIALOGUES } from '../config/narrative.config';
 import { EventBusService } from '../core/events/event-bus.service';
 import { GameEvents } from '../core/events/game-events';
+import { InventoryService } from '../game/inventory.service';
+import { ItemGeneratorService } from './item-generator.service';
 
 @Injectable({ providedIn: 'root' })
 export class DialogueService implements OnDestroy {
@@ -18,6 +20,8 @@ export class DialogueService implements OnDestroy {
   private mission = inject(MissionService);
   private sound = inject(SoundService);
   private eventBus = inject(EventBusService);
+  private inventory = inject(InventoryService);
+  private itemGen = inject(ItemGeneratorService);
 
   activeDialogue = signal<DialogueNode | null>(null);
   visibleText = signal('');
@@ -165,6 +169,22 @@ export class DialogueService implements OnDestroy {
                           payload: { onPlayer: true, yOffset: -120, text: "DATA LOG ACQUIRED", color: '#fbbf24', size: 24 } 
                       });
                   }
+                  break;
+              case 'GIVE_ITEM':
+                  // Special handling for test items in simulation
+                  if (act.target && act.target.startsWith('TEST_')) {
+                      const weaponType = act.target.replace('TEST_', '');
+                      const item = this.itemGen.generateTestWeapon(weaponType);
+                      if (this.inventory.addItem(item)) {
+                          this.eventBus.dispatch({
+                              type: GameEvents.FLOATING_TEXT_SPAWN,
+                              payload: { onPlayer: true, yOffset: -60, text: `ITEM ACQUIRED: ${item.name}`, color: '#22c55e', size: 20 }
+                          });
+                      }
+                  }
+                  break;
+              case 'REMOVE_ITEM':
+                  // Not fully implemented yet, but placeholder
                   break;
           }
       });
