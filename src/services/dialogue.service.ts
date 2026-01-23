@@ -7,6 +7,8 @@ import { MissionService } from '../game/mission.service';
 import { SoundService } from './sound.service';
 import { DialogueNode, DialogueOption, DialogueAction, Requirement, Faction } from '../models/narrative.models';
 import { DIALOGUES } from '../config/narrative.config';
+import { EventBusService } from '../core/events/event-bus.service';
+import { GameEvents } from '../core/events/game-events';
 
 @Injectable({ providedIn: 'root' })
 export class DialogueService implements OnDestroy {
@@ -15,6 +17,7 @@ export class DialogueService implements OnDestroy {
   private stats = inject(PlayerStatsService);
   private mission = inject(MissionService);
   private sound = inject(SoundService);
+  private eventBus = inject(EventBusService);
 
   activeDialogue = signal<DialogueNode | null>(null);
   visibleText = signal('');
@@ -154,6 +157,14 @@ export class DialogueService implements OnDestroy {
                   break;
               case 'COMPLETE_MISSION':
                   this.mission.completeQuest(act.target!);
+                  break;
+              case 'UNLOCK_LORE':
+                  if (this.narrative.discoverLog(act.target!)) {
+                      this.eventBus.dispatch({ 
+                          type: GameEvents.FLOATING_TEXT_SPAWN, 
+                          payload: { onPlayer: true, yOffset: -120, text: "DATA LOG ACQUIRED", color: '#fbbf24', size: 24 } 
+                      });
+                  }
                   break;
           }
       });

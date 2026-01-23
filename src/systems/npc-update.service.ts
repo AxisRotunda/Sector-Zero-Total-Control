@@ -21,7 +21,6 @@ export class NpcUpdateService {
       t.angle += 0.02;
       if (t.attackTimer <= 0) {
           const range = 500;
-          // FIX: Query using turret's zoneId
           const targets = this.spatialHash.query(t.x, t.y, range, t.zoneId);
           let nearest: Entity | null = null; let minDist = range;
           for (const target of targets) {
@@ -33,7 +32,6 @@ export class NpcUpdateService {
           if (nearest) {
               const angle = Math.atan2(nearest.y - t.y, nearest.x - t.x);
               t.angle = angle; 
-              // Pass zoneId to projectile
               const proj = this.entityPool.acquire('HITBOX', undefined, t.zoneId);
               proj.source = 'DEFENSE'; proj.x = t.x + Math.cos(angle) * 30; proj.y = t.y + Math.sin(angle) * 30; proj.z = 30; 
               proj.vx = Math.cos(angle) * 12; proj.vy = Math.sin(angle) * 12; proj.radius = 5; proj.hp = 50; proj.timer = 60; proj.color = '#38bdf8'; 
@@ -45,20 +43,17 @@ export class NpcUpdateService {
   updateGuard(g: Entity) {
       this.checkPlayerAwareness(g);
       
-      // Initialize Bark Timer if missing
       if (!g.data) g.data = {};
       if (g.data.nextBarkTime === undefined) {
           g.data.nextBarkTime = Date.now() + 5000 + Math.random() * 15000;
       }
 
-      // Bark Logic
       if (Date.now() > g.data.nextBarkTime) {
           const text = GUARD_BARKS[Math.floor(Math.random() * GUARD_BARKS.length)];
-          // Only bark if player is roughly nearby (culling)
           if (Math.hypot(this.world.player.x - g.x, this.world.player.y - g.y) < 600) {
               this.world.spawnFloatingText(g.x, g.y - 60, text, '#a5f3fc', 12);
           }
-          g.data.nextBarkTime = Date.now() + 15000 + Math.random() * 30000; // Reset timer
+          g.data.nextBarkTime = Date.now() + 15000 + Math.random() * 30000; 
       }
 
       if (!g.patrolPoints || g.patrolPoints.length === 0) {
@@ -75,7 +70,6 @@ export class NpcUpdateService {
       
       if (dist < 10) { 
           g.patrolIndex = (g.patrolIndex + 1) % g.patrolPoints.length; 
-          // Pause briefly at patrol point
           g.timer = 120 + Math.floor(Math.random() * 60); 
           g.state = 'IDLE';
           return; 
@@ -89,7 +83,6 @@ export class NpcUpdateService {
 
       g.state = 'MOVE';
       const angle = Math.atan2(dy, dx);
-      // Smooth turn
       const angleDiff = angle - g.angle;
       let d = angleDiff;
       while (d < -Math.PI) d += Math.PI * 2;
@@ -109,49 +102,48 @@ export class NpcUpdateService {
   }
 
   updateCitizen(c: Entity) {
+      // NEW BEHAVIOR: 'COWER' - Tremble in place
+      if (c.data?.behavior === 'COWER') {
+          // Jitter
+          c.angle += (Math.random() - 0.5) * 0.1;
+          this.animateIdle(c);
+          return;
+      }
+
       this.checkPlayerAwareness(c);
 
-      // Wander Logic
       if (c.timer && c.timer > 0) {
           c.timer--;
-          // While waiting, just breathe
           this.animateIdle(c);
       } else {
-          // If no target, pick one within wanderRadius of home
           if (c.targetX === undefined || c.targetY === undefined) {
-              const r = c.aggroRadius || 100; // Reuse aggroRadius as wander radius if not set explicit
+              const r = c.aggroRadius || 100;
               const homeX = c.homeX || c.x;
               const homeY = c.homeY || c.y;
-              
               const angle = Math.random() * Math.PI * 2;
               const dist = Math.random() * r;
-              
               c.targetX = homeX + Math.cos(angle) * dist;
               c.targetY = homeY + Math.sin(angle) * dist;
               c.state = 'MOVE';
           }
 
-          // Move to target
           const dx = c.targetX - c.x;
           const dy = c.targetY - c.y;
           const dist = Math.hypot(dx, dy);
 
           if (dist < 5) {
-              // Arrived
               c.targetX = undefined;
               c.targetY = undefined;
               c.state = 'IDLE';
-              c.timer = 120 + Math.random() * 200; // Pause for 2-5 seconds
+              c.timer = 120 + Math.random() * 200; 
           } else {
               const angle = Math.atan2(dy, dx);
-              // Smooth rotation
               let diff = angle - c.angle;
-              // Normalize angle
               while (diff < -Math.PI) diff += Math.PI * 2;
               while (diff > Math.PI) diff -= Math.PI * 2;
               c.angle += diff * 0.1;
 
-              const speed = 0.3; // Slow walk
+              const speed = 0.3; 
               c.vx += Math.cos(angle) * speed;
               c.vy += Math.sin(angle) * speed;
               this.animateMove(c);
@@ -161,33 +153,20 @@ export class NpcUpdateService {
 
   updateOverseerEye(eye: Entity) {
       const player = this.world.player;
-      
-      // Floating motion
       eye.z = (eye.data?.z || 150) + Math.sin(Date.now() * 0.002) * 10;
-
-      // Track player
       if (eye.data?.trackPlayer) {
-          // Calculate angle to player
           eye.angle = Math.atan2(player.y - eye.y, player.x - eye.x);
       }
-
-      // Reactive Color Logic
       const playerHP = player.hp / player.maxHp;
-      let targetColor = '#10b981'; // Green (Safe)
-
+      let targetColor = '#10b981';
       if (playerHP < 0.25) {
-          targetColor = '#ef4444'; // Red (Critical)
-          // Alarmed spin if player near death
+          targetColor = '#ef4444';
           eye.angle += (Date.now() % 1000) / 100; 
       } else if (playerHP < 0.6) {
-          targetColor = '#f59e0b'; // Yellow (Warning)
+          targetColor = '#f59e0b';
       }
-
-      // Very simple color lerp via hex is hard, just snapping for now or using property
       eye.color = targetColor;
   }
-
-  // --- Helpers ---
 
   private checkPlayerAwareness(npc: Entity) {
       const player = this.world.player;
@@ -195,14 +174,12 @@ export class NpcUpdateService {
       const dy = player.y - npc.y;
       const dist = Math.hypot(dx, dy);
       
-      // Look at player if close but not *too* close (personal space)
       if (dist < 150 && dist > 30) {
           const targetAngle = Math.atan2(dy, dx);
           let diff = targetAngle - npc.angle;
           while (diff < -Math.PI) diff += Math.PI * 2;
           while (diff > Math.PI) diff -= Math.PI * 2;
           
-          // Only turn head/body if moving slowly or idle
           if (Math.abs(npc.vx) < 0.1 && Math.abs(npc.vy) < 0.1) {
               npc.angle += diff * 0.1;
           }

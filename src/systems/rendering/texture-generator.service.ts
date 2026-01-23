@@ -23,7 +23,8 @@ export class TextureGeneratorService {
       grid: null,
       void: null,
       circuit: null,
-      plating: null
+      plating: null,
+      ice: null
   };
 
   constructor() {
@@ -109,6 +110,20 @@ export class TextureGeneratorService {
           ctx.beginPath(); ctx.arc(90, 90, 2, 0, Math.PI*2); ctx.fill();
           ctx.beginPath(); ctx.arc(10, 90, 2, 0, Math.PI*2); ctx.fill();
       });
+
+      // 8. Ice (Frozen) - Jagged Cracks
+      this.patterns.ice = createPattern(128, 128, (ctx) => {
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+          ctx.lineWidth = 1;
+          for (let i = 0; i < 5; i++) {
+              ctx.beginPath();
+              ctx.moveTo(Math.random() * 128, Math.random() * 128);
+              ctx.lineTo(Math.random() * 128, Math.random() * 128);
+              ctx.stroke();
+          }
+          ctx.fillStyle = 'rgba(200, 230, 255, 0.1)';
+          ctx.fillRect(0, 0, 128, 128);
+      });
   }
 
   getThemeVisuals(theme: ZoneTheme = 'INDUSTRIAL'): ThemeVisuals {
@@ -123,6 +138,8 @@ export class TextureGeneratorService {
               return { ...base, pattern: this.patterns.moss, edgeColor: '#052e16', erosionLevel: 0.4, rimLight: false, detailStyle: 'NONE' };
           case 'VOID':
               return { ...base, pattern: this.patterns.void, edgeColor: '#581c87', erosionLevel: 0.3, rimLight: true, overlayColor: '#a855f7', detailStyle: 'GLYPHS' };
+          case 'FROZEN':
+              return { ...base, pattern: this.patterns.ice, edgeColor: '#bae6fd', erosionLevel: 0.2, rimLight: true, fillOpacity: 0.8, detailStyle: 'PLATING', overlayColor: '#e0f2fe' };
           case 'INDUSTRIAL':
           default:
               return { ...base, pattern: this.patterns.plating, edgeColor: '#000000', erosionLevel: 0.1, rimLight: false, detailStyle: 'RIVETS' };

@@ -35,10 +35,13 @@ export const BUILDING_PREFABS = {
     
     medBay: (x: number, y: number): PrefabResult => ({
         walls: [
-            { x: x, y: y, w: 20, h: 300, height: 120, color: '#52525b' }
+            { x: x, y: y, w: 20, h: 300, height: 120, color: '#52525b' },
+            // Physical base for the Holo Table to prevent walking through
+            { x: x + 50, y: y - 50, w: 80, h: 80, height: 20, color: '#18181b' }
         ],
         entities: [
-            { type: 'NPC', subType: 'MEDIC', x: x + 50, y: y, data: { dialogueId: 'medic_intro', color: '#ef4444' } },
+            // Updated dialogue ID to new tree
+            { type: 'NPC', subType: 'MEDIC', x: x + 50, y: y, data: { dialogueId: 'medic_hub_main', color: '#ef4444' } },
             { type: 'DECORATION', subType: 'HOLO_TABLE', x: x + 50, y: y - 50, data: { color: '#ef4444' } },
             // Added Sign
             { type: 'DECORATION', subType: 'NEON', x: x - 20, y: y - 100, data: { z: 120, color: '#ef4444', width: 40, height: 40 } }
@@ -71,6 +74,14 @@ export const BUILDING_PREFABS = {
 
     gateAssembly: (y: number, locked: boolean = true): PrefabResult => {
         const D = STRUCTURE_DIMENSIONS;
+        
+        // Detention Cell Parameters
+        const cellX = 300;
+        const cellY = y - 150;
+        const cellSize = 120;
+        const cellHalf = cellSize / 2;
+        const wallThick = 20;
+
         const walls: PrefabWall[] = [
             // Left Flank
             { x: -D.GATE_FLANK_OFFSET, y: y, w: D.GATE_FLANK_WIDTH, h: D.WALL_THICKNESS, height: 350, color: '#18181b' },
@@ -83,21 +94,51 @@ export const BUILDING_PREFABS = {
             { x: D.PILLAR_OFFSET_X, y: y, w: D.PILLAR_WIDTH, h: D.PILLAR_DEPTH, height: D.PILLAR_HEIGHT, color: '#52525b', type: 'PILLAR' },
             
             // Guard Booth (Left of Gate)
-            // Back Wall
             { x: -200, y: y - 160, w: 100, h: 20, height: 200, color: '#3f3f46' },
-            // Left Side
             { x: -260, y: y - 120, w: 20, h: 100, height: 200, color: '#3f3f46' },
-            // Right Side
             { x: -140, y: y - 120, w: 20, h: 100, height: 200, color: '#3f3f46' },
-            // Roof Slab (data.z indicates vertical offset for future advanced renderers)
-            { x: -200, y: y - 120, w: 140, h: 100, height: 20, color: '#27272a', data: { z: 200 } } 
+            { x: -200, y: y - 120, w: 140, h: 100, height: 20, color: '#27272a', data: { z: 200 } },
+
+            // Detention Cell (Right of Gate) - Redesigned for Maximum Visibility
+            // Back Walls (North and West) - Keep solid/high for structure
+            { x: cellX, y: cellY - cellHalf, w: cellSize, h: wallThick, height: 180, color: '#3f3f46' }, // North
+            { x: cellX - cellHalf, y: cellY, w: wallThick, h: cellSize, height: 180, color: '#3f3f46' }, // West
+
+            // Front Walls (South and East) - Convert to Low Curbs (Height 20) to prevent occlusion
+            // These walls provide collision but don't block the camera view.
+            { x: cellX, y: cellY + cellHalf, w: cellSize, h: wallThick, height: 20, color: '#27272a' }, // South (Curb)
+            { x: cellX + cellHalf, y: cellY, w: wallThick, h: cellSize, height: 20, color: '#27272a' }, // East (Curb)
         ];
 
         const entities: ZoneEntityDef[] = [
+            // Gate Guard
             { type: 'NPC', subType: 'GUARD', x: -200, y: y - 120, data: { dialogueId: 'gate_locked', color: '#3b82f6' } },
-            // Added Lights on gate pillars
+            // Lights
             { type: 'DECORATION', subType: 'NEON', x: -D.PILLAR_OFFSET_X, y: y, data: { z: 300, color: '#ef4444', width: 20, height: 40 } },
-            { type: 'DECORATION', subType: 'NEON', x: D.PILLAR_OFFSET_X, y: y, data: { z: 300, color: '#ef4444', width: 20, height: 40 } }
+            { type: 'DECORATION', subType: 'NEON', x: D.PILLAR_OFFSET_X, y: y, data: { z: 300, color: '#ef4444', width: 20, height: 40 } },
+            
+            // Visual Barriers (Transparent Forcefields on South and East faces)
+            { 
+                type: 'DECORATION', subType: 'BARRIER', 
+                x: cellX, y: cellY + cellHalf, 
+                data: { width: cellSize, height: 150, color: '#ef4444' } 
+            },
+            { 
+                type: 'DECORATION', subType: 'BARRIER', 
+                x: cellX + cellHalf, y: cellY, 
+                data: { width: 20, depth: cellSize, height: 150, color: '#ef4444' } // Rotated via depth
+            },
+
+            // Prisoner (Inside Cell) - Positioned centrally
+            { type: 'NPC', subType: 'CITIZEN', x: cellX, y: cellY, data: { dialogueId: 'prisoner_bark', behavior: 'COWER', color: '#f97316' } },
+            
+            // Refugees Queue (Waiting for entry)
+            { type: 'NPC', subType: 'CITIZEN', x: -350, y: y - 200, data: { dialogueId: 'refugee_context', behavior: 'COWER', color: '#a1a1aa' } },
+            { type: 'NPC', subType: 'CITIZEN', x: -320, y: y - 250, data: { dialogueId: 'citizen_bark', behavior: 'IDLE', color: '#a1a1aa' } },
+            
+            // Refugee Luggage / Supplies
+            { type: 'DECORATION', subType: 'CRATE', x: -370, y: y - 210, data: { width: 20, height: 15, depth: 10, color: '#854d0e' } },
+            { type: 'DECORATION', subType: 'CRATE', x: -300, y: y - 260, data: { width: 25, height: 20, depth: 15, color: '#3f3f46' } }
         ];
 
         return { walls, entities };
@@ -109,33 +150,15 @@ export const BUILDING_PREFABS = {
         
         return {
             walls: [
-                // Redesigned to be a U-shaped enterable room
-                // Back Wall
                 { x: x, y: y - 170, w: 500, h: 60, height: 350, color: wallColor, type: 'TRAINING_EXTERIOR' },
-                // Left Wall
                 { x: x - 220, y: y + 30, w: 60, h: 340, height: 350, color: wallColor, type: 'TRAINING_EXTERIOR' },
-                // Right Wall
                 { x: x + 220, y: y + 30, w: 60, h: 340, height: 350, color: wallColor, type: 'TRAINING_EXTERIOR' },
-                
-                // Entrance Columns
                 { x: x - 150, y: y + 200, w: 80, h: 20, height: 350, color: wallColor },
                 { x: x + 150, y: y + 200, w: 80, h: 20, height: 350, color: wallColor },
-
-                // Interior Terminal Stand
                 { x: x, y: y - 130, w: 140, h: 20, height: 120, color: accentColor },
-                
-                // Floor Strip
-                {
-                    x: x, y: y, 
-                    w: 300, h: 10,
-                    height: 5,
-                    color: '#06b6d4',
-                    type: 'DYNAMIC_GLOW',
-                    data: { glowIntensity: 0.4, pulseSpeed: 1.5 }
-                }
+                { x: x, y: y, w: 300, h: 10, height: 5, color: '#06b6d4', type: 'DYNAMIC_GLOW', data: { glowIntensity: 0.4, pulseSpeed: 1.5 } }
             ],
             entities: [
-                // Zone transition (Inside the room)
                 {
                     type: 'INTERACTABLE',
                     subType: 'ZONE_TRANSITION',

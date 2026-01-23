@@ -55,7 +55,7 @@ export interface Requirement {
     invert?: boolean; // if true, requirement is NOT met when condition is true
 }
 
-export type ActionType = 'GIVE_ITEM' | 'REMOVE_ITEM' | 'ADD_REP' | 'SET_FLAG' | 'START_MISSION' | 'COMPLETE_MISSION' | 'ADD_CREDITS' | 'HEAL';
+export type ActionType = 'GIVE_ITEM' | 'REMOVE_ITEM' | 'ADD_REP' | 'SET_FLAG' | 'START_MISSION' | 'COMPLETE_MISSION' | 'ADD_CREDITS' | 'HEAL' | 'UNLOCK_LORE';
 export interface DialogueAction {
     type: ActionType;
     target?: string;

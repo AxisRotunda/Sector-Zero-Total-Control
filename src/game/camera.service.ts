@@ -12,6 +12,9 @@ export class CameraService {
   private input = inject(InputService);
 
   private targetZoom = RENDER_CONFIG.CAMERA.BASE_ZOOM;
+  
+  // Maximum distance the mouse can offset the camera (screen pixels approx)
+  private readonly MOUSE_PEEK_DISTANCE = 300; 
 
   // Signal for UI scaling based on zoom, useful for keeping UI elements consistent size
   // or adapting them to the view depth.
@@ -52,19 +55,30 @@ export class CameraService {
     // --- 1. Zoom-Responsive Look-Ahead ---
     // The "Eye of the Operator" projects focus forward based on velocity.
     // This projection scales inversely with zoom: when zoomed out (Tactical), we look further ahead.
-    // Formula: Gentler curve than pure inverse.
     const zoomFactor = 1.0 + (1.0 - camera.zoom) * 0.5;
     
     const lookAheadX = player.vx * config.LOOK_AHEAD_DIST * zoomFactor;
     const lookAheadY = player.vy * config.LOOK_AHEAD_DIST * zoomFactor;
     
-    const rawTargetX = player.x + lookAheadX;
-    const rawTargetY = player.y + lookAheadY;
+    let rawTargetX = player.x + lookAheadX;
+    let rawTargetY = player.y + lookAheadY;
     
+    // --- 1.5. Mouse Cursor Peeking (PC Optimization) ---
+    // Allows the player to "Look" towards the mouse cursor without moving
+    if (this.input.usingKeyboard()) {
+        const cursor = this.input.cursorRelative;
+        // Non-linear peek: Only engaging when cursor moves away from center
+        const peekX = Math.sign(cursor.x) * Math.pow(Math.abs(cursor.x), 2) * this.MOUSE_PEEK_DISTANCE;
+        const peekY = Math.sign(cursor.y) * Math.pow(Math.abs(cursor.y), 2) * this.MOUSE_PEEK_DISTANCE;
+        
+        // Scale peek by zoom level (look further when zoomed out)
+        rawTargetX += peekX / camera.zoom;
+        rawTargetY += peekY / camera.zoom;
+    }
+
     // --- 2. Soft-Clamp Bounds ---
     // We clamp the TARGET, not the camera position directly. 
     // This allows the damping (lerp) to naturally decelerate the camera as it approaches the "wall"
-    // created by the bounds, acting as a soft cushion rather than a hard stop.
     const bounds = this.world.mapBounds;
     const margin = config.BOUNDS_MARGIN;
     

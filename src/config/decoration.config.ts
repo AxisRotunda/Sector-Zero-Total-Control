@@ -38,5 +38,10 @@ export const DECORATIONS: Record<string, DecorationDef> = {
     'TRAINING_EXTERIOR': { id: 'TRAINING_EXTERIOR', width: 500, depth: 400, height: 350, baseColor: '#3f3f46', isStaticFloor: false, renderStyle: 'CUSTOM' },
     'DYNAMIC_GLOW': { id: 'DYNAMIC_GLOW', width: 100, depth: 100, height: 10, baseColor: '#fff', isStaticFloor: false, renderStyle: 'CUSTOM' },
     'NEON': { id: 'NEON', width: 60, depth: 10, height: 30, baseColor: '#fff', isStaticFloor: false, renderStyle: 'CUSTOM' },
-    'OVERSEER_EYE': { id: 'OVERSEER_EYE', width: 60, depth: 60, height: 60, baseColor: '#fff', isStaticFloor: false, renderStyle: 'CUSTOM' }
+    'OVERSEER_EYE': { id: 'OVERSEER_EYE', width: 60, depth: 60, height: 60, baseColor: '#fff', isStaticFloor: false, renderStyle: 'CUSTOM' },
+    
+    // NEW VISUALS
+    'MAGLEV_TRAIN': { id: 'MAGLEV_TRAIN', width: 800, depth: 120, height: 160, baseColor: '#0ea5e9', isStaticFloor: false, renderStyle: 'CUSTOM' },
+    'INFO_KIOSK': { id: 'INFO_KIOSK', width: 60, depth: 20, height: 100, baseColor: '#1e293b', isStaticFloor: false, renderStyle: 'CUSTOM' },
+    'BARRIER': { id: 'BARRIER', width: 20, depth: 20, height: 100, baseColor: '#ef4444', isStaticFloor: false, renderStyle: 'CUSTOM' } // Existing but ensuring definition
 };

@@ -93,6 +93,20 @@ export class EffectRendererService {
         });
         ctx.stroke(); ctx.globalAlpha = 1.0;
       }
+      
+      if (zone.weather === 'SNOW') {
+          ctx.fillStyle = '#fff';
+          ctx.globalAlpha = 0.8;
+          rainDrops.forEach(r => {
+              IsoUtils.toIso(r.x, r.y, r.z, this._pos);
+              ctx.beginPath();
+              // Small jittering snow
+              const s = (Math.sin(Date.now() * 0.01 + r.x) + 2) * 1.5;
+              ctx.arc(this._pos.x, this._pos.y, s, 0, Math.PI * 2);
+              ctx.fill();
+          });
+          ctx.globalAlpha = 1.0;
+      }
   }
 
   drawFloatingTexts(ctx: CanvasRenderingContext2D, texts: FloatingText[], cam: Camera) {

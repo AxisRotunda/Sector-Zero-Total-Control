@@ -43,6 +43,9 @@ export class InputService {
   inputVector = { x: 0, y: 0 };
   aimAngle: number | null = null;
   
+  // Normalized cursor position (-1 to 1) for camera peeking
+  cursorRelative = { x: 0, y: 0 };
+  
   usingKeyboard = signal(false);
   usingGamepad = signal(false);
   
@@ -251,6 +254,10 @@ export class InputService {
     
     const dx = mouseX - canvasCenterX;
     const dy = mouseY - canvasCenterY;
+    
+    // Calculate normalized cursor position (-1 to 1) for camera peeking
+    this.cursorRelative.x = Math.max(-1, Math.min(1, dx / (rect.width / 2)));
+    this.cursorRelative.y = Math.max(-1, Math.min(1, dy / (rect.height / 2)));
     
     this.aimAngle = Math.atan2(dy, dx);
   }

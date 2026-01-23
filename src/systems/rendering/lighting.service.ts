@@ -53,6 +53,7 @@ export class LightingService {
           case 'RESIDENTIAL': intensity = 0.95; color = '#1a0505'; break; // Very dark, neon pop
           case 'ORGANIC': intensity = 0.7; color = '#022c22'; break; // Dim, green tint
           case 'VOID': intensity = 0.95; color = '#020617'; break; // Pitch black
+          case 'FROZEN': intensity = 0.7; color = '#eff6ff'; break; // Bright, cold reflection
       }
       
       // SOCIO-POLITICAL OVERRIDE: Safe Zones (Hubs) should be well-lit to represent Order/Safety

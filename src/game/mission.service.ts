@@ -113,7 +113,7 @@ export class MissionService implements OnDestroy {
   // UPDATED COORDINATES TO MATCH HUB_ZONE (src/data/zones/hub.zone.ts)
   private questDb: Record<string, Omit<Mission, 'state'>> = {
       'MQ_01_ARRIVAL': { 
-          id: 'MQ_01_ARRIVAL', title: 'The Arrival', description: 'Contact surface handler.', category: 'MAIN', 
+          id: 'MQ_01_ARRIVAL', title: 'The Arrival', description: 'Disembark from Maglev Transport. Report to Mission Handler.', category: 'MAIN', 
           objectives: [{ 
               type: 'TALK', 
               targetId: 'HANDLER', 
@@ -121,7 +121,7 @@ export class MissionService implements OnDestroy {
               currentAmount: 0, 
               description: 'Report to Mission Handler', 
               targetZoneId: 'HUB', 
-              targetLocation: {x: -50, y: -300} // Matches HUB_ZONE static entity
+              targetLocation: {x: -50, y: -100} // Matches updated HUB_ZONE static entity
           }], 
           rewardXp: 100, rewardCredits: 50, unlocksFlag: 'ACT_I_STARTED' 
       },

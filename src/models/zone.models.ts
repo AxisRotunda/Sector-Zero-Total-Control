@@ -96,7 +96,7 @@ export interface ZoneTemplate {
   exits: ZoneExit[];
 
   environment: {
-    weather: 'NONE' | 'RAIN' | 'ASH';
+    weather: 'NONE' | 'RAIN' | 'ASH' | 'SNOW';
     lighting?: string;
     floorPattern: 'PLAIN' | 'GRID' | 'HAZARD' | 'ORGANIC' | 'HUB';
     colors: {

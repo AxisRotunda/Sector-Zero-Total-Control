@@ -1,3 +1,4 @@
+
 # World Politics & Factional Dynamics
 
 **META**
@@ -18,6 +19,12 @@ The political landscape of the late 21st century is defined by the **Fundamental
 ---
 
 ## 2. Major Political Entities
+
+### **The Directorate (The Government)**
+* **Political Model**: **Algorithmic Oligarchy**.
+* **Identity**: A shadowy council of former corporate and military executives who merged with the SYSTEM's core processing unit before the collapse. They rarely appear in person, communicating via terminals and holograms.
+* **Role**: The "brains" behind the Vanguard. They provide the funding, resources, and legality that allows the Vanguard to operate as a state military rather than a rogue militia.
+* **Current Status**: Hiding deep within the upper levels of the Citadel, protected by layers of PROXY encryption and elite Vanguard units.
 
 ### **The Vanguard Remnant (The Old Order)**
 * **Political Model**: **Military Junta / Shadow Technocracy**.

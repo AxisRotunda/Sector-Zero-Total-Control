@@ -290,6 +290,14 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       let focusY = player.y;
       let rotation = 0;
 
+      // In Isometric Projection:
+      // X Axis points Down-Right
+      // Y Axis points Down-Left
+      // "North" is Y- (Up-Right)
+      // "South" is Y+ (Down-Left)
+      // "West" is X- (Up-Left)
+      // "East" is X+ (Down-Right)
+
       if (this.mode === 'FULL') {
           zoom = this.viewZoom;
           focusX = this.viewX;
@@ -297,6 +305,10 @@ export class MapComponent implements AfterViewInit, OnDestroy {
           rotation = 0;
       } else {
           if (settings.rotateMiniMap) {
+              // Rotate map so Player Angle faces UP (-PI/2)
+              // Player Angle 0 is East (Right)
+              // To make angle 0 face Up (-PI/2), we rotate by -PI/2
+              // Map needs to rotate opposite to player
               rotation = -player.angle - Math.PI/2;
           }
       }
@@ -341,17 +353,27 @@ export class MapComponent implements AfterViewInit, OnDestroy {
               }
           }
           
-          if (e.type === 'DECORATION' && (e.subType === 'RUG' || e.subType === 'HOLO_TABLE')) {
-               this.ctx.fillStyle = zone.detailColor;
-               this.ctx.globalAlpha = 0.2;
-               if (e.width && e.height) {
-                   this.ctx.fillRect(e.x - e.width/2, e.y - e.height/2, e.width, e.height);
-               } else {
-                   this.ctx.beginPath();
-                   this.ctx.arc(e.x, e.y, 40, 0, Math.PI*2);
-                   this.ctx.fill();
+          if (e.type === 'DECORATION' && (e.subType === 'RUG' || e.subType === 'HOLO_TABLE' || e.subType === 'GRAFFITI')) {
+               // Render Labels if they exist (e.g., GRAFFITI with text data)
+               if (e.data?.label) {
+                   this.ctx.fillStyle = '#fff';
+                   this.ctx.font = `bold 32px monospace`;
+                   this.ctx.textAlign = 'center';
+                   this.ctx.save();
+                   this.ctx.translate(e.x, e.y);
+                   this.ctx.scale(1/zoom, 1/zoom);
+                   this.ctx.fillText(e.data.label, 0, 0);
+                   this.ctx.restore();
                }
-               this.ctx.globalAlpha = 1.0;
+
+               if (e.subType === 'RUG') {
+                   this.ctx.fillStyle = zone.detailColor;
+                   this.ctx.globalAlpha = 0.2;
+                   if (e.width && e.height) {
+                       this.ctx.fillRect(e.x - e.width/2, e.y - e.height/2, e.width, e.height);
+                   }
+                   this.ctx.globalAlpha = 1.0;
+               }
           }
           
           if (e.type === 'EXIT') {
@@ -443,10 +465,10 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       this.ctx.rotate(player.angle);
       
       // Field of View Cone
-      this.ctx.fillStyle = 'rgba(6, 182, 212, 0.1)';
+      this.ctx.fillStyle = 'rgba(6, 182, 212, 0.2)';
       this.ctx.beginPath();
       this.ctx.moveTo(0,0);
-      this.ctx.arc(0,0, 300, -Math.PI/6, Math.PI/6);
+      this.ctx.arc(0,0, 400, -Math.PI/4, Math.PI/4); // 90 degree cone
       this.ctx.closePath();
       this.ctx.fill();
 
@@ -466,13 +488,77 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       
       this.ctx.restore();
 
+      // RESTORE TO SCREEN SPACE FOR HUD ELEMENTS (Compass)
       this.ctx.restore();
       
+      // COMPASS RENDERER
+      this.drawCompass(w, h, rotation);
+
       // Update UI coords signal to ensure stability for template binding
       const coords = `${Math.round(player.x)}, ${Math.round(player.y)}`;
       if (this.playerCoords() !== coords) {
           this.playerCoords.set(coords);
       }
+  }
+
+  private drawCompass(w: number, h: number, rotation: number) {
+      if (!this.ctx) return;
+      const r = Math.min(w, h) * 0.4; // Radius from center to place letters
+      
+      this.ctx.save();
+      this.ctx.translate(w/2, h/2);
+      
+      // Font settings
+      this.ctx.font = 'bold 12px monospace';
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+
+      const cardinals = [
+          { text: 'N', angle: -Math.PI / 2, color: '#ef4444' }, // North (Up)
+          { text: 'E', angle: 0, color: '#fff' },               // East (Right)
+          { text: 'S', angle: Math.PI / 2, color: '#fff' },     // South (Down)
+          { text: 'W', angle: Math.PI, color: '#fff' }          // West (Left)
+      ];
+
+      // In Map Space (Cartesian): 
+      // North is Y- ( -PI/2 in Canvas coords? No, Canvas Y+ is Down. So Y- is Up. Angle -PI/2)
+      // We applied rotation to the world context earlier. 
+      // Now we are in Screen Space. 
+      // If the map rotated by `R`, then "North" on the screen is at angle `-PI/2 + R`.
+      
+      cardinals.forEach(card => {
+          // Calculate screen angle for this cardinal direction
+          // World Angle + Map Rotation
+          // Note: In our World Coords, North is Y-. West is X-.
+          // Y- is -90 deg. 
+          // World North is strictly Y-.
+          // If player rotates, map rotates opposite.
+          
+          let worldAngle = 0;
+          if (card.text === 'N') worldAngle = -Math.PI/2; // Up
+          if (card.text === 'S') worldAngle = Math.PI/2;  // Down
+          if (card.text === 'E') worldAngle = 0;          // Right
+          if (card.text === 'W') worldAngle = Math.PI;    // Left
+          
+          // Apply map rotation to the cardinal position
+          const screenAngle = worldAngle + rotation;
+          
+          const lx = Math.cos(screenAngle) * (r - 15);
+          const ly = Math.sin(screenAngle) * (r - 15);
+          
+          this.ctx!.fillStyle = card.color;
+          this.ctx!.fillText(card.text, lx, ly);
+          
+          // Draw small tick
+          const tx = Math.cos(screenAngle) * (r - 5);
+          const ty = Math.sin(screenAngle) * (r - 5);
+          
+          this.ctx!.beginPath();
+          this.ctx!.arc(tx, ty, 2, 0, Math.PI*2);
+          this.ctx!.fill();
+      });
+
+      this.ctx.restore();
   }
 
   private drawMarker(m: any, zoom: number) {
