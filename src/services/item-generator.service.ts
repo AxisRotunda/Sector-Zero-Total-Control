@@ -18,7 +18,7 @@ export interface LootContext {
   forceType?: ItemType;
   source?: 'ENEMY' | 'CRATE' | 'BOSS';
   luck?: number;
-  weaponType?: string; // e.g. PLASMA_RIFLE
+  weaponType?: string; 
 }
 
 @Injectable({
@@ -35,7 +35,19 @@ export class ItemGeneratorService {
     const rarity = this.rollRarity(level, rarityBias, context.source);
     const rarityTier = this.getRarityTier(rarity);
     const type = context.forceType || this.rollType();
-    const shape = this.getShapeForType(type);
+    
+    // Weapon Shape Logic: Now includes Guns
+    let shape = this.getShapeForType(type);
+    
+    // Randomize Weapon Shape (Melee vs Ranged)
+    if (type === 'WEAPON') {
+        const roll = Math.random();
+        if (roll < 0.4) shape = 'pistol';
+        else if (roll < 0.6) shape = 'shotgun';
+        else if (roll < 0.8) shape = 'rifle';
+        else shape = 'sword'; // Fallback / Classic
+    }
+
     const baseStats = { ...LOOT.BASE_STATS[type] };
     const stats: { [key: string]: number } = {};
     const scale = level * difficulty * (1 + rarityTier * 0.5);
@@ -46,23 +58,43 @@ export class ItemGeneratorService {
       stats[key] = Math.floor(baseStats[key] * (1 + (scale * 0.15)) * variance);
     }
 
-    // Special handling for Weapon Damage Packets
+    // Weapon Specifics
     let damagePacket: DamagePacket | undefined;
     let penetration: Penetration | undefined;
     let damageConversion: DamageConversion | undefined;
+    let projectileConfig: Item['projectile'] | undefined;
 
     if (type === 'WEAPON') {
         damagePacket = this.generateWeaponDamage(level, context.weaponType, rarity);
         penetration = this.rollPenetration(rarity);
         damageConversion = this.rollConversion(rarity);
-        // Legacy stat for UI compat until fully migrated
+        
+        // Projectile Config based on Shape
+        if (['pistol', 'rifle', 'shotgun', 'railgun'].includes(shape)) {
+            projectileConfig = this.generateProjectileConfig(shape, level);
+            // Adjust stats for ranged
+            stats['reach'] = projectileConfig.range; // UI mapping
+            // Ranged weapons might have different speed scaling
+            if (shape === 'pistol') stats['spd'] = 2.0;
+            if (shape === 'shotgun') stats['spd'] = 0.8;
+            if (shape === 'rifle') stats['spd'] = 1.5;
+        }
+
+        // Legacy stat for UI compat
         stats['dmg'] = damagePacket.physical + damagePacket.fire + damagePacket.cold + damagePacket.lightning + damagePacket.chaos;
     }
 
-    const baseNames: { [key in ItemType]: string } = {
+    // Naming
+    const baseNames: { [key: string]: string } = {
         'WEAPON': 'Baton', 'ARMOR': 'Rig', 'IMPLANT': 'Chip', 'STIM': 'Injector', 'PSI_BLADE': 'Cutter', 'AMULET': 'Talisman', 'RING': 'Band'
     };
     let coreName = baseNames[type];
+    
+    // Override Name for Guns
+    if (shape === 'pistol') coreName = 'Handcannon';
+    if (shape === 'rifle') coreName = 'Carbine';
+    if (shape === 'shotgun') coreName = 'Scattergun';
+
     const affixSlots = rarityTier === 0 ? 0 : (rarityTier === 1 ? 1 : 2);
     let prefix = null;
     let suffix = null;
@@ -90,17 +122,13 @@ export class ItemGeneratorService {
         }
     }
 
-    // Return extended Item interface (requires update to item.models.ts or flexible typing)
-    const item: any = {
+    const item: Item = {
       id: this.idGenerator.generateStringId(),
       name, type, rarity, level: Math.floor(level),
       stats, color: this.getRarityColor(rarity),
-      shape, stack, maxStack
+      shape: shape as ItemShape, stack, maxStack,
+      damagePacket, penetration, damageConversion, projectile: projectileConfig
     };
-
-    if (damagePacket) item.damagePacket = damagePacket;
-    if (penetration) item.penetration = penetration;
-    if (damageConversion) item.damageConversion = damageConversion;
 
     return item;
   }
@@ -111,50 +139,51 @@ export class ItemGeneratorService {
       const packet = createEmptyDamagePacket();
       let name = 'Test Weapon';
       let color = '#fff';
+      let shape: ItemShape = 'rifle';
+      let projectile: Item['projectile'] | undefined;
 
       switch(archetype) {
           case 'PLASMA':
               name = 'Sim-Plasma Rifle';
-              packet.fire = 30;
-              stats.dmg = 30;
-              color = '#f97316';
+              packet.fire = 30; stats.dmg = 30; color = '#f97316';
+              projectile = { speed: 12, count: 1, spread: 0, range: 60, renderType: 'PLASMA' };
+              stats.spd = 1.5;
               break;
           case 'CRYO':
               name = 'Sim-Cryo Emitter';
-              packet.cold = 30;
-              stats.dmg = 30;
-              color = '#3b82f6';
+              packet.cold = 30; stats.dmg = 30; color = '#3b82f6';
+              projectile = { speed: 15, count: 1, spread: 0, range: 60, renderType: 'BULLET' };
+              stats.spd = 2.0;
               break;
           case 'VOID':
               name = 'Sim-Void Blade';
-              packet.chaos = 35;
-              stats.dmg = 35;
-              color = '#a855f7';
+              shape = 'psiBlade'; // Melee test
+              packet.chaos = 35; stats.dmg = 35; color = '#a855f7';
               break;
           case 'KINETIC':
           default:
               name = 'Sim-Kinetic Driver';
-              packet.physical = 30;
-              stats.dmg = 30;
-              stats.armorPen = 20; // 20% pen
-              color = '#a1a1aa';
+              packet.physical = 30; stats.dmg = 30; stats.armorPen = 20; color = '#a1a1aa';
+              projectile = { speed: 25, count: 1, spread: 0.05, range: 80, renderType: 'BULLET' };
+              stats.spd = 2.5;
               break;
       }
 
       return {
           id: `TEST_${Date.now()}`,
-          name,
-          type: 'WEAPON',
-          shape: 'sword',
-          rarity: 'RARE',
-          level,
-          stats,
-          color,
-          stack: 1,
-          maxStack: 1,
-          damagePacket: packet,
-          penetration: archetype === 'KINETIC' ? { physical: 0.2, fire:0, cold:0, lightning:0, chaos:0 } : undefined
+          name, type: 'WEAPON', shape, rarity: 'RARE', level, stats, color, stack: 1, maxStack: 1,
+          damagePacket: packet, projectile
       };
+  }
+
+  private generateProjectileConfig(shape: string, level: number): Item['projectile'] {
+      switch(shape) {
+          case 'shotgun': return { speed: 20, count: 5, spread: 0.4, range: 30, renderType: 'BULLET' }; // High spread, low range
+          case 'pistol': return { speed: 22, count: 1, spread: 0.05, range: 60, renderType: 'BULLET' };
+          case 'rifle': return { speed: 25, count: 1, spread: 0.02, range: 80, renderType: 'BULLET' };
+          case 'railgun': return { speed: 40, count: 1, spread: 0, range: 120, renderType: 'RAIL' };
+          default: return { speed: 15, count: 1, spread: 0, range: 50, renderType: 'BULLET' };
+      }
   }
 
   private rollRarity(level: number, bias: number, source?: string): Rarity {
@@ -197,55 +226,20 @@ export class ItemGeneratorService {
       return map[type];
   }
 
-  /**
-   * Generates weapon damage packet based on weapon archetype.
-   */
-  private generateWeaponDamage(
-    level: number,
-    weaponType?: string,
-    rarity?: string
-  ): DamagePacket {
+  private generateWeaponDamage(level: number, weaponType?: string, rarity?: string): DamagePacket {
     const baseDamage = 5 + (level * 3) + (level * level * 0.2);
     const packet = createEmptyDamagePacket();
-
-    // Weapon type damage distributions
-    switch (weaponType) {
-      case 'KINETIC_RIFLE':
-        packet.physical = Math.floor(baseDamage * 1.0);
-        break;
-
-      case 'PLASMA_RIFLE':
-        packet.physical = Math.floor(baseDamage * 0.4);
-        packet.fire = Math.floor(baseDamage * 0.6);
-        break;
-
-      case 'CRYO_RIFLE':
-        packet.physical = Math.floor(baseDamage * 0.3);
-        packet.cold = Math.floor(baseDamage * 0.7);
-        break;
-
-      case 'SHOCK_RIFLE':
+    
+    const isEnergy = weaponType === 'PLASMA_RIFLE' || weaponType === 'VOID_RIFLE';
+    // If we passed weaponType, respect it. Otherwise random distribution.
+    
+    if (isEnergy) {
+        packet.fire = Math.floor(baseDamage * 0.8);
         packet.physical = Math.floor(baseDamage * 0.2);
-        packet.lightning = Math.floor(baseDamage * 0.8);
-        break;
-
-      case 'VOID_RIFLE':
-        packet.physical = Math.floor(baseDamage * 0.3);
-        packet.chaos = Math.floor(baseDamage * 0.7);
-        break;
-
-      default:
-        // Hybrid weapon - random distribution
-        const roll = Math.random();
-        if (roll < 0.5) {
-          packet.physical = Math.floor(baseDamage);
-        } else {
-          packet.physical = Math.floor(baseDamage * 0.5);
-          packet.fire = Math.floor(baseDamage * 0.5);
-        }
+    } else {
+        packet.physical = Math.floor(baseDamage);
     }
 
-    // Rarity damage boost
     const rarityMult = this.getRarityMultiplier(rarity);
     packet.physical = Math.floor(packet.physical * rarityMult);
     packet.fire = Math.floor(packet.fire * rarityMult);
@@ -256,52 +250,23 @@ export class ItemGeneratorService {
     return packet;
   }
 
-  /**
-   * Rolls for penetration modifier (rare on high-tier items).
-   */
   private rollPenetration(rarity?: string): Penetration | undefined {
     const chance = rarity === 'BLACK_MARKET' ? 0.5 : rarity === 'RARE' ? 0.2 : 0;
-    
     if (Math.random() < chance) {
-      const penValue = 0.1 + (Math.random() * 0.2); // 10-30% penetration
-
-      return {
-        physical: Math.random() < 0.5 ? penValue : 0,
-        fire: Math.random() < 0.3 ? penValue : 0,
-        cold: Math.random() < 0.3 ? penValue : 0,
-        lightning: Math.random() < 0.3 ? penValue : 0,
-        chaos: Math.random() < 0.2 ? penValue : 0
-      };
+      const penValue = 0.1 + (Math.random() * 0.2); 
+      return { physical: Math.random() < 0.5 ? penValue : 0, fire: 0, cold: 0, lightning: 0, chaos: 0 };
     }
-
     return undefined;
   }
 
-  /**
-   * Rolls for damage conversion (very rare, unique items only).
-   */
   private rollConversion(rarity?: string): DamageConversion | undefined {
     if (rarity !== 'BLACK_MARKET') return undefined;
     if (Math.random() > 0.3) return undefined;
-
-    const conversions: DamageConversion[] = [
-      { physicalToFire: 0.5 },
-      { physicalToCold: 0.5 },
-      { physicalToLightning: 0.5 },
-      { physicalToChaos: 0.3 },
-      { fireToCold: 0.4 },
-      { coldToFire: 0.4 }
-    ];
-
+    const conversions: DamageConversion[] = [ { physicalToFire: 0.5 }, { physicalToCold: 0.5 } ];
     return conversions[Math.floor(Math.random() * conversions.length)];
   }
 
   private getRarityMultiplier(rarity?: string): number {
-    switch (rarity) {
-      case 'BLACK_MARKET': return 2.0;
-      case 'RARE': return 1.5;
-      case 'UNCOMMON': return 1.2;
-      default: return 1.0;
-    }
+    switch (rarity) { case 'BLACK_MARKET': return 2.0; case 'RARE': return 1.5; case 'UNCOMMON': return 1.2; default: return 1.0; }
   }
 }

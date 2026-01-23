@@ -35,10 +35,56 @@ export class EffectRendererService {
   }
 
   drawHitboxIso(ctx: CanvasRenderingContext2D, e: Entity) {
+      // Check for Projectile Flag (set by PlayerAbilitiesService)
+      if (e.data?.isProjectile) {
+          this.drawProjectile(ctx, e);
+          return;
+      }
+
       IsoUtils.toIso(e.x, e.y, e.z, this._pos);
       ctx.save(); ctx.translate(this._pos.x, this._pos.y); ctx.rotate(Math.PI/4); 
       if (e.source === 'PLAYER' && e.radius < 100) { ctx.globalAlpha = 0.6; ctx.strokeStyle = e.color; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, 0, e.radius, e.angle - Math.PI/3, e.angle + Math.PI/3); ctx.stroke(); } 
       else { ctx.strokeStyle = e.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(0, 0, e.radius, e.radius * 0.5, -Math.PI/4, 0, Math.PI*2); ctx.stroke(); }
+      ctx.restore();
+  }
+
+  private drawProjectile(ctx: CanvasRenderingContext2D, e: Entity) {
+      IsoUtils.toIso(e.x, e.y, e.z, this._pos);
+      ctx.save();
+      ctx.translate(this._pos.x, this._pos.y);
+      
+      // Calculate rotation from velocity
+      // Note: vx/vy are World Cartesian. We need to project that to Screen Iso? 
+      // Or just draw line. Projectile moves in world space.
+      
+      const p1 = this._pos; // Current Iso Pos
+      // Trail tail position (previous frame approx)
+      const tailX = e.x - e.vx * 2; // Trail length
+      const tailY = e.y - e.vy * 2;
+      const tailIso = IsoUtils.toIso(tailX, tailY, e.z);
+      
+      const type = e.data.renderType;
+      
+      if (type === 'BULLET' || type === 'RAIL') {
+          ctx.strokeStyle = e.data.trailColor || '#facc15';
+          ctx.lineWidth = type === 'RAIL' ? 3 : 1;
+          ctx.shadowBlur = type === 'RAIL' ? 10 : 0;
+          ctx.shadowColor = ctx.strokeStyle as string;
+          ctx.beginPath();
+          ctx.moveTo(0,0);
+          ctx.lineTo(tailIso.x - p1.x, tailIso.y - p1.y);
+          ctx.stroke();
+          
+          // Head
+          ctx.fillStyle = '#fff';
+          ctx.beginPath(); ctx.arc(0,0, type === 'RAIL' ? 3 : 1.5, 0, Math.PI*2); ctx.fill();
+      } 
+      else if (type === 'PLASMA') {
+          ctx.fillStyle = e.data.trailColor || '#a855f7';
+          ctx.shadowBlur = 10; ctx.shadowColor = ctx.fillStyle as string;
+          ctx.beginPath(); ctx.arc(0,0, 4, 0, Math.PI*2); ctx.fill();
+      }
+
       ctx.restore();
   }
 
@@ -134,158 +180,53 @@ export class EffectRendererService {
       ctx.save();
       ctx.translate(this._pos.x, this._pos.y + hoverY - 40);
       
-      // Draw Bracket
-      ctx.strokeStyle = '#22c55e';
-      ctx.lineWidth = 2;
-      ctx.shadowColor = '#22c55e';
-      ctx.shadowBlur = 10;
+      ctx.strokeStyle = '#22c55e'; ctx.lineWidth = 2; ctx.shadowColor = '#22c55e'; ctx.shadowBlur = 10;
+      const w = 20; const h = 20;
+      ctx.beginPath(); ctx.moveTo(-w, -h + 5); ctx.lineTo(-w, -h); ctx.lineTo(-w + 5, -h); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(w - 5, -h); ctx.lineTo(w, -h); ctx.lineTo(w, -h + 5); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-w, h - 5); ctx.lineTo(-w, h); ctx.lineTo(-w + 5, h); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(w - 5, h); ctx.lineTo(w, h); ctx.lineTo(w, h - 5); ctx.stroke();
       
-      const w = 20;
-      const h = 20;
-
-      // Top-Left Corner
-      ctx.beginPath();
-      ctx.moveTo(-w, -h + 5); ctx.lineTo(-w, -h); ctx.lineTo(-w + 5, -h);
-      ctx.stroke();
-
-      // Top-Right Corner
-      ctx.beginPath();
-      ctx.moveTo(w - 5, -h); ctx.lineTo(w, -h); ctx.lineTo(w, -h + 5);
-      ctx.stroke();
-
-      // Bottom-Left Corner
-      ctx.beginPath();
-      ctx.moveTo(-w, h - 5); ctx.lineTo(-w, h); ctx.lineTo(-w + 5, h);
-      ctx.stroke();
-
-      // Bottom-Right Corner
-      ctx.beginPath();
-      ctx.moveTo(w - 5, h); ctx.lineTo(w, h); ctx.lineTo(w, h - 5);
-      ctx.stroke();
-      
-      // Label Background
-      ctx.shadowBlur = 0;
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-      const textWidth = ctx.measureText(label).width * 2; // Est
+      ctx.shadowBlur = 0; ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
       ctx.fillRect(-40, -h - 25, 80, 16);
-      
-      // Label Text
-      ctx.font = 'bold 12px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillStyle = '#fff';
-      ctx.fillText(label, 0, -h - 13);
-      
-      // Input Hint
-      ctx.font = '10px monospace';
-      ctx.fillStyle = '#4ade80';
-      ctx.fillText('[F] / TAP', 0, h + 15);
+      ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff'; ctx.fillText(label, 0, -h - 13);
+      ctx.font = '10px monospace'; ctx.fillStyle = '#4ade80'; ctx.fillText('[F] / TAP', 0, h + 15);
       
       ctx.restore();
   }
 
-  // Draw On-Screen Waypoint / Off-Screen Arrow
   drawGuidanceOverlay(ctx: CanvasRenderingContext2D, activeObjective: MissionObjective | null, player: Entity, cam: Camera, canvasWidth: number, canvasHeight: number, currentZoneId: string) {
       if (!activeObjective || !activeObjective.targetLocation) return;
-      
-      // If target is in another zone, we currently don't draw vector (TODO: Pathfind to exit)
-      // We only draw if activeObjective.targetZoneId matches current
       if (activeObjective.targetZoneId !== currentZoneId) return;
 
       const target = activeObjective.targetLocation;
+      const cx = canvasWidth / 2; const cy = canvasHeight / 2;
+      const wx = target.x - player.x; const wy = target.y - player.y;
+      const isoX = (wx - wy); const isoY = (wx + wy) * 0.5;
+      const screenX = cx + (isoX * cam.zoom); const screenY = cy + (isoY * cam.zoom);
       
-      // 1. Calculate Target Screen Position
-      // Reuse logic from RenderService.getScreenToWorld essentially but inverted
-      // World -> Screen transform manually because we don't have the context transform applied at this stage (this runs in overlay pass)
-      
-      // Camera Transform Re-calc
-      // Center of screen
-      const cx = canvasWidth / 2;
-      const cy = canvasHeight / 2;
-      
-      // World delta
-      const wx = target.x - player.x;
-      const wy = target.y - player.y;
-      
-      // Iso Projection of delta
-      const isoX = (wx - wy);
-      const isoY = (wx + wy) * 0.5;
-      
-      // Apply Zoom
-      const screenX = cx + (isoX * cam.zoom);
-      const screenY = cy + (isoY * cam.zoom);
-      
-      // 2. Check Bounds
       const padding = 40;
-      const minX = padding;
-      const maxX = canvasWidth - padding;
-      const minY = padding;
-      const maxY = canvasHeight - padding;
+      const isOffScreen = screenX < padding || screenX > canvasWidth - padding || screenY < padding || screenY > canvasHeight - padding;
       
-      const isOffScreen = screenX < minX || screenX > maxX || screenY < minY || screenY > maxY;
-      
-      ctx.save();
-      ctx.shadowBlur = 10;
-      ctx.shadowColor = '#fbbf24';
-      ctx.fillStyle = '#fbbf24';
-      ctx.strokeStyle = '#fbbf24';
+      ctx.save(); ctx.shadowBlur = 10; ctx.shadowColor = '#fbbf24'; ctx.fillStyle = '#fbbf24'; ctx.strokeStyle = '#fbbf24';
       
       if (isOffScreen) {
-          // Clamp to edge
-          // Vector from center
-          const dx = screenX - cx;
-          const dy = screenY - cy;
-          const angle = Math.atan2(dy, dx);
-          
-          // Simple clamping logic (intersects box)
-          // Use absolute ratio to find which edge is hit first
-          const absDx = Math.abs(dx);
-          const absDy = Math.abs(dy);
+          const dx = screenX - cx; const dy = screenY - cy; const angle = Math.atan2(dy, dx);
+          const absDx = Math.abs(dx); const absDy = Math.abs(dy);
           const ratioX = (canvasWidth / 2 - padding) / absDx;
           const ratioY = (canvasHeight / 2 - padding) / absDy;
           const scale = Math.min(ratioX, ratioY);
+          const clampX = cx + dx * scale; const clampY = cy + dy * scale;
           
-          const clampX = cx + dx * scale;
-          const clampY = cy + dy * scale;
-          
-          // Draw Arrow
-          ctx.translate(clampX, clampY);
-          ctx.rotate(angle);
-          
-          ctx.beginPath();
-          ctx.moveTo(10, 0);
-          ctx.lineTo(-10, 10);
-          ctx.lineTo(-10, -10);
-          ctx.closePath();
-          ctx.fill();
-          
-          // Pulse effect
-          const pulse = (Math.sin(Date.now() * 0.01) + 1) * 0.5;
-          ctx.globalAlpha = 0.5 + pulse * 0.5;
-          ctx.beginPath();
-          ctx.arc(0, 0, 20, 0, Math.PI*2);
-          ctx.stroke();
-          
+          ctx.translate(clampX, clampY); ctx.rotate(angle);
+          ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(-10, 10); ctx.lineTo(-10, -10); ctx.closePath(); ctx.fill();
+          const pulse = (Math.sin(Date.now() * 0.01) + 1) * 0.5; ctx.globalAlpha = 0.5 + pulse * 0.5; ctx.beginPath(); ctx.arc(0, 0, 20, 0, Math.PI*2); ctx.stroke();
       } else {
-          // On Screen Reticle
-          ctx.translate(screenX, screenY - 60); // Float above head
-          
-          const bounce = Math.sin(Date.now() * 0.008) * 5;
-          ctx.translate(0, bounce);
-          
-          // Down Arrow / Chevron
-          ctx.lineWidth = 3;
-          ctx.beginPath();
-          ctx.moveTo(-10, -10);
-          ctx.lineTo(0, 10);
-          ctx.lineTo(10, -10);
-          ctx.stroke();
-          
-          // Label
-          ctx.font = 'bold 10px monospace';
-          ctx.textAlign = 'center';
-          ctx.fillText("OBJECTIVE", 0, -20);
+          ctx.translate(screenX, screenY - 60); 
+          const bounce = Math.sin(Date.now() * 0.008) * 5; ctx.translate(0, bounce);
+          ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-10, -10); ctx.lineTo(0, 10); ctx.lineTo(10, -10); ctx.stroke();
+          ctx.font = 'bold 10px monospace'; ctx.textAlign = 'center'; ctx.fillText("OBJECTIVE", 0, -20);
       }
-      
       ctx.restore();
   }
 }

@@ -3,7 +3,7 @@ import { DamagePacket, Penetration, DamageConversion, StatusEffects } from './da
 
 export type Rarity = 'COMMON' | 'UNCOMMON' | 'RARE' | 'BLACK_MARKET';
 export type ItemType = 'WEAPON' | 'ARMOR' | 'IMPLANT' | 'STIM' | 'PSI_BLADE' | 'AMULET' | 'RING';
-export type ItemShape = 'sword' | 'shield' | 'chip' | 'syringe' | 'psiBlade' | 'amulet' | 'ring';
+export type ItemShape = 'sword' | 'shield' | 'chip' | 'syringe' | 'psiBlade' | 'amulet' | 'ring' | 'pistol' | 'rifle' | 'shotgun' | 'railgun';
 
 export interface Item {
   id: string;
@@ -22,6 +22,16 @@ export interface Item {
   penetration?: Penetration;
   damageConversion?: DamageConversion;
   status?: Partial<StatusEffects>;
+  
+  // Ranged Properties
+  projectile?: {
+      speed: number;
+      count: number;     // e.g. Shotgun = 5
+      spread: number;    // Angle variance in radians
+      range: number;     // Max distance/time
+      renderType: 'BULLET' | 'PLASMA' | 'RAIL' | 'ROCKET';
+      fireRate?: number; // Delay in frames (optional override)
+  };
 }
 
 export const UNARMED_WEAPON: Item = {
@@ -33,12 +43,12 @@ export const UNARMED_WEAPON: Item = {
   level: 1,
   color: '#fbbf24', // Gold
   stats: {
-    dmg: 8,        // Buffed from 6
-    spd: 2.0,      // Very fast base speed
-    reach: 75,     // Buffed from 35/45 to 75
-    crit: 15,      // High base crit (Martial precision)
+    dmg: 8,        
+    spd: 2.0,      
+    reach: 75,     
+    crit: 15,      
     ls: 0,
-    armorPen: 5    // Innate armor piercing (Targeting weak points)
+    armorPen: 5    
   },
   stack: 1,
   maxStack: 1
