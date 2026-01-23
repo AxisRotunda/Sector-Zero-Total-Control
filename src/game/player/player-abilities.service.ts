@@ -201,11 +201,14 @@ export class PlayerAbilitiesService {
       const reachScale = weapon?.shape === 'psiBlade' ? 1.2 : 1.0;
       let reach = (baseReach + (stats.damage * 0.3)) * reachScale;
 
-      let damage = weapon?.stats?.['dmg'] || 5;
+      let damage = 5;
+      if (weapon && weapon.stats) {
+          damage = weapon.stats['dmg'] || 5;
+      }
       
       // Dynamic Scaling for Unarmed
       if (isUnarmed) {
-          const level = this.progression.level();
+          const level = this.progression.level() || 1;
           // Formula: Base 5 + (Level * 1.5) + (20% of Total Damage Stat)
           const scalingBonus = (level * 1.5) + (stats.damage * 0.2);
           damage += scalingBonus;

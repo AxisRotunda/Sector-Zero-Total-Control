@@ -301,8 +301,8 @@ export class UnitRendererService {
       if (!item) {
           const combo = entity.comboIndex || 0;
           
-          // Only draw glowing fist for players or specific enemies
-          if (isPlayer || entity.type === 'ENEMY') {
+          // Only draw glowing fist for players
+          if (isPlayer) {
               const glowIntensity = 10 + (combo * 15);
               const glowColor = combo > 0 ? '#fbbf24' : '#f59e0b';
               
