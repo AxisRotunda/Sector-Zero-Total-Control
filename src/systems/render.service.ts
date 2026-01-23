@@ -56,8 +56,12 @@ export class RenderService {
 
   private renderList: (Entity | Particle)[] = [];
   
-  // Optimization: No longer copying static entities to a local array
-  // We access the ChunkManager buffer directly
+  // Vector pools for frustum calc to avoid allocations
+  private _fp1 = { x: 0, y: 0 };
+  private _fp2 = { x: 0, y: 0 };
+  private _fp3 = { x: 0, y: 0 };
+  private _fp4 = { x: 0, y: 0 };
+  private _frustum = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
 
   init(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -86,8 +90,8 @@ export class RenderService {
     }
   }
 
-  getScreenToWorld(screenX: number, screenY: number, cam: Camera) {
-      if (!this.canvas) return { x: 0, y: 0 };
+  getScreenToWorld(screenX: number, screenY: number, cam: Camera, out: {x: number, y: number} = {x:0, y:0}) {
+      if (!this.canvas) return out;
       
       // We must temporarily set the IsoUtils context to the current camera state 
       // to correctly inverse the rotation.
@@ -97,7 +101,6 @@ export class RenderService {
       IsoUtils.toIso(cam.x, cam.y, 0, this.camCenter);
       
       // 1. Un-center and Un-zoom (Screen Space -> Iso Space)
-      // Screen Center (w/2, h/2) maps to camCenter in Iso Space.
       const dx = screenX - this.canvas.width / 2;
       const dy = screenY - this.canvas.height / 2;
       
@@ -105,9 +108,9 @@ export class RenderService {
       const isoY = this.camCenter.y + dy / cam.zoom;
       
       // 2. Inverse Projection & Rotation via IsoUtils
-      const worldPos = IsoUtils.fromIso(isoX, isoY);
+      IsoUtils.fromIso(isoX, isoY, out);
       
-      return worldPos;
+      return out;
   }
 
   render(
@@ -125,18 +128,17 @@ export class RenderService {
     const h = this.canvas.height;
     
     // --- 0. SETUP ROTATION CONTEXT ---
-    // This is the key fix. We rotate coordinates, not the canvas.
     IsoUtils.setContext(cam.rotation, cam.x, cam.y);
 
-    // Calculate View Frustum
-    const frustum = this.calculateFrustum(cam, w, h);
+    // Calculate View Frustum (Zero Alloc)
+    this.calculateFrustum(cam, w, h);
 
     // 1. Prepare Scene (Logic Phase)
     // Gather renderable entities and sort them
-    this.prepareRenderList(cam, zone, entities, player, particles, w, h, frustum);
+    this.prepareRenderList(cam, zone, entities, player, particles, w, h, this._frustum);
     
     // Prepare Lights (Culling & Extraction)
-    this.prepareLighting(player, this.renderList, cam, w, h, frustum);
+    this.prepareLighting(player, this.renderList, cam, w, h, this._frustum);
     
     // Update Lighting Animation
     this.lighting.update(1, this.timeService.globalTime);
@@ -190,7 +192,6 @@ export class RenderService {
     );
     
     // --- CLEANUP ---
-    // Reset IsoUtils to default (no rotation) to prevent side effects outside render loop
     IsoUtils.setContext(0, 0, 0);
   }
 
@@ -242,7 +243,6 @@ export class RenderService {
 
           if (ent.type === 'DECORATION') {
               if (ent.subType === 'STREET_LIGHT') {
-                  // Allow override via entity color, fallback to preset
                   const lightColor = ent.color && ent.color !== '#ffffff' ? ent.color : presets.STREET_LIGHT.color;
                   this.lighting.registerLight({ 
                       id: `L_${ent.id}`, x: ent.x, y: ent.y, type: 'STATIC', 
@@ -294,9 +294,6 @@ export class RenderService {
           this.ctx.translate(sx, sy);
       }
 
-      // REMOVED: this.ctx.rotate(cam.rotation); 
-      // Rotation is now handled mathematically in IsoUtils.toIso
-      
       this.ctx.scale(cam.zoom, cam.zoom);
       this.ctx.translate(-this.camCenter.x, -this.camCenter.y);
   }
@@ -313,17 +310,18 @@ export class RenderService {
   ) {
       this.renderList.length = 0;
       
-      // OPTIMIZED: Use Zero-Alloc ChunkManager API
+      // OPTIMIZED: Use Zero-Alloc ChunkManager API for static entities
       const { buffer: staticBuffer, count: staticCount } = this.chunkManager.getVisibleStaticEntities(cam, w, h);
       
       for (let i = 0; i < staticCount; i++) {
           this.renderList.push(staticBuffer[i]);
       }
       
-      const visibleDynamic = this.spatialHash.queryRect(frustum.minX, frustum.minY, frustum.maxX, frustum.maxY, zone.id);
-      const dLen = visibleDynamic.length;
-      for (let i = 0; i < dLen; i++) {
-          const e = visibleDynamic[i];
+      // OPTIMIZED: Use Zero-Alloc SpatialHash query for dynamic entities
+      const { buffer: dynamicBuffer, count: dynamicCount } = this.spatialHash.queryRectFast(frustum.minX, frustum.minY, frustum.maxX, frustum.maxY, zone.id);
+      
+      for (let i = 0; i < dynamicCount; i++) {
+          const e = dynamicBuffer[i];
           if (e.type === 'WALL' && e.subType !== 'GATE_SEGMENT') continue;
           if (e.type === 'DECORATION' && (e.subType === 'RUG' || e.subType === 'FLOOR_CRACK' || e.subType === 'GRAFFITI')) continue;
           this.renderList.push(e);
@@ -448,18 +446,18 @@ export class RenderService {
   }
 
   private calculateFrustum(cam: Camera, width: number, height: number) {
-      const p1 = this.getScreenToWorld(0, 0, cam);
-      const p2 = this.getScreenToWorld(width, 0, cam);
-      const p3 = this.getScreenToWorld(0, height, cam);
-      const p4 = this.getScreenToWorld(width, height, cam);
+      // Reuse vector pools
+      this.getScreenToWorld(0, 0, cam, this._fp1);
+      this.getScreenToWorld(width, 0, cam, this._fp2);
+      this.getScreenToWorld(0, height, cam, this._fp3);
+      this.getScreenToWorld(width, height, cam, this._fp4);
+      
       const margin = RENDER_CONFIG.FRUSTUM_MARGIN;
       
-      return {
-        minX: Math.min(p1.x, p2.x, p3.x, p4.x) - margin,
-        maxX: Math.max(p1.x, p2.x, p3.x, p4.x) + margin,
-        minY: Math.min(p1.y, p2.y, p3.y, p4.y) - margin,
-        maxY: Math.max(p1.y, p2.y, p3.y, p4.y) + margin
-      };
+      this._frustum.minX = Math.min(this._fp1.x, this._fp2.x, this._fp3.x, this._fp4.x) - margin;
+      this._frustum.maxX = Math.max(this._fp1.x, this._fp2.x, this._fp3.x, this._fp4.x) + margin;
+      this._frustum.minY = Math.min(this._fp1.y, this._fp2.y, this._fp3.y, this._fp4.y) - margin;
+      this._frustum.maxY = Math.max(this._fp1.y, this._fp2.y, this._fp3.y, this._fp4.y) + margin;
   }
 
   private applyPostEffects(w: number, h: number) {
