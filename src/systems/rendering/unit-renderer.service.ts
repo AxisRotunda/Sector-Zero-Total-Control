@@ -6,6 +6,7 @@ import { InventoryService } from '../../game/inventory.service';
 import { IsoUtils } from '../../utils/iso-utils';
 import { InteractionService } from '../../services/interaction.service';
 import { PlayerStatsService } from '../../game/player/player-stats.service';
+import { PlayerAbilitiesService } from '../../game/player/player-abilities.service';
 
 interface StatusIcon { type: 'poison' | 'burn' | 'stun' | 'weakness' | 'slow' | 'bleed'; timer: number; maxTimer: number; icon: string; color: string; }
 
@@ -14,44 +15,34 @@ export class UnitRendererService {
   private inventory = inject(InventoryService);
   private interaction = inject(InteractionService);
   private playerStats = inject(PlayerStatsService);
+  private abilities = inject(PlayerAbilitiesService);
   
-  // Reusable vectors to prevent GC thrashing in the render loop
   private _iso = { x: 0, y: 0 };
   private _isoLeg = { x: 0, y: 0 };
   private _isoBody = { x: 0, y: 0 };
-  
-  // Additional vectors for limb logic to prevent overwrite
   private _isoShoulder = { x: 0, y: 0 };
   private _isoElbow = { x: 0, y: 0 };
   private _isoHand = { x: 0, y: 0 };
   
-  // Trig cache vars (per entity)
   private _cos = 0;
   private _sin = 0;
 
-  // Optimization: Angle Lookup Table (1-degree resolution)
   private angleCache = new Map<number, { sin: number, cos: number }>();
 
   constructor() {
-      // Pre-compute trig for 360 degrees in 1-degree steps
       for (let angle = 0; angle < 360; angle += 1) {
           const rad = angle * Math.PI / 180;
-          this.angleCache.set(angle, {
-              sin: Math.sin(rad),
-              cos: Math.cos(rad)
-          });
+          this.angleCache.set(angle, { sin: Math.sin(rad), cos: Math.cos(rad) });
       }
   }
 
   private getCachedTrig(rad: number) {
       const deg = Math.round((rad * 180 / Math.PI));
       const normalized = (deg % 360 + 360) % 360;
-      // Direct lookup since we now cover every integer degree
       return this.angleCache.get(normalized) || { sin: Math.sin(rad), cos: Math.cos(rad) };
   }
 
   drawHumanoid(ctx: CanvasRenderingContext2D, e: Entity) {
-      // CRITICAL: Do not render dead entities
       if (e.state === 'DEAD') return;
 
       const isPlayer = e.type === 'PLAYER'; 
@@ -88,21 +79,40 @@ export class UnitRendererService {
           if (isRanged) {
               const p = 1 - ((e.timer || 0) / (isPlayer ? 10 : 30)); 
               const recoil = Math.sin(p * Math.PI) * 0.3; 
-              
               rArmAngle = 0 - recoil; 
               lArmAngle = isTwoHanded ? (Math.PI / 6) : 0; 
-              
               bodyTwist = isTwoHanded ? 0.8 : 0.4; 
               bodyZ = -1 * recoil; 
           } else {
-              const phase = e.animPhase; const frame = e.animFrame;
-              if (isPlayer) {
-                  if (phase === 'startup') { const p = frame / 1; rArmAngle = p * (-Math.PI / 1.4); bodyTwist = p * -0.3; bodyZ = p * -2; } 
-                  else if (phase === 'active') { const p = (frame - 2) / 2; rArmAngle = (-Math.PI / 1.4) + p * (Math.PI / 1.4 + Math.PI / 3); bodyTwist = -0.3 + p * 0.7; rHandReach = p * 15; bodyZ = -2 + p * 2; } 
-                  else if (phase === 'recovery') { const p = (frame - 5) / 3; rArmAngle = (Math.PI / 3) - p * (Math.PI / 3 - Math.PI / 8); bodyTwist = 0.4 - p * 0.3; rHandReach = 15 - p * 10; bodyZ = 0; }
+              // MELEE LOGIC
+              if (isPlayer && this.abilities.activeComboStep) {
+                  const step = this.abilities.activeComboStep;
+                  const phase = e.animPhase;
+                  // Use standardized 0-1 progress derived from logic frame
+                  // Approximate progress based on arbitrary constants in animation service
+                  // Ideally pass progress explicitly in Entity, but using animFrame heuristics for now
+                  const p = e.animFrame / 8; // Normalized approx
+
+                  if (step.swingType === 'THRUST') {
+                      rArmAngle = -Math.PI/2 + (Math.sin(p * Math.PI) * 1.5);
+                      bodyTwist = 0.5;
+                      rHandReach = Math.sin(p * Math.PI) * 30;
+                  } else if (step.swingType === 'OVERHEAD') {
+                      rArmAngle = -Math.PI + (p * Math.PI * 1.5); // Top to bottom
+                      bodyTwist = 0.2;
+                  } else if (step.swingType === 'SLASH_LEFT') {
+                      rArmAngle = (Math.PI/2) - (p * Math.PI); // Right to Left
+                      bodyTwist = 0.5 - p;
+                  } else { // SLASH_RIGHT (Default)
+                      rArmAngle = (-Math.PI/2) + (p * Math.PI); // Left to Right
+                      bodyTwist = -0.5 + p;
+                  }
               } else {
+                  // Fallback / Enemy Logic
                   const p = 1 - ((e.timer || 0) / 10);
-                  if (p < 0.25) { rArmAngle = -Math.PI / 1.4; bodyTwist = -0.3; bodyZ = -2; } else if (p < 0.6) { rArmAngle = Math.PI / 3; bodyTwist = 0.4; rHandReach = 15; bodyZ = 0; } else { rArmAngle = Math.PI / 8; bodyTwist = 0.1; rHandReach = 5; bodyZ = 0; }
+                  if (p < 0.25) { rArmAngle = -Math.PI / 1.4; bodyTwist = -0.3; bodyZ = -2; } 
+                  else if (p < 0.6) { rArmAngle = Math.PI / 3; bodyTwist = 0.4; rHandReach = 15; bodyZ = 0; } 
+                  else { rArmAngle = Math.PI / 8; bodyTwist = 0.1; rHandReach = 5; bodyZ = 0; }
               }
           }
       } 
@@ -158,7 +168,6 @@ export class UnitRendererService {
          return target;
       };
 
-      // --- VISUAL INTERACTION INDICATOR ---
       const activeTarget = this.interaction.activeInteractable();
       if (activeTarget && activeTarget.id === e.id) {
           IsoUtils.toIso(e.x, e.y, 0, this._iso);
@@ -261,12 +270,9 @@ export class UnitRendererService {
       // 5. Arms & Weapons
       const drawArm = (angle: number, isRight: boolean, isSupportArm: boolean = false) => {
           const shoulderX = isRight ? 8 * scaleW : -8 * scaleW;
-          
-          // Use specific output vectors to avoid overwriting `this._iso` if recursing or re-calculating
           const shoulderPos = transformToIso(shoulderX, 0, 36 * scaleH, this._isoShoulder);
           
           let handX, handY;
-          
           if (isTwoHanded && isSupportArm) {
               handX = shoulderX + 15 * scaleW; 
               handY = 10; 
@@ -316,46 +322,29 @@ export class UnitRendererService {
       const shape = item.shape;
 
       if (shape === 'pistol') {
-          ctx.fillStyle = '#18181b';
-          ctx.fillRect(0, -2, 12, 4); 
-          ctx.fillRect(-2, 0, 4, 6); 
-          ctx.fillStyle = color;
-          ctx.fillRect(8, -2, 2, 2); 
+          ctx.fillStyle = '#18181b'; ctx.fillRect(0, -2, 12, 4); ctx.fillRect(-2, 0, 4, 6); 
+          ctx.fillStyle = color; ctx.fillRect(8, -2, 2, 2); 
       } 
       else if (shape === 'rifle' || shape === 'shotgun') {
-          ctx.fillStyle = '#18181b';
-          ctx.fillRect(-5, -2, 30, 4); 
-          ctx.fillStyle = '#27272a';
-          ctx.fillRect(-8, -1, 10, 4); 
-          ctx.fillRect(5, 2, 4, 6); 
-          ctx.fillStyle = color;
-          ctx.fillRect(0, -1, 25, 1); 
+          ctx.fillStyle = '#18181b'; ctx.fillRect(-5, -2, 30, 4); 
+          ctx.fillStyle = '#27272a'; ctx.fillRect(-8, -1, 10, 4); ctx.fillRect(5, 2, 4, 6); 
+          ctx.fillStyle = color; ctx.fillRect(0, -1, 25, 1); 
       }
       else if (shape === 'railgun') {
-          ctx.fillStyle = '#1e293b';
-          ctx.fillRect(-5, -3, 40, 6); 
-          ctx.fillStyle = color; 
-          ctx.shadowColor = color;
-          ctx.shadowBlur = 5;
-          ctx.fillRect(0, -1, 38, 2); 
-          ctx.shadowBlur = 0;
+          ctx.fillStyle = '#1e293b'; ctx.fillRect(-5, -3, 40, 6); 
+          ctx.fillStyle = color; ctx.shadowColor = color; ctx.shadowBlur = 5; ctx.fillRect(0, -1, 38, 2); ctx.shadowBlur = 0;
       }
       else if (shape === 'sword' || shape === 'psiBlade') {
           ctx.rotate(-Math.PI / 2); 
-          ctx.fillStyle = '#52525b';
-          ctx.fillRect(0, -2, 30, 4); 
-          ctx.fillStyle = color;
-          ctx.fillRect(0, -1, 30, 2); 
-          ctx.fillStyle = '#18181b';
-          ctx.fillRect(-5, -4, 5, 8); 
+          ctx.fillStyle = '#52525b'; ctx.fillRect(0, -2, 30, 4); 
+          ctx.fillStyle = color; ctx.fillRect(0, -1, 30, 2); 
+          ctx.fillStyle = '#18181b'; ctx.fillRect(-5, -4, 5, 8); 
       } 
       else if (shape === 'shield') {
-          ctx.fillStyle = color;
-          ctx.beginPath(); ctx.arc(5, 0, 10, 0, Math.PI*2); ctx.fill();
+          ctx.fillStyle = color; ctx.beginPath(); ctx.arc(5, 0, 10, 0, Math.PI*2); ctx.fill();
       } 
       else {
-          ctx.fillStyle = '#333';
-          ctx.fillRect(0, -2, 20, 4);
+          ctx.fillStyle = '#333'; ctx.fillRect(0, -2, 20, 4);
       }
       
       ctx.restore();

@@ -16,20 +16,10 @@ export class PlayerAnimationService {
 
   update(player: Entity) {
     const weapon = this.inventory.equipped().weapon || UNARMED_WEAPON;
-    const weaponSpeed = weapon.stats['spd'] || 1.0;
     
-    const comboSpeedMult = player.comboIndex === 2 ? 0.7 : (player.comboIndex === 1 ? 0.85 : 1.0);
-    const attackSpeedStat = this.stats.playerStats().speed * 0.1; 
-    
-    const baseSpeed = 3;
-    const attackFrameDuration = Math.max(1, Math.floor(baseSpeed / (weaponSpeed + attackSpeedStat) * comboSpeedMult));
-
+    // Animation Constants
     const IDLE_FRAME_DURATION = 12; const IDLE_FRAMES = 4;
     const MOVE_FRAME_DURATION = 6; const MOVE_FRAMES = 6;
-    
-    const ATTACK_STARTUP_FRAMES = 2; 
-    const ATTACK_ACTIVE_FRAMES = 3; 
-    const ATTACK_TOTAL_FRAMES = 9;
     
     player.animFrameTimer++;
     
@@ -45,32 +35,70 @@ export class PlayerAnimationService {
             } 
             break;
         case 'ATTACK':
-            if (player.animFrameTimer >= attackFrameDuration) {
-                player.animFrameTimer = 0; player.animFrame++;
-                
-                if (player.animFrame === 0) {
-                    this.combat.currentAttackState = 'STARTUP';
-                    player.animPhase = 'startup';
-                }
-                else if (this.combat.currentAttackState === 'STARTUP' && player.animFrame >= ATTACK_STARTUP_FRAMES) {
-                    this.combat.currentAttackState = 'ACTIVE';
-                    player.animPhase = 'active';
-                    this.abilities.spawnPrimaryAttackHitbox(player);
-                }
-                else if (this.combat.currentAttackState === 'ACTIVE' && player.animFrame >= ATTACK_STARTUP_FRAMES + ATTACK_ACTIVE_FRAMES) {
-                    this.combat.currentAttackState = 'RECOVERY';
-                    player.animPhase = 'recovery';
-                }
-                if (player.animFrame >= ATTACK_TOTAL_FRAMES) { 
-                    player.state = 'IDLE'; 
-                    player.animFrame = 0; 
-                    player.animPhase = undefined;
-                    this.combat.currentAttackState = 'IDLE';
-                    player.comboIndex = 0;
-                    this.abilities.currentCombo.set(0);
-                }
-            } 
+            this.handleAttackAnimation(player);
             break;
     }
+  }
+
+  private handleAttackAnimation(player: Entity) {
+      // 1. Get Combo Data
+      const comboStep = this.abilities.activeComboStep;
+      
+      // Fallback if no combo step (e.g. ranged or error)
+      if (!comboStep) {
+          this.handleGenericAttack(player);
+          return;
+      }
+
+      // 2. Map current frame to Attack Phase
+      const frame = player.animFrameTimer;
+      const total = comboStep.durationTotal;
+      const start = comboStep.hitboxStart;
+      const end = comboStep.hitboxEnd;
+
+      // Determine Phase
+      if (frame < start) {
+          this.combat.currentAttackState = 'STARTUP';
+          player.animPhase = 'startup';
+          // normalize frame for renderer (0 to 1)
+          player.animFrame = (frame / start) * 2; // Maps to approx range for lerping
+      } 
+      else if (frame >= start && frame < end) {
+          if (this.combat.currentAttackState !== 'ACTIVE') {
+              this.abilities.spawnPrimaryAttackHitbox(player);
+          }
+          this.combat.currentAttackState = 'ACTIVE';
+          player.animPhase = 'active';
+          player.animFrame = ((frame - start) / (end - start)) * 2 + 2; 
+      } 
+      else if (frame >= end) {
+          this.combat.currentAttackState = 'RECOVERY';
+          player.animPhase = 'recovery';
+          player.animFrame = ((frame - end) / (total - end)) * 3 + 5;
+      }
+
+      // End of animation
+      if (frame >= total) {
+          player.state = 'IDLE';
+          player.animFrame = 0;
+          player.animFrameTimer = 0;
+          this.combat.currentAttackState = 'IDLE';
+          
+          // Note: Combo Index reset is handled by Cooldown/Timer in PlayerControl or Abilities service if input window missed
+      }
+  }
+
+  private handleGenericAttack(player: Entity) {
+      // Fallback for Ranged or Non-Combo attacks
+      // Basic 9 frame cycle
+      if (player.animFrameTimer >= 3) {
+          player.animFrameTimer = 0;
+          player.animFrame++;
+          if (player.animFrame > 8) {
+              player.state = 'IDLE';
+              player.animFrame = 0;
+              this.combat.currentAttackState = 'IDLE';
+          }
+      }
   }
 }

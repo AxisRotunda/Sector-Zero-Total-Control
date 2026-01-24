@@ -16,6 +16,7 @@ import { PlayerProgressionService } from './player-progression.service';
 import { CollisionService } from '../../systems/collision.service';
 import { createEmptyDamagePacket } from '../../models/damage.model';
 import { CommandType } from '../../config/combo.config';
+import { MELEE_COMBOS, ComboStep } from '../../config/combat-combos.config';
 
 @Injectable({ providedIn: 'root' })
 export class PlayerAbilitiesService {
@@ -34,12 +35,13 @@ export class PlayerAbilitiesService {
   maxCooldowns = signal({ primary: BALANCE.COOLDOWNS.PRIMARY, secondary: BALANCE.COOLDOWNS.SECONDARY, dash: BALANCE.COOLDOWNS.DASH, utility: BALANCE.COOLDOWNS.UTILITY });
 
   // Combo State
-  currentCombo = signal(0);
-  private readonly MAX_COMBO = 3;
+  currentComboIndex = signal(0);
+  
+  // Cache current combo definition for animation service
+  activeComboStep: ComboStep | null = null;
 
   updateCooldowns() {
     const c = this.cooldowns();
-    // Optimization: Skip update if all cooldowns are 0
     if (c.primary <= 0 && c.secondary <= 0 && c.dash <= 0 && c.utility <= 0) {
         return;
     }
@@ -95,39 +97,34 @@ export class PlayerAbilitiesService {
   
   private useWhirlwind(player: Entity, stats: any) {
       player.state = 'ATTACK';
-      // Provide extended active frames for animation sync
       player.animFrameTimer = 0;
       player.animFrame = 0;
+      this.activeComboStep = null; // Special skill, not standard combo
       
       this.sound.play('SWOOSH');
       this.haptic.impactHeavy();
       
-      // Create a persistent hitbox that pulses
       const hitbox = this.entityPool.acquire('HITBOX', undefined, this.world.currentZone().id);
       hitbox.source = 'PLAYER';
       hitbox.x = player.x; 
       hitbox.y = player.y; 
-      hitbox.radius = 140; // Larger AOE
+      hitbox.radius = 140;
       
       hitbox.damagePacket = createEmptyDamagePacket();
       hitbox.damagePacket.physical = stats.damage * 1.5;
       hitbox.damagePacket.chaos = stats.psyche * 2;
       
       hitbox.color = '#f97316';
-      hitbox.timer = 20; // Lasts 20 frames
+      hitbox.timer = 20;
       hitbox.knockbackForce = 25;
-      hitbox.critChance = stats.crit + 20; // Bonus crit
+      hitbox.critChance = stats.crit + 20;
       
-      // Spin physics
-      player.angle += 3.14; // Instant spin visual
+      player.angle += 3.14; 
       
-      // Attach hit IDs so it only hits once per spawn, 
-      // but in a real whirlwind you might want multi-hit. 
-      // Current system limits single hitbox to single hit per entity.
       hitbox.hitIds = new Set();
 
       this.world.entities.push(hitbox);
-      this.collisionService.checkHitboxCollisions(hitbox); // Immediate check
+      this.collisionService.checkHitboxCollisions(hitbox);
       
       this.particleService.addParticles({ x: player.x, y: player.y, z: 20, count: 30, speed: 12, color: '#f97316', size: 3, type: 'circle', life: 0.6 });
       this.eventBus.dispatch({ type: GameEvents.FLOATING_TEXT_SPAWN, payload: { onPlayer: true, yOffset: -90, text: "WHIRLWIND", color: '#f97316', size: 26 } });
@@ -136,8 +133,8 @@ export class PlayerAbilitiesService {
   private useDashStrike(player: Entity, stats: any, targetAngle?: number) {
       const angle = targetAngle ?? player.angle;
       player.angle = angle;
+      this.activeComboStep = null;
       
-      // Huge velocity boost
       player.vx += Math.cos(angle) * 45;
       player.vy += Math.sin(angle) * 45;
       player.state = 'ATTACK';
@@ -152,17 +149,15 @@ export class PlayerAbilitiesService {
       hitbox.radius = 80;
       
       hitbox.damagePacket = createEmptyDamagePacket();
-      hitbox.damagePacket.physical = stats.damage * 2.5; // High single target dmg
+      hitbox.damagePacket.physical = stats.damage * 2.5;
       
-      hitbox.critChance = 100; // Guaranteed Crit
+      hitbox.critChance = 100;
       hitbox.color = '#ffffff';
-      hitbox.timer = 15; // Matches dash duration roughly
+      hitbox.timer = 15;
       
-      // Attach to player velocity for the duration
       hitbox.vx = player.vx;
       hitbox.vy = player.vy;
       
-      // Data flag for renderers/logic to know it's a projectile-like melee
       hitbox.data = { isProjectile: true, trailColor: '#ffffff' }; 
       
       this.world.entities.push(hitbox);
@@ -187,6 +182,7 @@ export class PlayerAbilitiesService {
       player.animFrame = 0;
       player.animFrameTimer = 0;
       player.timer = 0; 
+      this.activeComboStep = null; // Ranged doesn't use combo steps yet
 
       const recoilForce = 2.0; 
       player.vx -= Math.cos(aimAngle) * recoilForce;
@@ -254,23 +250,33 @@ export class PlayerAbilitiesService {
         
         if (cds.primary > 0 && !canCombo) return;
         
-        let newComboIndex = 0;
-        if (canCombo) {
-            newComboIndex = (this.currentCombo() + 1) % this.MAX_COMBO;
-        } else {
-            newComboIndex = 0;
-        }
-        
-        this.currentCombo.set(newComboIndex);
-        player.comboIndex = newComboIndex;
+        // 1. Determine Weapon Profile
+        let archetype = MELEE_COMBOS['STANDARD'];
+        if (weapon?.type === 'PSI_BLADE') archetype = MELEE_COMBOS['FAST'];
+        if (weapon?.shape === 'hammer' || weapon?.shape === 'axe') archetype = MELEE_COMBOS['HEAVY'];
 
+        // 2. Advance Combo Index
+        let nextIndex = 0;
+        if (canCombo) {
+            nextIndex = (this.currentComboIndex() + 1) % archetype.chain.length;
+        }
+        this.currentComboIndex.set(nextIndex);
+        player.comboIndex = nextIndex;
+
+        // 3. Get Step Config
+        const step = archetype.chain[nextIndex];
+        this.activeComboStep = step;
+
+        // 4. Calculate Cooldown
         const baseCdr = Math.max(0, Math.min(BALANCE.COOLDOWNS.CDR_CAP, stats.cdr / 100));
-        const cdTime = canCombo ? 15 : BALANCE.COOLDOWNS.PRIMARY;
-        const cooldown = Math.max(10, cdTime * (1 - baseCdr)); 
+        // Cooldown is slightly longer than animation to prevent spamming
+        const cdTime = step.durationTotal * (60/60); // frame to ms approx
+        const cooldown = Math.max(5, cdTime * (1 - baseCdr)); 
         
         this.maxCooldowns.update(c => ({...c, primary: cooldown})); 
         this.cooldowns.update(c => ({...c, primary: cooldown}));
         
+        // 5. Physics & State
         const attackDir = targetAngle ?? player.angle;
         player.angle = attackDir; 
         player.state = 'ATTACK'; 
@@ -278,24 +284,31 @@ export class PlayerAbilitiesService {
         player.animFrameTimer = 0; 
         player.animPhase = 'startup';
         
-        const shakeIntensity = 2 + newComboIndex;
-        this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: { intensity: shakeIntensity, decay: 0.9, x: Math.cos(attackDir), y: Math.sin(attackDir) } });
+        // Lunge logic applied here or in update loop? 
+        // Applying initial burst here for crispness
+        if (step.forwardLunge > 0) {
+            player.vx += Math.cos(attackDir) * step.forwardLunge;
+            player.vy += Math.sin(attackDir) * step.forwardLunge;
+        }
         
-        this.sound.play('SWOOSH'); 
+        this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: { intensity: step.shake, decay: 0.9, x: Math.cos(attackDir), y: Math.sin(attackDir) } });
+        
+        if (step.sound === 'HEAVY_SWING') this.sound.play('SWOOSH'); // Placeholder mapping
+        else this.sound.play('SWOOSH');
   }
 
   spawnPrimaryAttackHitbox(player: Entity) {
+      if (!this.activeComboStep) return;
+
+      const step = this.activeComboStep;
       const stats = this.stats.playerStats();
       const equippedWeapon = this.inventory.equipped().weapon;
-      
-      const combo = player.comboIndex || 0;
       const currentZoneId = this.world.currentZone().id;
+      
       const hitbox = this.entityPool.acquire('HITBOX', undefined, currentZoneId);
       hitbox.source = 'PLAYER';
       
-      // FIXED: Always use stats.damagePacket, create fallback if truly missing
       if (!stats.damagePacket) {
-        console.error('[CRITICAL] playerStats().damagePacket is undefined!');
         hitbox.damagePacket = { ...createEmptyDamagePacket(), physical: 10 };
       } else {
         hitbox.damagePacket = { ...stats.damagePacket };
@@ -304,48 +317,40 @@ export class PlayerAbilitiesService {
       if (stats.penetration) hitbox.penetration = { ...stats.penetration };
       if (equippedWeapon?.damageConversion) hitbox.damageConversion = { ...equippedWeapon.damageConversion };
 
-      let comboMultiplier = 1.0;
-      let knockback = 5;
-      let stun = 0;
-      let color = '#f97316';
-      let radiusMult = 1.0;
+      // Apply Combo Multipliers
+      if (step.damageMult !== 1.0) {
+          hitbox.damagePacket.physical = Math.floor(hitbox.damagePacket.physical * step.damageMult);
+          hitbox.damagePacket.fire = Math.floor(hitbox.damagePacket.fire * step.damageMult);
+          hitbox.damagePacket.cold = Math.floor(hitbox.damagePacket.cold * step.damageMult);
+          hitbox.damagePacket.lightning = Math.floor(hitbox.damagePacket.lightning * step.damageMult);
+          hitbox.damagePacket.chaos = Math.floor(hitbox.damagePacket.chaos * step.damageMult);
+      }
+
       let reach = 60;
+      if (!equippedWeapon) reach = 50; 
+      else reach = (equippedWeapon.stats['reach'] || 60) + (stats.damage * 0.1); 
 
-      if (!equippedWeapon) {
-          reach = 75; color = '#fbbf24';
-          const lungeSpeed = 12 + (combo * 4);
-          player.vx += Math.cos(player.angle) * lungeSpeed;
-          player.vy += Math.sin(player.angle) * lungeSpeed;
-      } else {
-          reach = (equippedWeapon.stats['reach'] || 60) + (stats.damage * 0.1); 
-      }
-
-      if (combo === 1) { comboMultiplier = 1.2; knockback += 3; radiusMult = 1.1; } 
-      else if (combo === 2) { comboMultiplier = 2.0; knockback += 15; stun = 20; radiusMult = 1.3; this.sound.play('IMPACT'); }
-
-      if (hitbox.damagePacket && comboMultiplier !== 1.0) {
-          hitbox.damagePacket.physical = Math.floor(hitbox.damagePacket.physical * comboMultiplier);
-          hitbox.damagePacket.fire = Math.floor(hitbox.damagePacket.fire * comboMultiplier);
-          hitbox.damagePacket.cold = Math.floor(hitbox.damagePacket.cold * comboMultiplier);
-          hitbox.damagePacket.lightning = Math.floor(hitbox.damagePacket.lightning * comboMultiplier);
-          hitbox.damagePacket.chaos = Math.floor(hitbox.damagePacket.chaos * comboMultiplier);
-      }
-
-      const offsetDist = 20 + (combo * 5); 
+      // Hitbox Physics
+      // Center the hitbox further out based on reach
+      const offsetDist = reach * 0.6;
       hitbox.x = player.x + Math.cos(player.angle) * offsetDist;
       hitbox.y = player.y + Math.sin(player.angle) * offsetDist;
       hitbox.z = 10;
-      hitbox.vx = Math.cos(player.angle) * (3 + combo);
-      hitbox.vy = Math.sin(player.angle) * (3 + combo);
+      
+      // Hitbox moves slightly with swing
+      hitbox.vx = Math.cos(player.angle) * 2;
+      hitbox.vy = Math.sin(player.angle) * 2;
       
       hitbox.angle = player.angle;
-      hitbox.radius = reach * radiusMult;
-      hitbox.timer = 12; 
+      hitbox.radius = reach * step.radiusMult;
       
-      hitbox.color = color;
+      // Timer is duration of ACTIVE phase
+      hitbox.timer = step.hitboxEnd - step.hitboxStart; 
+      
+      hitbox.color = equippedWeapon ? equippedWeapon.color : '#fbbf24';
       hitbox.state = 'ATTACK';
-      hitbox.knockbackForce = knockback;
-      hitbox.status.stun = stun;
+      hitbox.knockbackForce = step.knockback;
+      hitbox.status.stun = step.knockback > 15 ? 20 : 0;
       
       if (equippedWeapon?.status) hitbox.status = { ...hitbox.status, ...equippedWeapon.status };
       
@@ -354,9 +359,6 @@ export class PlayerAbilitiesService {
 
       this.collisionService.checkHitboxCollisions(hitbox);
       this.world.entities.push(hitbox);
-      
-      player.comboIndex = (combo + 1) % this.MAX_COMBO;
-      this.currentCombo.set(player.comboIndex);
   }
 
   private useSecondary(player: Entity, stats: any, cds: any) {
@@ -382,8 +384,10 @@ export class PlayerAbilitiesService {
   private useDash(player: Entity, cds: any, targetAngle?: number) {
         if (cds.dash > 0) return;
         this.cooldowns.update(c => ({...c, dash: 40}));
-        this.currentCombo.set(0); 
+        this.currentComboIndex.set(0); 
         player.comboIndex = 0;
+        this.activeComboStep = null;
+        
         const dashDir = targetAngle ?? player.angle;
         player.angle = dashDir;
         player.vx += Math.cos(dashDir) * 20; player.vy += Math.sin(dashDir) * 20;
@@ -446,5 +450,5 @@ export class PlayerAbilitiesService {
         this.particleService.addParticles({ x: player.x, y: player.y, z: 20, count: 50, speed: 12, color: '#f0abfc', size: 6, type: 'circle', life: 1.0, emitsLight: true });
   }
 
-  reset() { this.cooldowns.set({ primary: 0, secondary: 0, dash: 0, utility: 0 }); this.currentCombo.set(0); }
+  reset() { this.cooldowns.set({ primary: 0, secondary: 0, dash: 0, utility: 0 }); this.currentComboIndex.set(0); this.activeComboStep = null; }
 }

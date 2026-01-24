@@ -9,6 +9,7 @@ import { GameEvents, ScreenShakePayload } from '../../core/events/game-events';
 import { SectorId } from '../../models/game.models';
 import { catchError } from 'rxjs/operators';
 import { EMPTY } from 'rxjs';
+import { CommandType } from '../../config/combo.config';
 
 export interface PlayerSaveData {
   level: number;
@@ -69,7 +70,8 @@ export class PlayerService {
   updatePerFrame() { this.abilities.updateCooldowns(); this.stats.update(); }
 
   // Facade Methods
-  useSkill(skill: 'PRIMARY' | 'SECONDARY' | 'DASH' | 'UTILITY' | 'OVERLOAD' | 'SHIELD_BASH', targetAngle?: number) {
+  // Updated signature to accept CommandType from combo config
+  useSkill(skill: CommandType, targetAngle?: number) {
       this.abilities.useSkill(skill, targetAngle);
   }
 

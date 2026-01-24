@@ -3,7 +3,8 @@ import { DamagePacket, Penetration, DamageConversion, StatusEffects } from './da
 
 export type Rarity = 'COMMON' | 'UNCOMMON' | 'RARE' | 'BLACK_MARKET';
 export type ItemType = 'WEAPON' | 'ARMOR' | 'IMPLANT' | 'STIM' | 'PSI_BLADE' | 'AMULET' | 'RING';
-export type ItemShape = 'sword' | 'shield' | 'chip' | 'syringe' | 'psiBlade' | 'amulet' | 'ring' | 'pistol' | 'rifle' | 'shotgun' | 'railgun';
+// Added 'hammer' and 'axe' to ItemShape to support heavy weapon combos
+export type ItemShape = 'sword' | 'shield' | 'chip' | 'syringe' | 'psiBlade' | 'amulet' | 'ring' | 'pistol' | 'rifle' | 'shotgun' | 'railgun' | 'hammer' | 'axe';
 
 export interface Item {
   id: string;
