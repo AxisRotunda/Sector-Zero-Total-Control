@@ -282,13 +282,29 @@ export const DIALOGUES: Record<string, DialogueNode> = {
       options: [{ text: "Thanks for nothing.", nextId: undefined }]
     },
     
+    // NEW / UPDATED PASSENGER DIALOGUE
     'passenger_anxious': {
       id: 'passenger_anxious',
       speaker: 'Refugee',
       text: "They say Sector 9 is flooding again. I just want to get to the surface levels...",
       options: [
         { text: "What happened in Sector 9?", nextId: 'passenger_sector9' },
+        { 
+          text: "I've been to Sector 9. It's worse than you think.",
+          nextId: 'passenger_shock',
+          reqs: [{ type: 'FLAG', target: 'VISITED_SECTOR_9', value: true }] 
+        },
         { text: "Stay calm.", nextId: undefined }
+      ]
+    },
+    'passenger_shock': {
+      id: 'passenger_shock',
+      speaker: 'Refugee',
+      mood: 'AFRAID',
+      text: "...You made it out? Then it's true. The containment failed. We're all dead...",
+      options: [
+        { text: "Not if we evacuate soon.", nextId: undefined },
+        { text: "...", nextId: undefined }
       ]
     },
     'passenger_sector9': {
@@ -306,7 +322,7 @@ export const DIALOGUES: Record<string, DialogueNode> = {
       text: "Manifest check. State your clearance level.",
       options: [
         { text: "Just looking around.", nextId: 'cargo_suspicious' },
-        { text: "I'm with the Handler's unit.", nextId: 'cargo_clearance' }, // Could add reqs later
+        { text: "I'm with the Handler's unit.", nextId: 'cargo_clearance' },
         { text: "Leave.", nextId: undefined }
       ]
     },
@@ -322,6 +338,32 @@ export const DIALOGUES: Record<string, DialogueNode> = {
       speaker: 'Vanguard Guard',
       text: "...Verified. Don't touch anything without authorization.",
       options: [{ text: "Understood.", nextId: undefined }]
+    },
+
+    // NEW TERMINAL DIALOGUES
+    'emergency_broadcast': {
+      id: 'emergency_broadcast',
+      speaker: 'EMERGENCY BROADCAST SYSTEM',
+      mood: 'DIGITAL',
+      text: ">> SECTOR 9 QUARANTINE IN EFFECT.\n>> UNAUTHORIZED TRANSIT PROHIBITED.\n>> VIOLATORS SUBJECT TO IMMEDIATE DETENTION.",
+      options: [{ text: "Turn off.", nextId: undefined }]
+    },
+    'cargo_manifest': {
+      id: 'cargo_manifest',
+      speaker: 'MANIFEST TERMINAL',
+      factionId: 'VANGUARD',
+      mood: 'DIGITAL',
+      text: ">> MANIFEST #4472-B\n>> CONTENTS: [REDACTED]\n>> DESTINATION: CITADEL COMMAND\n>> CLEARANCE REQUIRED: OVERSEER+",
+      options: [
+        { text: "Attempt override.", nextId: 'manifest_locked' },
+        { text: "Close.", nextId: undefined }
+      ]
+    },
+    'manifest_locked': {
+      id: 'manifest_locked',
+      speaker: 'MANIFEST TERMINAL',
+      text: ">> ACCESS DENIED.\n>> SECURITY ALERT LOGGED.",
+      options: [{ text: "Exit quickly.", nextId: undefined }]
     },
 
     // --- VANGUARD HANDLER ---

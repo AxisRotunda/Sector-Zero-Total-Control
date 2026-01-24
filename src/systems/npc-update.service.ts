@@ -43,6 +43,28 @@ export class NpcUpdateService {
   updateGuard(g: Entity) {
       this.checkPlayerAwareness(g);
       
+      // Behavior Override: Alert / Confront
+      if (g.data?.alertBehavior === 'CONFRONT') {
+          const p = this.world.player;
+          const dist = Math.hypot(p.x - g.x, p.y - g.y);
+          // If player is close but not touching, face and move towards
+          if (dist < (g.data.detectionRadius || 150) && dist > 50) {
+              g.state = 'MOVE';
+              const angle = Math.atan2(p.y - g.y, p.x - g.x);
+              g.angle = angle;
+              const speed = 1.5; // Fast walk
+              g.vx += Math.cos(angle) * speed;
+              g.vy += Math.sin(angle) * speed;
+              this.animateMove(g);
+              return; // Override patrol
+          } else if (dist <= 50) {
+              g.state = 'IDLE'; // Stop at player
+              g.angle = Math.atan2(p.y - g.y, p.x - g.x); // Face player
+              this.animateIdle(g);
+              return;
+          }
+      }
+
       if (!g.data) g.data = {};
       if (g.data.nextBarkTime === undefined) {
           g.data.nextBarkTime = Date.now() + 5000 + Math.random() * 15000;
@@ -174,7 +196,9 @@ export class NpcUpdateService {
       const dy = player.y - npc.y;
       const dist = Math.hypot(dx, dy);
       
-      if (dist < 150 && dist > 30) {
+      const detectionRange = npc.data?.detectionRadius || 150;
+
+      if (dist < detectionRange && dist > 30) {
           const targetAngle = Math.atan2(dy, dx);
           let diff = targetAngle - npc.angle;
           while (diff < -Math.PI) diff += Math.PI * 2;
