@@ -12,7 +12,6 @@ import { NarrativeService } from '../game/narrative.service';
 import { FACTIONS } from '../config/narrative.config';
 import { GlitchTextComponent } from './glitch-text.component';
 import { ICONS } from '../config/icons.config';
-import { CameraService } from '../game/camera.service';
 
 @Component({
   selector: 'app-hud',
@@ -58,39 +57,16 @@ import { CameraService } from '../game/camera.service';
 
           <!-- RIGHT: MAP & MENU -->
           <div class="flex flex-col items-end gap-2">
-             <div class="flex items-center gap-1">
-                 <!-- Camera Controls -->
-                 <div class="flex flex-col items-center gap-1 mr-1">
-                     <div class="text-[8px] text-zinc-500 font-bold">CAM {{ camera.rotationDegrees() | number:'1.0-0' }}°</div>
-                     <div class="flex gap-1">
-                         <button (click)="camera.snapRotation(-1)" class="w-8 h-8 bg-black/60 border border-zinc-700 text-zinc-400 hover:text-white flex items-center justify-center rounded-sm">
-                            ↺
-                         </button>
-                         <button (click)="camera.snapRotation(1)" class="w-8 h-8 bg-black/60 border border-zinc-700 text-zinc-400 hover:text-white flex items-center justify-center rounded-sm">
-                            ↻
-                         </button>
-                     </div>
-                     <!-- Compass Visual -->
-                     <div class="w-8 h-8 rounded-full border border-zinc-700 bg-black/40 relative flex items-center justify-center">
-                        <div class="absolute w-full h-full flex items-center justify-center transition-transform duration-200"
-                             [style.transform]="'rotate(' + (-camera.currentRotation()) + 'rad)'">
-                             <div class="w-1 h-3 bg-red-500 absolute top-1 rounded-sm"></div> <!-- North -->
-                             <div class="w-1 h-2 bg-zinc-600 absolute bottom-1 rounded-sm"></div>
-                        </div>
-                     </div>
-                 </div>
-
-                 <div class="relative group">
-                     <app-map mode="MINI" (mousedown)="mapService.toggleFullMap()" class="cursor-pointer border-2 border-zinc-800 hover:border-cyan-500 transition-colors shadow-lg bg-black"></app-map>
-                     
-                     <div class="absolute top-0 right-0 max-w-[180px] bg-black/80 rounded-bl text-right p-1 pointer-events-none border-b border-l border-zinc-800 flex flex-col items-end">
-                         <div class="text-[9px] text-cyan-500 font-bold uppercase truncate tracking-tight">{{ world.currentZone().name }}</div>
-                         <div class="flex items-center gap-2">
-                             @if (world.currentZone().isSafeZone) {
-                                 <span class="text-[7px] font-bold text-green-500 bg-green-900/30 px-1 rounded border border-green-900/50 tracking-widest animate-pulse">SAFE ZONE</span>
-                             }
-                             <div class="text-[7px] text-zinc-600 uppercase tracking-widest">Depth {{ world.currentZone().minDepth }}</div>
-                         </div>
+             <div class="relative group">
+                 <app-map mode="MINI" (mousedown)="mapService.toggleFullMap()" class="cursor-pointer border-2 border-zinc-800 hover:border-cyan-500 transition-colors shadow-lg bg-black"></app-map>
+                 
+                 <div class="absolute top-0 right-0 max-w-[180px] bg-black/80 rounded-bl text-right p-1 pointer-events-none border-b border-l border-zinc-800 flex flex-col items-end">
+                     <div class="text-[9px] text-cyan-500 font-bold uppercase truncate tracking-tight">{{ world.currentZone().name }}</div>
+                     <div class="flex items-center gap-2">
+                         @if (world.currentZone().isSafeZone) {
+                             <span class="text-[7px] font-bold text-green-500 bg-green-900/30 px-1 rounded border border-green-900/50 tracking-widest animate-pulse">SAFE ZONE</span>
+                         }
+                         <div class="text-[7px] text-zinc-600 uppercase tracking-widest">Depth {{ world.currentZone().minDepth }}</div>
                      </div>
                  </div>
              </div>
@@ -106,28 +82,28 @@ import { CameraService } from '../game/camera.service';
                     }
                 </div>
 
-                <button (click)="openInventory.emit()" class="hud-btn group" title="Inventory [I]">
+                <button (click)="openInventory.emit()" class="hud-btn group" title="Inventory">
                    <svg viewBox="0 0 24 24" class="hud-icon"><path [attr.d]="icons.INVENTORY"></path></svg>
                    <span class="hud-label">KIT</span>
                 </button>
-                <button (click)="openAbilities.emit()" class="hud-btn group" title="Abilities [U]">
+                <button (click)="openAbilities.emit()" class="hud-btn group" title="Abilities">
                    <svg viewBox="0 0 24 24" class="hud-icon"><path [attr.d]="icons.ABILITIES"></path></svg>
                    <span class="hud-label">PSI</span>
                 </button>
-                <button (click)="openSkills.emit()" class="hud-btn group relative" title="Skill Tree [N]">
+                <button (click)="openSkills.emit()" class="hud-btn group relative" title="Skill Tree">
                    <svg viewBox="0 0 24 24" class="hud-icon"><path [attr.d]="icons.SKILLS"></path></svg>
                    <span class="hud-label">NET</span>
                    @if (skillTree.skillPoints() > 0) { <span class="absolute -top-1 -right-1 w-2 h-2 bg-orange-500 rounded-full animate-bounce"></span> }
                 </button>
-                <button (click)="openCodex.emit()" class="hud-btn group" title="Codex [L]">
+                <button (click)="openCodex.emit()" class="hud-btn group" title="Codex">
                    <svg viewBox="0 0 24 24" class="hud-icon"><path [attr.d]="icons.CODEX"></path></svg>
                    <span class="hud-label">LOG</span>
                 </button>
-                <button (click)="openJournal.emit()" class="hud-btn group" title="Journal [J]">
+                <button (click)="openJournal.emit()" class="hud-btn group" title="Journal">
                    <svg viewBox="0 0 24 24" class="hud-icon"><path [attr.d]="icons.JOURNAL"></path></svg>
                    <span class="hud-label">OBJ</span>
                 </button>
-                <button (click)="mapService.toggleSettings()" class="hud-btn group" title="Settings [Esc]">
+                <button (click)="mapService.toggleSettings()" class="hud-btn group" title="Settings">
                    <svg viewBox="0 0 24 24" class="hud-icon"><path [attr.d]="icons.SETTINGS"></path></svg>
                    <span class="hud-label">SYS</span>
                 </button>
@@ -176,7 +152,6 @@ export class HudComponent {
   world = inject(WorldService);
   mapService = inject(MapService);
   narrative = inject(NarrativeService);
-  camera = inject(CameraService);
 
   openInventory = output<void>();
   openSkills = output<void>();

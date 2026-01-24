@@ -198,7 +198,7 @@ export class RenderService {
 
     // 6. Occlusion / X-Ray Pass
     const { buffer, count } = this.chunkManager.getVisibleStaticEntities(cam, window.innerWidth, window.innerHeight);
-    this.drawOcclusion(player, buffer, count);
+    this.drawOcclusion(player, buffer, count, cam.rotation);
 
     // 7. Visual Effects
     this.effectRenderer.drawGlobalEffects(this.ctx, this.renderList as Entity[], player, zone, rainDrops);
@@ -206,20 +206,15 @@ export class RenderService {
     // 8. World UI (In-World)
     this.drawWorldUI(texts, cam);
 
-    // 9. DEBUG: Depth Sort Values
-    if (this.debugMode()) {
-        this.drawDebugDepth(this.renderList);
-    }
-
     this.ctx.restore();
     
-    // 10. Lighting & Atmosphere Pass (Screen Space Overlay)
+    // 9. Lighting & Atmosphere Pass (Screen Space Overlay)
     this.lightingRenderer.drawLighting(this.ctx, this.renderList as Entity[], player, cam, zone, w, h);
 
-    // 11. Post-Processing & HUD Overlays
+    // 10. Post-Processing & HUD Overlays
     this.applyPostEffects(w, h);
     
-    // 12. Guidance Overlay (Always on top)
+    // 11. Guidance Overlay (Always on top)
     this.effectRenderer.drawGuidanceOverlay(
         this.ctx, 
         this.mission.activeObjective(), 
@@ -231,32 +226,6 @@ export class RenderService {
     
     // --- CLEANUP ---
     IsoUtils.setContext(0, 0, 0);
-  }
-
-  private drawDebugDepth(renderList: (Entity | Particle)[]) {
-      if (!this.ctx) return;
-      this.ctx.font = '10px monospace';
-      this.ctx.fillStyle = 'white';
-      this.ctx.textAlign = 'center';
-      
-      const len = renderList.length;
-      const _pos = { x: 0, y: 0 };
-
-      for (let i = 0; i < len; i++) {
-          const e = renderList[i];
-          const z = e.z || 0;
-          
-          IsoUtils.toIso(e.x, e.y, z, _pos);
-          
-          const depth = IsoUtils.getSortDepth(e.x, e.y, z);
-          
-          // Draw text slightly above entity
-          this.ctx.fillText(
-              `D:${depth.toFixed(0)} Z:${z.toFixed(0)}`, 
-              _pos.x, 
-              _pos.y - (('height' in e) ? (e.height || 0) : 20) - 20
-          );
-      }
   }
 
   private prepareLighting(
@@ -395,7 +364,8 @@ export class RenderService {
           }
       }
 
-      this.sorter.sortForRender(this.renderList, player);
+      // CRITICAL FIX: Pass camera rotation to sorting service
+      this.sorter.sortForRender(this.renderList, cam.rotation);
   }
 
   private drawShadows(renderList: (Entity | Particle)[]) {
@@ -462,9 +432,9 @@ export class RenderService {
       }
   }
 
-  private drawOcclusion(player: Entity, staticEntities: Entity[], count: number) {
+  private drawOcclusion(player: Entity, staticEntities: Entity[], count: number, rotation: number) {
       if (!this.ctx) return;
-      if (this.checkOcclusion(player, staticEntities, count)) {
+      if (this.checkOcclusion(player, staticEntities, count, rotation)) {
           this.ctx.save();
           this.ctx.globalAlpha = 0.3;
           this.ctx.globalCompositeOperation = 'source-over'; 
@@ -486,26 +456,33 @@ export class RenderService {
       }
   }
 
-  private checkOcclusion(player: Entity, staticEntities: Entity[], count: number): boolean {
+  private checkOcclusion(player: Entity, staticEntities: Entity[], count: number, rotation: number): boolean {
       const margin = 20;
-      const px = player.x;
-      const py = player.y;
-      
-      // Use new depth sort logic for occlusion check consistency
-      const pDepth = IsoUtils.getSortDepth(px, py, player.z);
+      const pDepth = IsoUtils.getSortDepth(player.x, player.y, 0, rotation);
 
       for (let i = 0; i < count; i++) {
           const e = staticEntities[i];
           if ((e.type === 'WALL' || (e.type === 'DECORATION' && (e.height || 0) > 80))) {
-              const eDepth = IsoUtils.getSortDepth(e.x, e.y, e.z);
+              // Calculate entity depth using same rotation logic
+              const eDepth = IsoUtils.getSortDepth(e.x, e.y, 0, rotation);
+              
+              // If entity is behind player (higher depth value means closer to camera in standard sort, 
+              // BUT in painter's algo we sort back-to-front. 
+              // So smaller depth = background. larger depth = foreground.
+              // If entity is in FOREGROUND (larger depth) than player, check collision.
               if (eDepth <= pDepth) continue; 
 
               const w = e.width || 40;
               const d = e.depth || 40;
-              const halfW = w / 2 + margin;
-              const halfD = d / 2 + margin;
+              // Expand check slightly for height
+              const hFactor = (e.height || 100) * 0.5; 
               
-              if (Math.abs(e.x - px) < halfW && Math.abs(e.y - py) < halfD) {
+              const halfW = w / 2 + margin;
+              const halfD = d / 2 + margin + hFactor; // Height effectively extends bounding box Y in screen space
+              
+              // Rotated bounding box approximation
+              // Optimization: We check simple radius distance first
+              if (Math.abs(e.x - player.x) < halfW && Math.abs(e.y - player.y) < halfD) {
                   return true;
               }
           }

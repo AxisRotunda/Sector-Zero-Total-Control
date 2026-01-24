@@ -25,6 +25,7 @@ export const IsoUtils = {
    */
   toIso: function(x: number, y: number, z: number = 0, out: {x: number, y: number} = {x:0, y:0}) {
     // 1. Rotate around camera center
+    // Optimization: If rotation is effectively zero, skip math
     let rx = x;
     let ry = y;
 
@@ -50,6 +51,9 @@ export const IsoUtils = {
     const y = screenY; 
     const x = screenX; 
     
+    // Derived from:
+    // isoX = rx - ry
+    // isoY = (rx + ry)/2
     const ry = y - 0.5 * x;
     const rx = y + 0.5 * x;
 
@@ -58,7 +62,8 @@ export const IsoUtils = {
         const dx = rx - this._cx;
         const dy = ry - this._cy;
         
-        // Inverse rotation matrix
+        // Inverse rotation matrix (transpose of rotation matrix)
+        // cos stays same, sin becomes -sin
         out.x = dx * this._cos - dy * (-this._sin) + this._cx;
         out.y = dx * (-this._sin) + dy * this._cos + this._cy;
     } else {
@@ -70,26 +75,30 @@ export const IsoUtils = {
   },
 
   /**
-   * Calculates a depth sort key based on the current rotation context.
-   * Fixes verticality Z-fighting by separating footprint depth from elevation bias.
+   * Calculates the sorting depth of a point given a specific camera rotation.
+   * This is critical for Z-sorting in a rotated isometric view.
+   * 
+   * @param x World X
+   * @param y World Y
+   * @param z World Z (Height)
+   * @param rotation Camera Rotation (Radians)
    */
-  getSortDepth(x: number, y: number, z: number = 0): number {
-      // Calculate rotated coordinates relative to camera context
-      const rx = x * this._cos - y * this._sin;
-      const ry = x * this._sin + y * this._cos;
+  getSortDepth: function(x: number, y: number, z: number, rotation: number): number {
+      let rx = x;
+      let ry = y;
+
+      // Apply rotation around origin (0,0) for sorting is sufficient as relative depth is what matters
+      if (rotation !== 0) {
+          const cos = Math.cos(rotation);
+          const sin = Math.sin(rotation);
+          rx = x * cos - y * sin;
+          ry = x * sin + y * cos;
+      }
+
+      // Isometric depth is essentially (x + y) in the aligned space.
+      // We bias by Z slightly to ensure floor objects draw behind elevated objects at same footprint.
+      // However, for walls, we often want the BASE to sort them.
       
-      // 1. Footprint Depth
-      // In iso projection, X+Y corresponds roughly to distance from top of screen.
-      // We scale this massively so it acts as the primary sort key (Rows/Layers).
-      const footprintDepth = (rx + ry) * 10000;
-      
-      // 2. Elevation Bias
-      // Z adds to the sort value (drawn later = on top), but with a smaller scale
-      // so it only affects sorting within the same footprint band.
-      // This prevents tall objects from popping behind ground objects 
-      // while ensuring objects at the same location layer correctly by height.
-      const elevationBias = z * 10;
-      
-      return footprintDepth + elevationBias;
+      return rx + ry + (z * 0.01); 
   }
 };

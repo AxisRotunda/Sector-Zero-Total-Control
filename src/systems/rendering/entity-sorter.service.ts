@@ -9,38 +9,47 @@ export class EntitySorterService {
   /**
    * Sorts entities for Isometric Rendering (Back to Front).
    * 
+   * Primary Sort Key: Projected Depth (Rotated X + Rotated Y)
+   * 
    * Updates objects in-place with `isoDepth` to avoid recalculation during the sort comparator.
-   * Leverages IsoUtils which is pre-configured with the current frame's camera rotation.
    */
-  sortForRender(renderList: (Entity | Particle)[], player: Entity): void {
+  sortForRender(renderList: (Entity | Particle)[], cameraRotation: number): void {
     
     const len = renderList.length;
     
+    // Optimization: Cache trig values for the frame
+    const cos = Math.cos(cameraRotation);
+    const sin = Math.sin(cameraRotation);
+
     // 1. Calculate Depth Key for all items (Linear Pass)
     for (let i = 0; i < len; i++) {
         const e = renderList[i];
         
-        // Base Iso Depth: Use rotation-aware helper
-        // Uses (rx + ry) * 10000 + z * 10 formula
-        let depth = IsoUtils.getSortDepth(e.x, e.y, e.z);
+        // Calculate Rotated Coordinates manually here for speed 
+        // (Avoiding function call overhead of IsoUtils.getSortDepth inside tight loop)
+        const rx = e.x * cos - e.y * sin;
+        const ry = e.x * sin + e.y * cos;
+        
+        // Base Iso Depth: Rotated X + Rotated Y
+        let depth = rx + ry;
         
         // --- Layer Biasing ---
-        // Special handling to force certain types to render strictly before or after others
         
-        if ('type' in e) {
-            const ent = e as Entity;
-            
-            // Floor Decorations: Always Deepest
-            // We apply a massive negative bias to ensure they are drawn before any standing entities
-            // in the same vicinity.
-            if (ent.type === 'DECORATION') {
-                if (ent.subType === 'RUG' || ent.subType === 'FLOOR_CRACK' || ent.subType === 'GRAFFITI') {
-                    depth -= 500000;
-                }
+        // Floor Decorations: Always Deepest
+        if ('subType' in e && e.type === 'DECORATION') {
+            if (e.subType === 'RUG' || e.subType === 'FLOOR_CRACK' || e.subType === 'GRAFFITI') {
+                depth -= 100000;
             }
-            
-            // Wall segments or Gates might need bias if they are visually 'behind' but mathematically 'front'
-            // For now, the improved Iso formula handles most structure/unit overlap correctly.
+        }
+        
+        // Floating Objects: Bias based on Z.
+        // In Iso, Z moves things "Up" (Lower Y). 
+        // Standard painter's algo sorts by "Footprint".
+        // If we add Z to depth, we might make flying things sort behind things they are visually in front of.
+        // Usually, we ignore Z for sorting unless it's a multi-story game.
+        // However, adding a tiny epsilon of Z helps strict overlaps.
+        if (e.z > 0) {
+             depth += e.z * 0.01;
         }
 
         // Store calculated depth on the object (transiently)

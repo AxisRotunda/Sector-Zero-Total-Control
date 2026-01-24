@@ -96,14 +96,18 @@ export class AppComponent implements OnInit, OnDestroy {
                else this.mapService.toggleSettings();
                break;
           case 'INTERACT':
-               const target = this.interactionService.activeInteractable();
-               if (target) {
-                   this.interactionService.interact(target);
-               } else if (this.dialogueService.activeDialogue()) {
-                   this.dialogueService.skipTypewriter();
-               }
+               this.executeInteraction();
                break;
       }
+  }
+
+  executeInteraction() {
+       const target = this.interactionService.activeInteractable();
+       if (target) {
+           this.interactionService.interact(target);
+       } else if (this.dialogueService.activeDialogue()) {
+           this.dialogueService.skipTypewriter();
+       }
   }
 
   loadGame() {
@@ -147,10 +151,9 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   handleGlobalTouch(event: TouchEvent) {
-    if (this.game.isInMenu() || this.ui.isOpen('SKILLS') || this.ui.isOpen('SHOP') || this.mapService.isFullMapOpen() || this.mapService.isSettingsOpen() || this.ui.isOpen('ABILITIES') || this.ui.isOpen('CODEX') || this.ui.isOpen('JOURNAL') || this.ui.isOpen('WORLD_MAP')) return;
+    if (this.game.isInMenu() || this.ui.isAnyPanelOpen() || this.mapService.isFullMapOpen() || this.mapService.isSettingsOpen()) return;
     
-    if (this.ui.isOpen('INVENTORY') && (event.target as HTMLElement).closest('.app-inventory-container')) return;
-
+    // Prevent interaction if touching specific UI controls
     const target = event.target as HTMLElement;
     if (target.closest('app-joystick') || target.closest('button')) {
         return;
@@ -158,9 +161,8 @@ export class AppComponent implements OnInit, OnDestroy {
     
     const touch = event.changedTouches[0];
     const width = window.innerWidth;
-    const height = window.innerHeight;
 
-    // Right side tap logic
+    // Right side tap logic (Action Zone)
     if (touch.clientX > width / 2) {
         const currentTime = Date.now();
         // Double tap -> Dash
@@ -170,14 +172,10 @@ export class AppComponent implements OnInit, OnDestroy {
             this.player.abilities.useSkill('DASH', this.input.aimAngle ?? undefined);
             this.lastTapTime = 0; 
         } else {
-            // Single tap -> Try World Interact
-            this.interactionService.tryInteractAt(touch.clientX, touch.clientY, width, height);
             this.lastTapTime = currentTime;
         }
-    } else {
-        // Left side tap -> Also try interact if not dragging joystick
-        this.interactionService.tryInteractAt(touch.clientX, touch.clientY, width, height);
     }
+    // Left side is reserved purely for Joystick or blank input, no tap interactions to prevent misclicks.
   }
 
   onRightClick(event: MouseEvent) {
