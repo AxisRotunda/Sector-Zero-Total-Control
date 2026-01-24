@@ -31,6 +31,9 @@ export class ParticleService {
   reset() { this.particlePool.releaseAll(); this.particles = []; }
 
   addParticles(opts: ParticleOptions) {
+      // Use 'source-over' as default for sort comparison consistency
+      const composite = opts.composite || 'source-over';
+
       for(let i=0; i<opts.count; i++) {
           const a = Math.random() * Math.PI * 2;
           const s = Math.random() * opts.speed;
@@ -40,10 +43,47 @@ export class ParticleService {
           p.color = opts.color; p.life = opts.life || 1.0;
           p.sizeStart = opts.size || 2; p.sizeEnd = 0; p.alphaStart = 1; p.alphaEnd = 0;
           p.shape = opts.type || 'circle'; p.rotation = Math.random() * 360; p.rotSpeed = (Math.random() - 0.5) * 10;
-          p.composite = opts.composite;
+          p.composite = composite;
           p.emitsLight = opts.emitsLight;
-          this.particles.push(p);
+          
+          this.insertSorted(p);
       }
+  }
+
+  // Insert particle keeping the array sorted by composite mode
+  // 'source-over' usually needs to be first, 'lighter' last for correct blending
+  // String comparison: 'lighter' < 'source-over'. So ascending sort puts lighter first? 
+  // Wait, EffectRenderer previously sorted by localCompare.
+  // Standard alpha blending (source-over) should usually be drawn before additive (lighter).
+  // 'source-over' > 'lighter'. So Descending sort?
+  // Let's stick to localeCompare order: 'lighter' comes before 'source-over'.
+  // If we draw 'lighter' first, it blends with background. Then 'source-over' draws on top.
+  // Actually, for additive glow, we usually want it on top.
+  // The previous renderer code did: particles.sort((a,b) => a.comp.localeCompare(b.comp));
+  // This puts 'lighter' before 'source-over'.
+  // We will maintain that order.
+  private insertSorted(particle: Particle) {
+      const comp = particle.composite || 'source-over';
+      // Find index where next element is >= comp
+      // Optimization: Most particles are 'source-over'. Check end first.
+      
+      if (this.particles.length === 0) {
+          this.particles.push(particle);
+          return;
+      }
+
+      // Linear scan is fast enough for particle counts (hundreds) compared to Sort (N log N)
+      let index = 0;
+      // We want to insert such that the array remains sorted by composite string
+      // Loop until we find an item that is "greater" or equal
+      while (index < this.particles.length) {
+          const currentComp = this.particles[index].composite || 'source-over';
+          if (currentComp.localeCompare(comp) >= 0) {
+              break;
+          }
+          index++;
+      }
+      this.particles.splice(index, 0, particle);
   }
 
   update() {

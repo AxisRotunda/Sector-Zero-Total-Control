@@ -13,17 +13,12 @@ export class EffectRendererService {
   drawParticles(ctx: CanvasRenderingContext2D, particles: Particle[]) {
       if (particles.length === 0) return;
 
-      // 1. Sort by composite mode to minimize context state changes
-      // 'source-over' is default, 'lighter'/'screen' are common additives
-      particles.sort((a, b) => {
-          const cA = a.composite || 'source-over';
-          const cB = b.composite || 'source-over';
-          return cA.localeCompare(cB);
-      });
+      // REMOVED: Per-frame sort. ParticleService now maintains sorted order.
+      // particles.sort(...)
 
       let currentComposite = ctx.globalCompositeOperation;
 
-      // 2. Iterate and draw
+      // 2. Iterate and draw (Array is already sorted by composite)
       for (const p of particles) {
           const comp = p.composite || 'source-over';
           

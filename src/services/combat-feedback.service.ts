@@ -68,46 +68,43 @@ export class CombatFeedbackService {
         return;
     }
 
-    // Show dominant type if mixed, or stack them?
-    // Let's stack distinct non-zero types
-    const types = [
-        { type: 'physical', val: breakdown.physical },
-        { type: 'fire', val: breakdown.fire },
-        { type: 'cold', val: breakdown.cold },
-        { type: 'lightning', val: breakdown.lightning },
-        { type: 'chaos', val: breakdown.chaos }
-    ].filter(t => t.val > 0);
+    // Filter significant damage types to avoid clutter
+    // A type is significant if it contributes > 0 to damage
+    const significantTypes = [
+        { type: 'physical', val: breakdown.physical, color: DAMAGE_TYPE_COLORS.physical },
+        { type: 'fire', val: breakdown.fire, color: DAMAGE_TYPE_COLORS.fire },
+        { type: 'cold', val: breakdown.cold, color: DAMAGE_TYPE_COLORS.cold },
+        { type: 'lightning', val: breakdown.lightning, color: DAMAGE_TYPE_COLORS.lightning },
+        { type: 'chaos', val: breakdown.chaos, color: DAMAGE_TYPE_COLORS.chaos }
+    ].filter(t => t.val > 0.5); // Threshold to hide tiny rounding errors
 
-    if (types.length === 0) {
+    if (significantTypes.length === 0) {
         this.spawnSingleDamageNumber(target, totalDamage, isCrit);
         return;
     }
 
-    let yOffset = isCrit ? -50 : -40;
+    // If mostly one type, just show that one bigger. 
+    // If mixed, stack them.
+    // Limit to top 2 types to avoid UI spam.
+    significantTypes.sort((a, b) => b.val - a.val);
+    const topTypes = significantTypes.slice(0, 2);
+
+    let yOffset = isCrit ? -60 : -40;
     
-    // Stack numbers upwards
-    types.forEach((t, i) => {
-        const color = DAMAGE_TYPE_COLORS[t.type as keyof typeof DAMAGE_TYPE_COLORS];
-        const size = isCrit ? 24 : 18;
-        
+    topTypes.forEach((t, i) => {
+        const isMain = i === 0;
+        const size = isCrit && isMain ? 26 : (isMain ? 20 : 16);
+        const prefix = isCrit && isMain ? '!' : '';
+        const offset = i * 20;
+
         this.world.spawnFloatingText(
-            target.x,
-            target.y + yOffset - (i * 20),
-            Math.ceil(t.val).toString(),
-            color,
+            target.x + (i * 10), // Stagger X slightly
+            target.y + yOffset + offset,
+            `${Math.ceil(t.val)}${prefix}`,
+            t.color,
             size
         );
     });
-
-    if (isCrit) {
-      this.world.spawnFloatingText(
-        target.x,
-        target.y - 70,
-        'CRITICAL!',
-        '#facc15',
-        10
-      );
-    }
   }
 
   private spawnSingleDamageNumber(target: Entity, damage: number, isCrit: boolean): void {

@@ -45,8 +45,8 @@ export class CollisionService {
         
         if (dist < player.radius + hitbox.radius) {
             if (player.state !== 'DEAD' && !player.invulnerable) {
-                const damage = hitbox.damageValue ?? this.calculateFallbackDamage(hitbox);
-                this.combat.applyDirectDamage(hitbox, player, damage);
+                // FIXED: Use processHit to apply resistances correctly
+                this.combat.processHit(hitbox, player);
                 
                 if (hitbox.timer !== undefined) {
                     hitbox.timer = 0;
@@ -56,6 +56,7 @@ export class CollisionService {
     }
   }
 
+  // Deprecated but kept for fallback compatibility in CombatService
   private calculateFallbackDamage(hitbox: Entity): number {
     if (hitbox.type === 'ENEMY' && hitbox.equipment?.weapon?.stats['dmg']) {
         return hitbox.equipment.weapon.stats['dmg'];

@@ -1,3 +1,4 @@
+
 import { Injectable, inject } from '@angular/core';
 import { Entity } from '../models/game.models';
 import {
@@ -48,11 +49,12 @@ export class CombatService {
     // Get damage packet from hitbox or generate fallback
     const damagePacket = hitbox.damagePacket ?? this.createFallbackDamagePacket(hitbox);
     
-    const result = this.calculateMitigatedDamage(hitbox, target, damagePacket);
-    
-    if (result.total === 0) {
-      // Zero damage logic if needed
+    // Validate packet in debug mode (optional)
+    if (BALANCE.PLAYER.BASE_HP < 0) { // Using a safe constant check for "Debug" proxy
+        this.validateDamagePacket(damagePacket, `${hitbox.source} -> ${target.type}`);
     }
+
+    const result = this.calculateMitigatedDamage(hitbox, target, damagePacket);
     
     this.applyCombatResult(hitbox, target, result);
   }
@@ -75,6 +77,11 @@ export class CombatService {
 
     const result = this.calculateMitigatedDamage(attacker, target, damagePacket);
     this.applyCombatResult(attacker, target, result);
+  }
+
+  private validateDamagePacket(packet: DamagePacket, source: string): void {
+      if (packet.physical === undefined || isNaN(packet.physical)) packet.physical = 0;
+      if (calculateTotalDamage(packet) < 0) console.warn(`[Combat] Negative damage from ${source}`);
   }
 
   /**
@@ -212,8 +219,9 @@ export class CombatService {
       damagePacket.chaos *= amp;
     }
 
-    // 4. Get penetration
-    const penetration = source.penetration ?? createZeroPenetration();
+    // 4. Get penetration (Use LET to allow cloning)
+    let penetration = source.penetration ? { ...source.penetration } : createZeroPenetration();
+    
     // Default armor pen for player from stats if not set on source entity
     if ((source.source === 'PLAYER' || source.source === 'PSIONIC') && !source.penetration) {
         const pStats = this.stats.playerStats();
@@ -224,6 +232,7 @@ export class CombatService {
             penetration.physical = pStats.armorPen;
         }
     } else if (source.armorPen) {
+        // Legacy fallback
         penetration.physical = source.armorPen;
     }
 
@@ -236,15 +245,12 @@ export class CombatService {
     const effectiveResistances = this.applyPenetration(targetResistances, penetration);
 
     // 7. Calculate physical mitigation (Armor based)
-    // Reduce armor by penetration amount first (Flat reduction for armor usually)
-    const effectiveArmor = Math.max(0, targetResistances.physical - penetration.physical * 100); 
-    
-    // We reduce effective armor by penetration % of current armor
-    const armorMitigationVal = targetResistances.physical * (1 - penetration.physical);
+    // Reduce armor by penetration amount first (Percentage reduction logic)
+    const effectiveArmor = targetResistances.physical * (1 - penetration.physical);
     
     const physicalMitigation = this.calculatePhysicalMitigation(
       damagePacket.physical,
-      armorMitigationVal
+      effectiveArmor
     );
 
     // 8. Apply per-type mitigation
