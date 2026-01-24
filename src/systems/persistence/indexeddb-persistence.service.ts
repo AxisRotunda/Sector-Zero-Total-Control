@@ -1,1 +1,1 @@
-// DEPRECATED - Use src/services/indexed-db.service.ts
+// DELETED - Superseded by src/services/indexed-db.service.ts

@@ -1,2 +1,1 @@
-// DEPRECATED - This file has been superseded by src/game/skill-tree.service.ts
-// Please update imports to point to the new location.
+// DELETED - Superseded by src/game/skill-tree.service.ts

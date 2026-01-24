@@ -45,43 +45,13 @@ export class CombatService {
   public processHit(hitbox: Entity, target: Entity): void {
     if (target.hitFlash > 0 || target.isHitStunned) return;
 
-    // ✅ EXTENSIVE LOGGING
-    console.log('💥 Combat Hit Detected:', {
-      hitbox: {
-        type: hitbox.type,
-        source: hitbox.source,
-        hasDamagePacket: !!hitbox.damagePacket,
-        damagePacket: hitbox.damagePacket,
-        position: { x: hitbox.x, y: hitbox.y }
-      },
-      target: {
-        type: target.type,
-        subType: target.subType,
-        hp: target.hp,
-        maxHp: target.maxHp,
-        resistances: target.resistances,
-        position: { x: target.x, y: target.y }
-      }
-    });
-
     // Get damage packet from hitbox or generate fallback
     const damagePacket = hitbox.damagePacket ?? this.createFallbackDamagePacket(hitbox);
     
-    console.log('📦 Damage Packet Used:', damagePacket);
-
     const result = this.calculateMitigatedDamage(hitbox, target, damagePacket);
     
-    console.log('🎯 Damage Result:', {
-      total: result.total,
-      breakdown: result.breakdown,
-      isCrit: result.isCrit
-    });
-
     if (result.total === 0) {
-      console.error('❌ ZERO DAMAGE DETECTED - Debugging:');
-      console.error('   Packet:', damagePacket);
-      console.error('   Target Resistances:', target.resistances);
-      console.error('   Calculation breakdown:', result.breakdown);
+      // Zero damage logic if needed
     }
     
     this.applyCombatResult(hitbox, target, result);
@@ -126,7 +96,6 @@ export class CombatService {
     
     // Calculate from source
     if (hitbox.source === 'PLAYER' || hitbox.source === 'PSIONIC') {
-      // ✅ FIX: Use damagePacket from playerStats
       const stats = this.stats.playerStats();
       
       if (stats.damagePacket) {
@@ -251,7 +220,6 @@ export class CombatService {
         if (pStats.penetration) {
             penetration.physical += pStats.penetration.physical;
             penetration.fire += pStats.penetration.fire;
-            // ... merge others if needed, typically physical is main one stored in stats.penetration
         } else {
             penetration.physical = pStats.armorPen;
         }
@@ -499,34 +467,5 @@ export class CombatService {
     }
 
     this.loot.processDestructibleRewards(e);
-  }
-
-  public updatePickup(e: Entity): void {
-    const player = this.world.player;
-    const dist = Math.hypot(player.x - e.x, player.y - e.y);
-    e.z = 10 + Math.sin(performance.now() * 0.005) * 5;
-
-    if (dist < 100) {
-      e.x += (player.x - e.x) * 0.1;
-      e.y += (player.y - e.y) * 0.1;
-
-      if (dist < 30 && e.itemData) {
-        if (this.inventory.addItem(e.itemData)) {
-          this.world.spawnFloatingText(
-            player.x,
-            player.y - 60,
-            e.itemData.name || 'ITEM',
-            e.itemData.color || '#fff',
-            16
-          );
-          this.eventBus.dispatch({
-            type: GameEvents.ITEM_COLLECTED,
-            payload: { itemId: e.itemData.id || '' }
-          });
-          this.sound.play('POWERUP');
-          e.hp = 0;
-        }
-      }
-    }
   }
 }

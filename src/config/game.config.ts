@@ -1,4 +1,3 @@
-
 import { Zone } from '../models/game.models';
 
 export const SAVE_KEY = 'sector_zero_save_tower_v2';
@@ -23,12 +22,6 @@ export const LOOT_CHANCES = {
     RARE: 0.85,
     BLACK_MARKET: 0.96,
 };
-
-// ZONES array removed. All zone data is now managed via src/data/ and ZoneManagerService.
-export const ZONES: Zone[] = [
-    // Fallback/Default if loaded before ZoneManager initializes
-    { id: 'HUB', name: 'Liminal Citadel', theme: 'INDUSTRIAL', groundColor: '#09090b', wallColor: '#27272a', detailColor: '#06b6d4', minDepth: 0, difficultyMult: 1.0, weather: 'ASH', floorPattern: 'HUB' }
-];
 
 export const SKILL_TREE_GEN = {
     LAYERS: 5,
