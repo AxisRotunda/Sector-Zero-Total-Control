@@ -147,7 +147,24 @@ export class WorldService implements OnDestroy {
   cleanup() {
      for (let i = this.entities.length - 1; i >= 0; i--) { 
         const e = this.entities[i];
+        
         if (e.type === 'SPAWNER' || e.type === 'SHRINE' || e.type === 'WALL') continue;
+        
+        // Remove dead entities after a decay period
+        if (e.state === 'DEAD') {
+            // Initialize death timer if not present
+            if (!e.data) e.data = {};
+            if (e.data.deathTime === undefined) {
+                e.data.deathTime = Date.now();
+            }
+            
+            // Remove after 3 seconds (allows loot to spawn and potential death effects)
+            if (Date.now() - e.data.deathTime > 3000) {
+                this.entities.splice(i, 1);
+                continue;
+            }
+        }
+
         // Simple bounds check cleanup
         if (e.x < this.mapBounds.minX - 500 || e.x > this.mapBounds.maxX + 500 || e.y < this.mapBounds.minY - 500 || e.y > this.mapBounds.maxY + 500) {
             this.entities.splice(i, 1);

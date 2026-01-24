@@ -112,10 +112,15 @@ export class PlayerStatsService {
           if (weapon.penetration) {
               pen.physical += weapon.penetration.physical;
               pen.fire += weapon.penetration.fire;
-              // ... others
+              pen.cold += weapon.penetration.cold;
+              pen.lightning += weapon.penetration.lightning;
+              pen.chaos += weapon.penetration.chaos;
           } else if (weapon.stats?.['armorPen']) {
               pen.physical += (weapon.stats['armorPen'] / 100);
           }
+      } else {
+          // Unarmed has 15% base armor pen (fists bypass some armor via strikes)
+          pen.physical += 0.15;
       }
       
       // Cap physical pen

@@ -42,10 +42,15 @@ export class EntityUpdateService {
     // Register Player (Dynamic) so enemies can query position via Hash
     this.spatialHash.insert(player, false);
 
-    // Register all Dynamic Entities
+    // Register all LIVING Dynamic Entities
     for (let i = 0; i < entities.length; i++) {
+        const entity = entities[i];
+        
+        // Skip dead entities - they should not be in spatial queries or rendered
+        if (entity.state === 'DEAD') continue;
+
         // Insert before logic to ensure physics/AI queries against reasonably fresh data
-        this.spatialHash.insert(entities[i], false);
+        this.spatialHash.insert(entity, false);
     }
 
     // 2. Player Updates (Generic Entity Logic)

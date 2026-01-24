@@ -51,6 +51,9 @@ export class UnitRendererService {
   }
 
   drawHumanoid(ctx: CanvasRenderingContext2D, e: Entity) {
+      // CRITICAL: Do not render dead entities
+      if (e.state === 'DEAD') return;
+
       const isPlayer = e.type === 'PLAYER'; 
       const isGuard = e.subType === 'GUARD'; 
       const isNPC = e.type === 'NPC' && !isGuard; 
