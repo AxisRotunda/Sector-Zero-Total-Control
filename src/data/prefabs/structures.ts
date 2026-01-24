@@ -181,10 +181,10 @@ export const BUILDING_PREFABS = {
 
     livingQuarters: (x: number, y: number, color: string, idPrefix: string = 'barracks'): PrefabResult => {
         const walls: PrefabWall[] = [
-            // Outer boundaries (Low walls to see inside)
-            { x: x, y: y - 120, w: 300, h: 20, height: 100, color: color }, // Back
-            { x: x, y: y + 120, w: 300, h: 20, height: 100, color: color }, // Front
-            { x: x - 160, y: y, w: 20, h: 260, height: 100, color: color }, // Left
+            // Outer boundaries (High walls to see from behind obstacles)
+            { x: x, y: y - 120, w: 300, h: 20, height: 250, color: color }, // Back (Was 100)
+            { x: x, y: y + 120, w: 300, h: 20, height: 250, color: color }, // Front (Was 100)
+            { x: x - 160, y: y, w: 20, h: 260, height: 250, color: color }, // Left (Was 100)
         ];
 
         const entities: ZoneEntityDef[] = [];
@@ -216,8 +216,8 @@ export const BUILDING_PREFABS = {
     messHall: (x: number, y: number, color: string, idPrefix: string = 'mess'): PrefabResult => {
         const walls: PrefabWall[] = [
             // Open air canteen structure
-            { x: x, y: y - 100, w: 250, h: 20, height: 120, color: color },
-            { x: x - 135, y: y, w: 20, h: 220, height: 120, color: color },
+            { x: x, y: y - 100, w: 250, h: 20, height: 250, color: color }, // Was 120
+            { x: x - 135, y: y, w: 20, h: 220, height: 250, color: color }, // Was 120
         ];
 
         const entities: ZoneEntityDef[] = [];
@@ -243,7 +243,7 @@ export const BUILDING_PREFABS = {
 
     supplyDepot: (x: number, y: number, idPrefix: string = 'supply'): PrefabResult => {
         const walls: PrefabWall[] = [
-            { x: x, y: y, w: 200, h: 100, height: 150, color: '#3f3f46' } // Backstop wall
+            { x: x, y: y, w: 200, h: 100, height: 250, color: '#3f3f46' } // Backstop wall (Was 150)
         ];
         
         const entities: ZoneEntityDef[] = [
