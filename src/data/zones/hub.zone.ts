@@ -144,7 +144,7 @@ export const HUB_ZONE: ZoneTemplate = {
   
   regionType: 'hub',
   isSafeZone: true, 
-  childZoneIds: ['SECTOR_9_N', 'HUB_TRAINING'],
+  childZoneIds: ['SECTOR_9_N', 'HUB_TRAINING', 'MAGLEV_INTERIOR'],
 
   renderLayers: {
     floor: { zIndex: -1000 },

@@ -24,6 +24,7 @@ export interface PrefabWall {
     type?: string;
     locked?: boolean;
     data?: any;
+    subType?: string; // Explicit subtype for renderer dispatch
 }
 
 export interface PrefabResult {
@@ -44,15 +45,15 @@ export const BUILDING_PREFABS = {
             // Train Hull
             { x: x, y: y - 80, w: STATION_DIMS.TRAIN.width, h: STATION_DIMS.TRAIN.height, height: STATION_DIMS.TRAIN.depth, color: '#0ea5e9', type: 'MAGLEV_TRAIN' },
             // Platform Barriers
-            { x: x - 300, y: y, w: STATION_DIMS.BARRIER.width, h: STATION_DIMS.BARRIER.depth, height: STATION_DIMS.BARRIER.height, color: '#ef4444', type: 'BARRIER' },
-            { x: x + 300, y: y, w: STATION_DIMS.BARRIER.width, h: STATION_DIMS.BARRIER.depth, height: STATION_DIMS.BARRIER.height, color: '#ef4444', type: 'BARRIER' },
-            { x: x, y: y, w: STATION_DIMS.BARRIER.width, h: STATION_DIMS.BARRIER.depth, height: STATION_DIMS.BARRIER.height, color: '#ef4444', type: 'BARRIER' },
+            { x: x - 300, y: y, w: STATION_DIMS.BARRIER.width, h: STATION_DIMS.BARRIER.depth, height: STATION_DIMS.BARRIER.height, color: '#ef4444', type: 'BARRIER', subType: 'BARRIER' },
+            { x: x + 300, y: y, w: STATION_DIMS.BARRIER.width, h: STATION_DIMS.BARRIER.depth, height: STATION_DIMS.BARRIER.height, color: '#ef4444', type: 'BARRIER', subType: 'BARRIER' },
+            { x: x, y: y, w: STATION_DIMS.BARRIER.width, h: STATION_DIMS.BARRIER.depth, height: STATION_DIMS.BARRIER.height, color: '#ef4444', type: 'BARRIER', subType: 'BARRIER' },
             // Roof Supports
             { x: x - 300, y: y + 100, w: 20, h: 20, height: 350, color: '#94a3b8' },
             { x: x + 300, y: y + 100, w: 20, h: 20, height: 350, color: '#94a3b8' },
             // Gates
-            { x: x - 100, y: y + 200, w: 10, h: 40, height: 40, color: '#ef4444', type: 'BARRIER' },
-            { x: x + 100, y: y + 200, w: 10, h: 40, height: 40, color: '#ef4444', type: 'BARRIER' },
+            { x: x - 100, y: y + 200, w: 10, h: 40, height: 40, color: '#ef4444', type: 'BARRIER', subType: 'BARRIER' },
+            { x: x + 100, y: y + 200, w: 10, h: 40, height: 40, color: '#ef4444', type: 'BARRIER', subType: 'BARRIER' },
             { x: x - 200, y: y + 200, w: 200, h: 10, height: 40, color: '#334155' },
             { x: x + 200, y: y + 200, w: 200, h: 10, height: 40, color: '#334155' },
         ],
@@ -60,7 +61,111 @@ export const BUILDING_PREFABS = {
             // Default Station Entities
             { id: `station_kiosk_w`, type: 'DECORATION', subType: 'INFO_KIOSK', x: x - 150, y: y + 100 },
             { id: `station_kiosk_e`, type: 'DECORATION', subType: 'INFO_KIOSK', x: x + 150, y: y + 100 },
-            { type: 'DECORATION', subType: 'NEON', x: x, y: y + 100, data: { width: 600, height: 20, z: 300, color: '#bae6fd' } }
+            { type: 'DECORATION', subType: 'NEON', x: x, y: y + 100, data: { width: 600, height: 20, z: 300, color: '#bae6fd' } },
+            // Entrance Trigger
+            { 
+                id: 'station_entrance',
+                type: 'INTERACTABLE', 
+                subType: 'ZONE_TRANSITION', 
+                x: x, 
+                y: y - 40, 
+                data: { 
+                  targetZone: 'MAGLEV_INTERIOR', 
+                  promptText: 'BOARD MAGLEV', 
+                  isTransition: true,
+                  width: 120,
+                  depth: 60
+                } 
+            }
+        ]
+    }),
+
+    maglevCockpit: (x: number, y: number): PrefabResult => ({
+        walls: [
+          // Front viewport (Lower wall)
+          { x: x, y: y - 60, w: 200, h: 20, height: 150, color: '#1e293b' },
+          // Side walls
+          { x: x - 110, y: y, w: 20, h: 120, height: 150, color: '#334155' },
+          { x: x + 110, y: y, w: 20, h: 120, height: 150, color: '#334155' },
+          // Control console base
+          { x: x, y: y - 20, w: 120, h: 60, height: 80, color: '#0ea5e9' }
+        ],
+        entities: [
+          { type: 'TERMINAL', x: x, y: y - 20, data: { 
+            dialogueId: 'maglev_nav_system', 
+            color: '#06b6d4', 
+            promptText: 'NAV CONSOLE',
+            width: 40, depth: 30, height: 50
+          }},
+          { type: 'DECORATION', subType: 'DYNAMIC_GLOW', x: x, y: y - 50, data: { 
+            width: 180, depth: 20, z: 90, color: '#06b6d4', glowIntensity: 1.2 
+          }},
+          { type: 'NPC', subType: 'HANDLER', x: x - 40, y: y, data: {
+            dialogueId: 'maglev_pilot',
+            color: '#eab308',
+            behavior: 'IDLE'
+          }}
+        ]
+    }),
+      
+    maglevPassengerCar: (x: number, y: number, carId: string): PrefabResult => ({
+        walls: [
+          // Side walls
+          { x: x - 110, y: y, w: 20, h: 200, height: 150, color: '#334155' },
+          { x: x + 110, y: y, w: 20, h: 200, height: 150, color: '#334155' },
+          // Seat rows (low walls)
+          { x: x - 60, y: y - 60, w: 80, h: 30, height: 40, color: '#475569' },
+          { x: x + 60, y: y - 60, w: 80, h: 30, height: 40, color: '#475569' },
+          { x: x - 60, y: y + 60, w: 80, h: 30, height: 40, color: '#475569' },
+          { x: x + 60, y: y + 60, w: 80, h: 30, height: 40, color: '#475569' }
+        ],
+        entities: [
+          // Passengers (randomized)
+          { type: 'NPC', subType: 'CITIZEN', x: x - 60, y: y - 60, data: { 
+            dialogueId: 'passenger_gossip', behavior: 'IDLE', color: '#94a3b8' 
+          }},
+          { type: 'NPC', subType: 'CITIZEN', x: x + 60, y: y + 60, data: { 
+            dialogueId: 'passenger_anxious', behavior: 'COWER', color: '#64748b' 
+          }},
+          // Window lights
+          { type: 'DECORATION', subType: 'NEON', x: x - 120, y: y, data: { 
+            z: 100, width: 20, height: 200, color: '#0ea5e9' 
+          }},
+          { type: 'DECORATION', subType: 'NEON', x: x + 120, y: y, data: { 
+            z: 100, width: 20, height: 200, color: '#0ea5e9' 
+          }},
+          // Luggage
+          { type: 'DECORATION', subType: 'CRATE', x: x, y: y - 90, data: { 
+            width: 30, height: 25, depth: 20, color: '#3f3f46' 
+          }}
+        ]
+    }),
+      
+    maglevCargoBay: (x: number, y: number): PrefabResult => ({
+        walls: [
+          // Wider walls for cargo space
+          { x: x - 140, y: y, w: 20, h: 250, height: 150, color: '#334155' },
+          { x: x + 140, y: y, w: 20, h: 250, height: 150, color: '#334155' },
+          // Cargo containers
+          { x: x - 60, y: y - 80, w: 60, h: 60, height: 80, color: '#854d0e' },
+          { x: x + 60, y: y - 80, w: 60, h: 60, height: 80, color: '#854d0e' },
+          { x: x, y: y + 80, w: 100, h: 50, height: 70, color: '#3f3f46' }
+        ],
+        entities: [
+          { type: 'INTERACTABLE', subType: 'STASH', x: x, y: y + 80, data: {
+            promptText: 'INSPECT CARGO'
+          }},
+          { type: 'NPC', subType: 'GUARD', x: x, y: y - 100, data: {
+            dialogueId: 'cargo_guard',
+            color: '#3b82f6',
+            behavior: 'PATROL',
+            patrolPoints: [
+              { x: x, y: y - 100 },
+              { x: x, y: y + 100 }
+            ]
+          }},
+          { type: 'DECORATION', subType: 'BARREL', x: x - 80, y: y, data: {} },
+          { type: 'DECORATION', subType: 'BARREL', x: x + 80, y: y, data: {} }
         ]
     }),
 
@@ -81,7 +186,7 @@ export const BUILDING_PREFABS = {
 
     shop: (x: number, y: number): PrefabResult => ({
         walls: [
-            { x: x, y: y, w: 60, h: 60, height: 150, color: '#52525b', type: 'PILLAR' }
+            { x: x, y: y, w: 60, h: 60, height: 150, color: '#52525b', type: 'PILLAR', subType: 'PILLAR' }
         ],
         entities: [
             { type: 'NPC', subType: 'TRADER', x: x - 50, y: y, data: { dialogueId: 'generic', color: '#eab308' } },
@@ -93,7 +198,7 @@ export const BUILDING_PREFABS = {
 
     spire: (x: number, y: number): PrefabResult => ({
         walls: [
-            { x: x, y: y, w: 200, h: 200, height: 600, color: '#06b6d4', type: 'MONOLITH' }
+            { x: x, y: y, w: 200, h: 200, height: 600, color: '#06b6d4', type: 'MONOLITH', subType: 'MONOLITH' }
         ],
         entities: [
             { type: 'DECORATION', subType: 'CABLE', x: x, y: y, data: { targetX: x + 650, targetY: y + 300, z: 400 } },
@@ -119,10 +224,10 @@ export const BUILDING_PREFABS = {
             // Right Flank
             { x: D.GATE_FLANK_OFFSET, y: y, w: D.GATE_FLANK_WIDTH, h: D.WALL_THICKNESS, height: 350, color: '#18181b' },
             // Mechanism (Center)
-            { x: 0, y: y, w: D.GATE_WIDTH, h: 60, height: 300, color: '#3f3f46', type: 'GATE_SEGMENT', locked: locked },
+            { x: 0, y: y, w: D.GATE_WIDTH, h: 60, height: 300, color: '#3f3f46', type: 'GATE_SEGMENT', subType: 'GATE_SEGMENT', locked: locked },
             // Pillars
-            { x: -D.PILLAR_OFFSET_X, y: y, w: D.PILLAR_WIDTH, h: D.PILLAR_DEPTH, height: D.PILLAR_HEIGHT, color: '#52525b', type: 'PILLAR' },
-            { x: D.PILLAR_OFFSET_X, y: y, w: D.PILLAR_WIDTH, h: D.PILLAR_DEPTH, height: D.PILLAR_HEIGHT, color: '#52525b', type: 'PILLAR' },
+            { x: -D.PILLAR_OFFSET_X, y: y, w: D.PILLAR_WIDTH, h: D.PILLAR_DEPTH, height: D.PILLAR_HEIGHT, color: '#52525b', type: 'PILLAR', subType: 'PILLAR' },
+            { x: D.PILLAR_OFFSET_X, y: y, w: D.PILLAR_WIDTH, h: D.PILLAR_DEPTH, height: D.PILLAR_HEIGHT, color: '#52525b', type: 'PILLAR', subType: 'PILLAR' },
             
             // Guard Booth (Left of Gate)
             { x: -200, y: y - 160, w: 100, h: 20, height: 200, color: '#3f3f46' },
@@ -165,13 +270,13 @@ export const BUILDING_PREFABS = {
         
         return {
             walls: [
-                { x: x, y: y - 170, w: 500, h: 60, height: 350, color: wallColor, type: 'TRAINING_EXTERIOR' },
-                { x: x - 220, y: y + 30, w: 60, h: 340, height: 350, color: wallColor, type: 'TRAINING_EXTERIOR' },
-                { x: x + 220, y: y + 30, w: 60, h: 340, height: 350, color: wallColor, type: 'TRAINING_EXTERIOR' },
+                { x: x, y: y - 170, w: 500, h: 60, height: 350, color: wallColor, type: 'TRAINING_EXTERIOR', subType: 'TRAINING_EXTERIOR' },
+                { x: x - 220, y: y + 30, w: 60, h: 340, height: 350, color: wallColor, type: 'TRAINING_EXTERIOR', subType: 'TRAINING_EXTERIOR' },
+                { x: x + 220, y: y + 30, w: 60, h: 340, height: 350, color: wallColor, type: 'TRAINING_EXTERIOR', subType: 'TRAINING_EXTERIOR' },
                 { x: x - 150, y: y + 200, w: 80, h: 20, height: 350, color: wallColor },
                 { x: x + 150, y: y + 200, w: 80, h: 20, height: 350, color: wallColor },
                 { x: x, y: y - 130, w: 140, h: 20, height: 120, color: accentColor },
-                { x: x, y: y, w: 300, h: 10, height: 5, color: '#06b6d4', type: 'DYNAMIC_GLOW', data: { glowIntensity: 0.4, pulseSpeed: 1.5 } }
+                { x: x, y: y, w: 300, h: 10, height: 5, color: '#06b6d4', type: 'DYNAMIC_GLOW', subType: 'DYNAMIC_GLOW', data: { glowIntensity: 0.4, pulseSpeed: 1.5 } }
             ],
             entities: [
                 { type: 'INTERACTABLE', subType: 'ZONE_TRANSITION', x: x, y: y - 100, data: { targetZone: 'HUB_TRAINING', promptText: 'ENTER SIMULATION', isTransition: true } }

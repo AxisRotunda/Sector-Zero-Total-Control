@@ -253,6 +253,77 @@ export const DATA_LOGS: DataLog[] = [
 ];
 
 export const DIALOGUES: Record<string, DialogueNode> = {
+    // --- MAGLEV INTERIOR ---
+    'maglev_pilot': {
+      id: 'maglev_pilot',
+      speaker: 'Pilot Kovac',
+      factionId: 'VANGUARD',
+      mood: 'NEUTRAL',
+      text: "Route locked to Undercity. Directorate orders. Nothing I can do about it.",
+      options: [
+        { text: "When's the next departure?", nextId: 'maglev_schedule' },
+        { text: "Can you override the lock?", nextId: 'maglev_locked' },
+        { text: "Never mind.", nextId: undefined }
+      ]
+    },
+    'maglev_schedule': {
+      id: 'maglev_schedule',
+      speaker: 'Pilot Kovac',
+      factionId: 'VANGUARD',
+      text: "Every 6 hours. Next run is 0400. If you're not cleared by then, don't bother showing up.",
+      options: [{ text: "Understood.", nextId: undefined }]
+    },
+    'maglev_locked': {
+      id: 'maglev_locked',
+      speaker: 'Pilot Kovac',
+      factionId: 'VANGUARD',
+      mood: 'ANGRY',
+      text: "You think I want to stay stuck here? Override codes are at Command. Good luck with that.",
+      options: [{ text: "Thanks for nothing.", nextId: undefined }]
+    },
+    
+    'passenger_anxious': {
+      id: 'passenger_anxious',
+      speaker: 'Refugee',
+      text: "They say Sector 9 is flooding again. I just want to get to the surface levels...",
+      options: [
+        { text: "What happened in Sector 9?", nextId: 'passenger_sector9' },
+        { text: "Stay calm.", nextId: undefined }
+      ]
+    },
+    'passenger_sector9': {
+      id: 'passenger_sector9',
+      speaker: 'Refugee',
+      mood: 'AFRAID',
+      text: "Containment breach. That's all they told us. Just 'evacuate immediately.' No explanation.",
+      options: [{ text: "...", nextId: undefined }]
+    },
+    
+    'cargo_guard': {
+      id: 'cargo_guard',
+      speaker: 'Vanguard Guard',
+      factionId: 'VANGUARD',
+      text: "Manifest check. State your clearance level.",
+      options: [
+        { text: "Just looking around.", nextId: 'cargo_suspicious' },
+        { text: "I'm with the Handler's unit.", nextId: 'cargo_clearance' }, // Could add reqs later
+        { text: "Leave.", nextId: undefined }
+      ]
+    },
+    'cargo_suspicious': {
+      id: 'cargo_suspicious',
+      speaker: 'Vanguard Guard',
+      mood: 'ANGRY',
+      text: "Then look somewhere else. This area is restricted.",
+      options: [{ text: "Fine.", nextId: undefined }]
+    },
+    'cargo_clearance': {
+      id: 'cargo_clearance',
+      speaker: 'Vanguard Guard',
+      text: "...Verified. Don't touch anything without authorization.",
+      options: [{ text: "Understood.", nextId: undefined }]
+    },
+
     // --- VANGUARD HANDLER ---
     'handler_hub_main': { 
         id: 'handler_hub_main', speaker: 'Overseer-9', factionId: 'VANGUARD', mood: 'DIGITAL',
@@ -301,6 +372,11 @@ export const DIALOGUES: Record<string, DialogueNode> = {
             },
             { text: "Exit.", nextId: undefined }
         ]
+    },
+    'maglev_nav_system': {
+        id: 'maglev_nav_system', speaker: 'NAV-COM', factionId: 'VANGUARD', mood: 'DIGITAL',
+        text: ">> ROUTE LOCKED: CITADEL -> UNDERCITY -> [REDACTED]\n>> WARNING: SECTOR 9 SIGNAL LOST.\n>> STATUS: HOLDING PATTERN.",
+        options: [{ text: "Log off.", nextId: undefined }]
     },
 
     // --- ARRIVAL GUARD ---
@@ -393,6 +469,11 @@ export const DIALOGUES: Record<string, DialogueNode> = {
             { text: "We save ourselves.", nextId: undefined, actions: [{ type: 'ADD_REP', target: 'RESONANT', value: 1 }] },
             { text: "Trust the System.", nextId: undefined, actions: [{ type: 'ADD_REP', target: 'VANGUARD', value: 1 }] }
         ]
+    },
+    'passenger_gossip': {
+        id: 'passenger_gossip', speaker: 'Passenger',
+        text: "I heard the food synthesizers in Sector 8 are failing. People are eating the bio-mass... I'd rather starve.",
+        options: [{ text: "Grim times.", nextId: undefined }]
     },
 
     // --- TERMINALS & OBJECTS ---

@@ -2,6 +2,7 @@
 import { WorldGraph, ZoneLifecycle } from "../../models/zone.models";
 import { HUB_ZONE } from "../zones/hub.zone";
 import { HUB_TRAINING_ZONE } from "../zones/hub_training.zone";
+import { MAGLEV_INTERIOR_ZONE } from "../zones/maglev-interior.zone";
 import { SECTOR_9_N_ZONE } from "../zones/sector-9-segments/sector-9-north.zone";
 import { SECTOR_9_S_ZONE } from "../zones/sector-9-segments/sector-9-south.zone";
 import { SECTOR_9_E_ZONE } from "../zones/sector-9-segments/sector-9-east.zone";
@@ -16,12 +17,19 @@ export const WORLD_GRAPH: WorldGraph = {
       displayName: 'Safe Haven',
       template: HUB_ZONE,
       lifecycle: ZoneLifecycle.PERSISTENT,
-      childZoneIds: ['SECTOR_9_N', 'HUB_TRAINING']
+      childZoneIds: ['SECTOR_9_N', 'HUB_TRAINING', 'MAGLEV_INTERIOR']
     },
     'HUB_TRAINING': {
         id: 'HUB_TRAINING',
         displayName: 'Sim Chamber',
         template: HUB_TRAINING_ZONE,
+        lifecycle: ZoneLifecycle.PERSISTENT,
+        parentZoneId: 'HUB'
+    },
+    'MAGLEV_INTERIOR': {
+        id: 'MAGLEV_INTERIOR',
+        displayName: 'Transit Dock 04',
+        template: MAGLEV_INTERIOR_ZONE,
         lifecycle: ZoneLifecycle.PERSISTENT,
         parentZoneId: 'HUB'
     },
