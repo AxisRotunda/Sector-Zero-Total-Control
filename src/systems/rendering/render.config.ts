@@ -51,6 +51,14 @@ export const RENDER_CONFIG = {
   }
 };
 
+export const SORTING_CONFIG = {
+  LAYER_THRESHOLDS: {
+    GROUND_MAX: 80,
+    ELEVATED_MAX: 300,
+    LARGE_ENTITY_MIN: 80
+  }
+};
+
 export const QUALITY_TIERS = [
   { name: 'LOW', shadow: false, lightScale: 0.25, renderScale: 0.75, particleCap: 100 },
   { name: 'MEDIUM', shadow: false, lightScale: 0.5, renderScale: 0.9, particleCap: 300 },

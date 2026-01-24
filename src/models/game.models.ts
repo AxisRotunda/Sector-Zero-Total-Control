@@ -12,6 +12,12 @@ export enum RenderLayer {
   UI = 4               // Always on top
 }
 
+export interface SortMetadata {
+    min: number;
+    max: number;
+    center: number;
+}
+
 // Standardized Interface for 3D Structures
 export interface Volumetric {
     width?: number;  // X-axis span
@@ -57,7 +63,7 @@ export interface Entity extends Volumetric {
   isoDepth?: number; 
   renderLayer?: RenderLayer;
   // Transient sorting metadata (calculated per frame, not saved)
-  _sortMeta?: { min: number, max: number, center: number };
+  _sortMeta?: SortMetadata;
 
   vx: number;
   vy: number;
@@ -213,4 +219,5 @@ export interface Particle {
   // Render Sorting
   isoDepth?: number;
   renderLayer?: RenderLayer; // Layer override for particles
+  _sortMeta?: SortMetadata;
 }
