@@ -19,6 +19,7 @@ import { Entity } from '../../models/game.models';
 import { WaypointService } from './waypoint.service';
 import { EntityPoolService } from '../../services/entity-pool.service';
 import { IdGeneratorService } from '../../utils/id-generator.service';
+import { NavigationService } from '../../systems/navigation.service';
 
 @Injectable({
   providedIn: 'root'
@@ -35,6 +36,7 @@ export class ZoneManagerService {
   private waypointService = inject(WaypointService);
   private entityPool = inject(EntityPoolService);
   private idGenerator = inject(IdGeneratorService);
+  private navigation = inject(NavigationService);
 
   // Strategies
   private staticLoader = inject(StaticZoneLoader);
@@ -93,10 +95,13 @@ export class ZoneManagerService {
         this.player.currentSectorId.set(targetZoneId);
         this.world.player.zoneId = targetZoneId;
 
-        // 6. Discovery & Events
+        // 6. Build Navigation Grid for new Zone
+        this.navigation.buildNavGrid(this.world.currentZone());
+
+        // 7. Discovery & Events
         this.checkDiscovery(targetZoneId, targetConfig.displayName);
         
-        // 7. Check Riftgate Unlock
+        // 8. Check Riftgate Unlock
         if (targetConfig.template.metadata.hasRiftgate) {
             this.waypointService.unlockWaypoint(targetZoneId);
         }
@@ -121,6 +126,10 @@ export class ZoneManagerService {
       this.spatialHash.clearAll();
       
       await this.loadZoneStrategy(config.id);
+      
+      // Build Navigation Grid
+      this.navigation.buildNavGrid(this.world.currentZone());
+
       this.checkDiscovery(config.id, config.displayName);
       
       if (config.template.metadata.hasRiftgate) {
@@ -164,18 +173,6 @@ export class ZoneManagerService {
       
       const loader = isProcedural ? this.proceduralLoader : this.staticLoader;
 
-      // Validate Configuration
-      if (config.lifecycle === ZoneLifecycle.CHECKPOINT && isProcedural) {
-          console.warn(
-            `[ZoneManager] CHECKPOINT lifecycle on procedural zone "${zoneId}" will not persist layout geometry. ` +
-            `Consider using INSTANCED or converting to static template.`
-          );
-      }
-
-      // NOTE: Procedural zones cannot persist layout geometry.
-      // CHECKPOINT/PERSISTENT procedural zones will restore entities but regenerate walls.
-      // This is acceptable for INSTANCED dungeons; avoid CHECKPOINT on procedural.
-
       // Lifecycle Switch
       let shouldLoadFromSnapshot = false;
       
@@ -185,24 +182,21 @@ export class ZoneManagerService {
               shouldLoadFromSnapshot = this.worldState.hasSector(zoneId);
               break;
           case ZoneLifecycle.BOSS_ARENA:
-              shouldLoadFromSnapshot = false; // Always reset arenas on exit/re-entry?
+              shouldLoadFromSnapshot = false; 
               break;
           case ZoneLifecycle.INSTANCED:
-              shouldLoadFromSnapshot = false; // Always fresh
+              shouldLoadFromSnapshot = false; 
               break;
       }
 
       // Load Zone Content
       if (isProcedural && !shouldLoadFromSnapshot) {
-          // Fresh Procedural
           await loader.load(this.world, { template, previousZoneId });
       } else {
-          // Static or Persisted Procedural
           await loader.load(this.world, { template, previousZoneId });
       }
 
       // Sync ID Generator if we loaded entities
-      // This prevents newly spawned entities from having colliding IDs with loaded ones
       if (this.world.entities.length > 0) {
           let maxId = 0;
           for (const e of this.world.entities) {
