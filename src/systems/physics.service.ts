@@ -46,7 +46,8 @@ export class PhysicsService {
         const zoneId = this.world.currentZone().id;
         const queryRadius = e.radius * this.SPATIAL_BUFFER_RATIO;
         
-        const { buffer, count } = this.spatialHash.queryFast(e.x, e.y, queryRadius, zoneId);
+        // Use default buffer (0) for outer separation loop
+        const { buffer, count } = this.spatialHash.queryFast(e.x, e.y, queryRadius, zoneId, 0);
         
         let processedNeighbors = 0;
 
@@ -155,7 +156,8 @@ export class PhysicsService {
       
       const queryRadius = radius * this.COLLISION_QUERY_RATIO;
       
-      const { buffer, count } = this.spatialHash.queryFast(e.x, e.y, queryRadius, zoneId); 
+      // CRITICAL: Use buffer index 1 to avoid overwriting outer loop (buffer 0)
+      const { buffer, count } = this.spatialHash.queryFast(e.x, e.y, queryRadius, zoneId, 1); 
       
       // Check Static Walls
       const { buffer: staticBuffer, count: staticCount } = this.chunkManager.getVisibleStaticEntities(

@@ -15,13 +15,15 @@ class SpatialHash {
   // Frame version for lazy clearing
   private currentVersion = 1;
   
-  // Shared buffer for queries to avoid allocation
-  public queryResult: Entity[] = [];
+  // Shared buffers for queries to avoid allocation.
+  // We maintain multiple buffers to allow for nested queries (e.g. Physics loop -> Collision check)
+  private queryBuffers: Entity[][] = [new Array(2000), new Array(2000)];
+  private activeBuffer: Entity[] = [];
+  
   private queryIdCounter = 0;
   
   constructor(public cellSize: number) {
-      // Pre-allocate a large buffer
-      this.queryResult = new Array(2000);
+      this.activeBuffer = this.queryBuffers[0];
   }
 
   private getKey(x: number, y: number): number { return ((x & 0xFFFF) << 16) | (y & 0xFFFF); }
@@ -30,8 +32,6 @@ class SpatialHash {
       // Instead of clearing Maps and Arrays (high GC), we just increment the version.
       // Cells with old versions are treated as empty during insert/query.
       this.currentVersion++;
-      // We occasionally prune the map to prevent infinite growth in long sessions? 
-      // For now, lazy clear is sufficient as entities tend to revisit similar cells.
   }
 
   clearAll(): void {
@@ -107,27 +107,37 @@ class SpatialHash {
    * Standard query returning a new Array (Legacy/Safe)
    */
   query(x: number, y: number, radius: number, zoneId?: string): Entity[] {
+    // Legacy queries use buffer 0 but slice results
+    this.activeBuffer = this.queryBuffers[0];
     const count = this.performQuery(x, y, radius, zoneId);
-    return this.queryResult.slice(0, count);
+    return this.activeBuffer.slice(0, count);
   }
 
   /**
    * Zero-allocation query. Returns direct reference to shared buffer.
-   * WARNING: Data in buffer is valid only until next query call.
+   * WARNING: Data in buffer is valid only until next query call on the same buffer index.
+   * 
+   * @param bufferIndex Use 0 for main logic, 1 for nested queries (e.g. inside a loop iterating buffer 0)
    */
-  queryFast(x: number, y: number, radius: number, zoneId?: string): { buffer: Entity[], count: number } {
+  queryFast(x: number, y: number, radius: number, zoneId?: string, bufferIndex: number = 0): { buffer: Entity[], count: number } {
+      if (!this.queryBuffers[bufferIndex]) {
+          this.queryBuffers[bufferIndex] = new Array(2000);
+      }
+      this.activeBuffer = this.queryBuffers[bufferIndex];
       const count = this.performQuery(x, y, radius, zoneId);
-      return { buffer: this.queryResult, count };
+      return { buffer: this.activeBuffer, count };
   }
 
   queryRect(minX: number, minY: number, maxX: number, maxY: number, zoneId?: string): Entity[] {
+    this.activeBuffer = this.queryBuffers[0];
     const count = this.performQueryRect(minX, minY, maxX, maxY, zoneId);
-    return this.queryResult.slice(0, count);
+    return this.activeBuffer.slice(0, count);
   }
 
   queryRectFast(minX: number, minY: number, maxX: number, maxY: number, zoneId?: string): { buffer: Entity[], count: number } {
+      this.activeBuffer = this.queryBuffers[0];
       const count = this.performQueryRect(minX, minY, maxX, maxY, zoneId);
-      return { buffer: this.queryResult, count };
+      return { buffer: this.activeBuffer, count };
   }
 
   private performQuery(x: number, y: number, radius: number, zoneId?: string): number {
@@ -150,8 +160,8 @@ class SpatialHash {
     this.queryIdCounter++;
     let count = 0;
 
-    // Expand buffer if needed (rare)
-    if (this.queryResult.length < 2000) this.queryResult.length = 2000;
+    // Expand active buffer if needed
+    if (this.activeBuffer.length < 2000) this.activeBuffer.length = 2000;
 
     const processDynamicMap = (gridMap: Map<number, HashCell>) => {
         for (let j = startY; j <= endY; j++) {
@@ -166,8 +176,8 @@ class SpatialHash {
                         const e = items[k];
                         if (e.lastQueryId !== this.queryIdCounter) {
                             e.lastQueryId = this.queryIdCounter;
-                            if (count >= this.queryResult.length) this.queryResult.push(e);
-                            else this.queryResult[count] = e;
+                            if (count >= this.activeBuffer.length) this.activeBuffer.push(e);
+                            else this.activeBuffer[count] = e;
                             count++;
                         }
                     }
@@ -187,8 +197,8 @@ class SpatialHash {
                         const e = cell[k];
                         if (e.lastQueryId !== this.queryIdCounter) {
                             e.lastQueryId = this.queryIdCounter;
-                            if (count >= this.queryResult.length) this.queryResult.push(e);
-                            else this.queryResult[count] = e;
+                            if (count >= this.activeBuffer.length) this.activeBuffer.push(e);
+                            else this.activeBuffer[count] = e;
                             count++;
                         }
                     }
@@ -228,7 +238,13 @@ export class SpatialHashService {
   
   query(x: number, y: number, radius: number, zoneId?: string): Entity[] { return this.hash.query(x, y, radius, zoneId); }
   
-  queryFast(x: number, y: number, radius: number, zoneId?: string) { return this.hash.queryFast(x, y, radius, zoneId); }
+  /**
+   * Fast query returning internal buffer.
+   * @param bufferIndex 0 for main loops, 1 for nested/inner loops.
+   */
+  queryFast(x: number, y: number, radius: number, zoneId?: string, bufferIndex: number = 0) { 
+      return this.hash.queryFast(x, y, radius, zoneId, bufferIndex); 
+  }
 
   queryRect(minX: number, minY: number, maxX: number, maxY: number, zoneId?: string): Entity[] {
       return this.hash.queryRect(minX, minY, maxX, maxY, zoneId);

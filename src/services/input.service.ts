@@ -72,7 +72,11 @@ export class InputService implements OnDestroy {
       axes: [0, 0, 0, 0]
   };
   private readonly DEADZONE = 0.15;
-  private rafId: number | null = null;
+  private rafId: any = null;
+  
+  // Gamepad Polling Throttle
+  private unchangedFrames = 0;
+  private lastGamepadStateJson = '';
 
   // Input Arbitration
   private lastInputTime = 0;
@@ -86,7 +90,11 @@ export class InputService implements OnDestroy {
 
   ngOnDestroy() {
     this.subs.forEach(s => s.unsubscribe());
-    if (this.rafId) cancelAnimationFrame(this.rafId);
+    if (this.rafId) {
+        // Handle both rAF and setTimeout IDs safely
+        if (typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(this.rafId);
+        clearTimeout(this.rafId);
+    }
   }
 
   setCanvas(canvas: HTMLCanvasElement) {
@@ -323,6 +331,15 @@ export class InputService implements OnDestroy {
       const gamepad = navigator.getGamepads()[this.gamepadIndex];
       if (!gamepad) return;
 
+      // Throttle Logic: Serialize state to detect changes
+      const currentStateJson = JSON.stringify(gamepad.buttons.map(b => b.pressed).concat(gamepad.axes as any));
+      if (currentStateJson === this.lastGamepadStateJson) {
+          this.unchangedFrames++;
+      } else {
+          this.unchangedFrames = 0;
+          this.lastGamepadStateJson = currentStateJson;
+      }
+
       // --- AXES ---
       const lx = gamepad.axes[0];
       const ly = gamepad.axes[1];
@@ -378,6 +395,8 @@ export class InputService implements OnDestroy {
       mapButton(14, 'TOGGLE_SKILLS'); // D-Left
       mapButton(15, 'TOGGLE_SHOP'); // D-Right
 
-      this.rafId = requestAnimationFrame(() => this.pollGamepad());
+      // Adaptive Throttle: If unchanged for >10 frames, poll at 30Hz instead of 60Hz+
+      const delay = this.unchangedFrames > 10 ? 33 : 16;
+      this.rafId = setTimeout(() => this.pollGamepad(), delay);
   }
 }

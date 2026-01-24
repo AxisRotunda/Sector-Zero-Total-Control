@@ -29,12 +29,12 @@ export class UnitRendererService {
   private _cos = 0;
   private _sin = 0;
 
-  // Optimization: Angle Lookup Table
+  // Optimization: Angle Lookup Table (1-degree resolution)
   private angleCache = new Map<number, { sin: number, cos: number }>();
 
   constructor() {
-      // Pre-compute trig for 360 degrees in 5-degree steps
-      for (let angle = 0; angle < 360; angle += 5) {
+      // Pre-compute trig for 360 degrees in 1-degree steps
+      for (let angle = 0; angle < 360; angle += 1) {
           const rad = angle * Math.PI / 180;
           this.angleCache.set(angle, {
               sin: Math.sin(rad),
@@ -46,8 +46,8 @@ export class UnitRendererService {
   private getCachedTrig(rad: number) {
       const deg = Math.round((rad * 180 / Math.PI));
       const normalized = (deg % 360 + 360) % 360;
-      const snapped = Math.round(normalized / 5) * 5;
-      return this.angleCache.get(snapped) || { sin: Math.sin(rad), cos: Math.cos(rad) };
+      // Direct lookup since we now cover every integer degree
+      return this.angleCache.get(normalized) || { sin: Math.sin(rad), cos: Math.cos(rad) };
   }
 
   drawHumanoid(ctx: CanvasRenderingContext2D, e: Entity) {
