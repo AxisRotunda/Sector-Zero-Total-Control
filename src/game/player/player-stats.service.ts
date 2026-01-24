@@ -67,12 +67,11 @@ export class PlayerStatsService {
     const gear = this.gearStats();
     const weapon = this.equippedWeapon();
 
-    const packet = createEmptyDamagePacket();
+    const packet: DamagePacket = { ...createEmptyDamagePacket(), physical: 10 };
     
-    // Base + Tree
-    packet.physical += base.baseDamagePacket.physical + (tree?.damage ?? 0);
+    // Apply base damage from stats (if defined in base packet) or ensure minimum
+    packet.physical = Math.max(packet.physical, base.baseDamagePacket.physical);
 
-    // Weapon
     if (weapon) {
         if (weapon.damagePacket) {
             packet.physical += weapon.damagePacket.physical;
@@ -95,7 +94,19 @@ export class PlayerStatsService {
         const levelBonus = (base.level - 1) * 2;
         packet.physical += levelBonus;
         if (gear?.dmg) packet.physical += gear.dmg;
+        
+        // ADDED: Debug logging for unarmed
+        if (packet.physical < 10) {
+          console.warn('[UNARMED] Damage packet physical below baseline:', packet.physical);
+        }
     }
+    
+    // Apply tree bonuses
+    if (tree?.damage) packet.physical += tree.damage;
+    // Assume tree fireDamage or other elementals might exist in future, currently 'damage' is generic physical/all
+    
+    // ADDED: Validation
+    // console.log('[DAMAGE PACKET]', weapon ? 'ARMED' : 'UNARMED', packet);
 
     return packet;
   });

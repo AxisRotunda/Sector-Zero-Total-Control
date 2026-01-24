@@ -30,7 +30,11 @@ function moveTowardTarget(enemy: Entity, targetX: number, targetY: number, ctx: 
     const lastTarget = enemy.data.pathTarget || {x: -999, y: -999};
     const targetDiff = Math.abs(targetX - lastTarget.x) + Math.abs(targetY - lastTarget.y);
     
-    if (!enemy.data.path || (now - (enemy.data.lastPathTime || 0) > 1000 && targetDiff > 50)) {
+    // MODIFIED: Squad members use longer staleness window to prevent jitter
+    const isSquadMember = !!enemy.squadId;
+    const staleThreshold = isSquadMember ? 2000 : 1000;  // 2s for squads, 1s for solos
+
+    if (!enemy.data.path || (now - (enemy.data.lastPathTime || 0) > staleThreshold && targetDiff > 50)) {
         enemy.data.path = ctx.navigation.findPath({x: enemy.x, y: enemy.y}, {x: targetX, y: targetY});
         enemy.data.currentWaypoint = 0;
         enemy.data.lastPathTime = now;

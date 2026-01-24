@@ -293,12 +293,12 @@ export class PlayerAbilitiesService {
       const hitbox = this.entityPool.acquire('HITBOX', undefined, currentZoneId);
       hitbox.source = 'PLAYER';
       
-      hitbox.damagePacket = stats.damagePacket 
-        ? { ...stats.damagePacket } 
-        : createEmptyDamagePacket();
-
-      if (hitbox.damagePacket.physical === 0 && hitbox.damagePacket.fire === 0 && hitbox.damagePacket.cold === 0 && hitbox.damagePacket.lightning === 0 && hitbox.damagePacket.chaos === 0) {
-          hitbox.damagePacket.physical = 10;
+      // FIXED: Always use stats.damagePacket, create fallback if truly missing
+      if (!stats.damagePacket) {
+        console.error('[CRITICAL] playerStats().damagePacket is undefined!');
+        hitbox.damagePacket = { ...createEmptyDamagePacket(), physical: 10 };
+      } else {
+        hitbox.damagePacket = { ...stats.damagePacket };
       }
       
       if (stats.penetration) hitbox.penetration = { ...stats.penetration };

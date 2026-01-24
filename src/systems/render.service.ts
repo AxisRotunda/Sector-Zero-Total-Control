@@ -293,6 +293,7 @@ export class RenderService {
       const { buffer: dynamicBuffer, count: dynamicCount } = this.spatialHash.queryRectFast(frustum.minX, frustum.minY, frustum.maxX, frustum.maxY, zone.id);
       for (let i = 0; i < dynamicCount; i++) {
           const e = dynamicBuffer[i];
+          if (e.state === 'DEAD' || e.data?.isDead) continue; // FILTER: Don't render dead entities
           if (e.type === 'WALL' && e.subType !== 'GATE_SEGMENT') continue;
           if (e.type === 'DECORATION' && (e.subType === 'RUG' || e.subType === 'FLOOR_CRACK' || e.subType === 'GRAFFITI')) continue;
           this.renderList[renderIndex++] = e;
