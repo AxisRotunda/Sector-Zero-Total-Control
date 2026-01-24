@@ -1,4 +1,3 @@
-
 import { Injectable, inject } from '@angular/core';
 import { Entity } from '../models/game.models';
 import { WorldService } from '../game/world/world.service';
@@ -9,6 +8,7 @@ import { SquadAiService } from './squad-ai.service';
 import { SpatialHashService } from './spatial-hash.service';
 import { CombatService } from './combat.service';
 import * as BALANCE from '../config/balance.config';
+import { createEmptyDamagePacket } from '../models/damage.model';
 
 @Injectable({ providedIn: 'root' })
 export class AiService {
@@ -47,9 +47,13 @@ export class AiService {
     }
 
     let targetX = player.x; let targetY = player.y;
+    
     if (enemy.squadId) {
         const orders = this.squadAi.getSquadOrders(enemy, player);
-        if (orders.behavior === 'ATTACK') { targetX += orders.xOffset; targetY += orders.yOffset; }
+        if (orders && orders.behavior === 'ATTACK') { 
+            targetX += orders.xOffset; 
+            targetY += orders.yOffset; 
+        }
     }
 
     const targetDx = targetX - enemy.x; const targetDy = targetY - enemy.y;
@@ -79,11 +83,26 @@ export class AiService {
       }
 
       if (bestCover) {
-          const anglePlayerToWall = Math.atan2(bestCover.y - player.y, bestCover.x - player.x);
-          const coverX = bestCover.x + Math.cos(anglePlayerToWall) * 60; const coverY = bestCover.y + Math.sin(anglePlayerToWall) * 60;
+          // Improve Cover calculation: Find closest point on wall bounds rather than center
+          const w = bestCover.width || 40;
+          const h = bestCover.depth || 40;
+          
+          // Clamp player pos to wall bounds to find relative angle
+          const clampX = Math.max(bestCover.x - w/2, Math.min(player.x, bestCover.x + w/2));
+          const clampY = Math.max(bestCover.y - h/2, Math.min(player.y, bestCover.y + h/2));
+          
+          // Vector from player to closest point on wall
+          const angleToWall = Math.atan2(clampY - player.y, clampX - player.x);
+          
+          // Project "Shadow" behind wall
+          const coverX = clampX + Math.cos(angleToWall) * (w + 40); 
+          const coverY = clampY + Math.sin(angleToWall) * (h + 40);
+          
           const coverAngle = Math.atan2(coverY - enemy.y, coverX - enemy.x);
           enemy.vx += Math.cos(coverAngle) * 0.5; enemy.vy += Math.sin(coverAngle) * 0.5;
-      } else { enemy.vx -= Math.cos(angle) * 0.4; enemy.vy -= Math.sin(angle) * 0.4; }
+      } else { 
+          enemy.vx -= Math.cos(angle) * 0.4; enemy.vy -= Math.sin(angle) * 0.4; 
+      }
   }
 
   private updateSupport(enemy: Entity, player: Entity, dist: number, angle: number) {
@@ -152,7 +171,9 @@ export class AiService {
             projectile.vx = Math.cos(angle) * 15; projectile.vy = Math.sin(angle) * 15;
             projectile.angle = angle; projectile.radius = 8; 
             
-            projectile.damageValue = damage; 
+            // Fix: Use new damage packet system
+            projectile.damagePacket = createEmptyDamagePacket();
+            projectile.damagePacket.physical = damage;
             
             projectile.color = '#a855f7'; projectile.state = 'ATTACK'; projectile.timer = 60;
             

@@ -1,4 +1,3 @@
-
 import { Injectable, inject } from '@angular/core';
 import { Entity } from '../models/game.models';
 import { WorldService } from '../game/world/world.service';
@@ -65,18 +64,7 @@ export class NpcUpdateService {
           }
       }
 
-      if (!g.data) g.data = {};
-      if (g.data.nextBarkTime === undefined) {
-          g.data.nextBarkTime = Date.now() + 5000 + Math.random() * 15000;
-      }
-
-      if (Date.now() > g.data.nextBarkTime) {
-          const text = GUARD_BARKS[Math.floor(Math.random() * GUARD_BARKS.length)];
-          if (Math.hypot(this.world.player.x - g.x, this.world.player.y - g.y) < 600) {
-              this.world.spawnFloatingText(g.x, g.y - 60, text, '#a5f3fc', 12);
-          }
-          g.data.nextBarkTime = Date.now() + 15000 + Math.random() * 30000; 
-      }
+      this.handleGuardBark(g);
 
       if (!g.patrolPoints || g.patrolPoints.length === 0) {
           this.animateIdle(g);
@@ -116,6 +104,21 @@ export class NpcUpdateService {
       g.vy += Math.sin(angle) * speed;
       
       this.animateMove(g);
+  }
+
+  private handleGuardBark(g: Entity) {
+      if (!g.data) g.data = {};
+      if (g.data.nextBarkTime === undefined) {
+          g.data.nextBarkTime = Date.now() + 5000 + Math.random() * 15000;
+      }
+
+      if (Date.now() > g.data.nextBarkTime) {
+          const text = GUARD_BARKS[Math.floor(Math.random() * GUARD_BARKS.length)];
+          if (Math.hypot(this.world.player.x - g.x, this.world.player.y - g.y) < 600) {
+              this.world.spawnFloatingText(g.x, g.y - 60, text, '#a5f3fc', 12);
+          }
+          g.data.nextBarkTime = Date.now() + 15000 + Math.random() * 30000; 
+      }
   }
 
   updateGenericNpc(npc: Entity) {
