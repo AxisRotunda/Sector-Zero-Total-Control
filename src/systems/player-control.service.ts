@@ -77,14 +77,13 @@ export class PlayerControlService {
             const prevVy = player.vy;
             
             // Adjust input vector based on Camera Rotation to ensure Screen-Relative control
-            const camRot = this.world.camera.rotation;
-            const input = this.input.inputVector;
+            // Optimization: Use cached trig values from CameraService
+            // Math.cos(-x) = Math.cos(x)
+            // Math.sin(-x) = -Math.sin(x)
+            const cos = this.cameraService.rotationCos;
+            const sin = -this.cameraService.rotationSin;
             
-            // Rotate the input vector inversely to the camera rotation
-            // WorldVec = Rotate(ScreenVec, -CameraAngle)
-            // Use reused vector to avoid garbage collection
-            const cos = Math.cos(-camRot);
-            const sin = Math.sin(-camRot);
+            const input = this.input.inputVector;
             
             this._rotatedInput.x = input.x * cos - input.y * sin;
             this._rotatedInput.y = input.x * sin + input.y * cos;
@@ -143,21 +142,17 @@ export class PlayerControlService {
             let targetAngle = this.input.aimAngle;
             
             // AUTO-TARGETING
-            // If the player presses attack WITHOUT aiming (aimAngle is null),
-            // find the nearest valid target and snap angle to them.
             if (targetAngle === null) {
                 const autoTarget = this.findBestTarget(player);
-                if (autoTarget) {
+                // Fix: Ensure autoTarget properties are valid numbers before math
+                if (autoTarget && typeof autoTarget.x === 'number' && typeof autoTarget.y === 'number') {
                     targetAngle = Math.atan2(autoTarget.y - player.y, autoTarget.x - player.x);
                 } else if (Math.hypot(player.vx, player.vy) > 0.1) {
-                    // If no target but moving, attack in movement direction
                     targetAngle = Math.atan2(player.vy, player.vx);
                 } else {
-                    // Absolute fallback
                     targetAngle = player.angle;
                 }
             } else {
-                // Adjust manual aim for camera rotation
                 targetAngle -= this.world.camera.rotation;
             }
             
@@ -166,7 +161,6 @@ export class PlayerControlService {
 
         const autoCombat = this.playerService.autoCombatEnabled();
         
-        // Auto-combat check
         if (autoCombat && !this.activeInteractable() && player.state !== 'ATTACK' && !manualAttack) {
              const nextCmd = this.inputBuffer.peekCommand();
              if (!nextCmd || nextCmd.priority <= 1) {
@@ -174,31 +168,20 @@ export class PlayerControlService {
              }
         }
 
-        // Chaining Logic: Allow input consumption during recovery or if not attacking
         const canInterrupt = player.state === 'ATTACK' && this.attackState === 'RECOVERY';
         
         if (player.state !== 'ATTACK' || canInterrupt) {
             const cmd = this.inputBuffer.peekCommand();
             if (cmd) {
-                // If attacking, only accept high priority or primary (for combos)
                 if (player.state === 'ATTACK' && cmd.priority < 1) return;
 
                 this.inputBuffer.consumeCommand();
-                
-                // If command has a specific angle (from manual aim or auto-target), use it.
-                // Otherwise default to current player facing.
                 let targetAngle = cmd.angle ?? player.angle;
-                
                 this.playerService.useSkill(cmd.type, targetAngle);
             }
         }
     }
 
-    /**
-     * Mobile-Optimized Targeting
-     * Prioritizes enemies in the direction the player is facing/moving ("Cone of Attention").
-     * Heavily penalizes targets behind the player.
-     */
     private findBestTarget(player: Entity): Entity | null {
         const zoneId = this.world.currentZone().id;
         const range = 500; 
@@ -219,26 +202,19 @@ export class PlayerControlService {
             const dy = e.y - player.y;
             const dist = Math.hypot(dx, dy);
             
-            // Normalized direction to target
             const dirX = dx / dist;
             const dirY = dy / dist;
             
-            // Dot product (1.0 = directly in front, -1.0 = directly behind)
             const dot = playerDirX * dirX + playerDirY * dirY;
             
-            // Score Calculation (Lower is better)
-            // Base score is distance
             let score = dist;
             
-            // Angle Bias: Reduce effective distance score for targets in front
-            // Increase score massively for targets behind
             if (dot > 0) {
-                score *= (1 - dot * 0.5); // Up to 50% "closer" if directly in front
+                score *= (1 - dot * 0.5); 
             } else {
-                score += 300; // Heavy penalty for being behind
+                score += 300; 
             }
             
-            // Prioritize enemies over boxes
             if (isDestructible(e)) score += 150;
 
             if (score < minScore) {
@@ -267,7 +243,6 @@ export class PlayerControlService {
              if (isEnemy(closest)) this.tutorial.trigger('COMBAT');
              const targetAngle = Math.atan2((closest as Entity).y - player.y, (closest as Entity).x - player.x);
              const speed = Math.hypot(player.vx, player.vy);
-             // Allow auto-attack if not moving fast, or if using joystick
              if (speed < 0.5 && !this.input.usingKeyboard()) {
                  this.inputBuffer.addCommand('PRIMARY', targetAngle, 0);
              }
@@ -275,11 +250,9 @@ export class PlayerControlService {
     }
 
     private updatePlayerAnimation(player: Entity) {
-        // Calculate Speed based on Weapon Stats (or Unarmed fallback)
         const weapon = this.inventory.equipped().weapon || UNARMED_WEAPON;
         const weaponSpeed = weapon.stats['spd'] || 1.0;
         
-        // Faster animations for later combo steps
         const comboSpeedMult = player.comboIndex === 2 ? 0.7 : (player.comboIndex === 1 ? 0.85 : 1.0);
         const attackSpeedStat = this.playerService.stats.playerStats().speed * 0.1; 
         
@@ -309,7 +282,6 @@ export class PlayerControlService {
                 if (player.animFrameTimer >= attackFrameDuration) {
                     player.animFrameTimer = 0; player.animFrame++;
                     
-                    // --- ATTACK STATE MACHINE ---
                     if (player.animFrame === 0) {
                         this.attackState = 'STARTUP';
                         player.animPhase = 'startup';

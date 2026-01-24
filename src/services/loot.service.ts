@@ -1,3 +1,4 @@
+
 import { Injectable, inject } from '@angular/core';
 import { Entity } from '../models/game.models';
 import { WorldService } from '../game/world/world.service';
@@ -8,6 +9,8 @@ import { EventBusService } from '../core/events/event-bus.service';
 import { GameEvents } from '../core/events/game-events';
 import { NarrativeService } from '../game/narrative.service';
 import * as CONFIG from '../config/game.config';
+import { InventoryService } from '../game/inventory.service';
+import { SoundService } from './sound.service';
 
 @Injectable({ providedIn: 'root' })
 export class LootService {
@@ -17,6 +20,8 @@ export class LootService {
   private progression = inject(PlayerProgressionService);
   private eventBus = inject(EventBusService);
   private narrative = inject(NarrativeService);
+  private inventory = inject(InventoryService);
+  private sound = inject(SoundService);
 
   public processEnemyRewards(enemy: Entity): void {
     const currentZone = this.world.currentZone();
@@ -106,5 +111,49 @@ export class LootService {
     if (Math.random() < CONFIG.LOOT_CHANCES.DESTRUCTIBLE_DROP) {
       this.spawnLoot(destructible.x, destructible.y, 'CRATE');
     }
+  }
+
+  public updatePickup(pickup: Entity): void {
+    const player = this.world.player;
+    const dist = Math.hypot(player.x - pickup.x, player.y - pickup.y);
+    
+    // Magnetic pull
+    if (dist < 150) {
+        const pullStrength = 0.8;
+        const dx = player.x - pickup.x;
+        const dy = player.y - pickup.y;
+        const len = Math.hypot(dx, dy);
+        
+        if (len > 0) {
+            pickup.vx += (dx / len) * pullStrength;
+            pickup.vy += (dy / len) * pullStrength;
+        }
+    }
+
+    if (dist < player.radius + 15) {
+        this.collectItem(pickup);
+    }
+  }
+
+  private collectItem(pickup: Entity): void {
+      if (!pickup.itemData) {
+          pickup.state = 'DEAD';
+          return;
+      }
+
+      if (this.inventory.addItem(pickup.itemData)) {
+          pickup.state = 'DEAD';
+          this.sound.play('PICKUP');
+          
+          this.eventBus.dispatch({ 
+              type: GameEvents.ITEM_COLLECTED, 
+              payload: { itemId: pickup.itemData.id } 
+          });
+          
+          this.eventBus.dispatch({ 
+              type: GameEvents.FLOATING_TEXT_SPAWN, 
+              payload: { x: pickup.x, y: pickup.y - 40, text: pickup.itemData.name, color: pickup.itemData.color, size: 14 } 
+          });
+      }
   }
 }

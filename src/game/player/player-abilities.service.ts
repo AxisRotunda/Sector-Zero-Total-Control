@@ -37,8 +37,17 @@ export class PlayerAbilitiesService {
   private readonly MAX_COMBO = 3;
 
   updateCooldowns() {
-    this.cooldowns.update(c => ({
-        primary: Math.max(0, c.primary - 1), secondary: Math.max(0, c.secondary - 1), dash: Math.max(0, c.dash - 1), utility: Math.max(0, c.utility - 1)
+    const c = this.cooldowns();
+    // Optimization: Skip update if all cooldowns are 0
+    if (c.primary <= 0 && c.secondary <= 0 && c.dash <= 0 && c.utility <= 0) {
+        return;
+    }
+
+    this.cooldowns.update(curr => ({
+        primary: Math.max(0, curr.primary - 1), 
+        secondary: Math.max(0, curr.secondary - 1), 
+        dash: Math.max(0, curr.dash - 1), 
+        utility: Math.max(0, curr.utility - 1)
     }));
   }
 
@@ -81,9 +90,6 @@ export class PlayerAbilitiesService {
       if (this.cooldowns().primary > 0) return;
 
       const stats = this.stats.playerStats();
-      // Calculate Cooldown based on Weapon Speed
-      // Base frame delay = 60 / (Weapon Speed + Stats)
-      // e.g. Speed 2.0 = 30 frames. Speed 5.0 = 12 frames.
       const atkSpeed = Math.max(0.5, (weapon.stats['spd'] || 1.0) + (stats.speed * 0.1));
       const cooldown = Math.floor(60 / atkSpeed);
       
@@ -95,10 +101,9 @@ export class PlayerAbilitiesService {
       player.state = 'ATTACK';
       player.animFrame = 0;
       player.animFrameTimer = 0;
-      player.timer = 0; // used for recoil lerp in renderer
+      player.timer = 0; 
 
-      // Recoil - Push player back opposite to aim
-      const recoilForce = 2.0; // Adjustable per weapon later
+      const recoilForce = 2.0; 
       player.vx -= Math.cos(aimAngle) * recoilForce;
       player.vy -= Math.sin(aimAngle) * recoilForce;
 
@@ -119,43 +124,32 @@ export class PlayerAbilitiesService {
           const bullet = this.entityPool.acquire('HITBOX', undefined, zoneId);
           bullet.source = 'PLAYER';
           
-          // Offset spawn to gun tip (approx)
           const offsetDist = 30;
           bullet.x = player.x + Math.cos(angle) * offsetDist;
           bullet.y = player.y + Math.sin(angle) * offsetDist;
           
-          // Velocity with spread
           const fireAngle = angle + (Math.random() - 0.5) * spread;
           const speed = projConfig.speed || 15;
           bullet.vx = Math.cos(fireAngle) * speed;
           bullet.vy = Math.sin(fireAngle) * speed;
           
-          // Properties
           bullet.radius = 5;
-          bullet.timer = projConfig.range || 60; // Despawn timer
-          bullet.color = weapon.color; // Tracer color
+          bullet.timer = projConfig.range || 60; 
+          bullet.color = weapon.color; 
           bullet.state = 'ATTACK';
           
-          // Mark as Projectile for renderer
           bullet.data = { 
               renderType: projConfig.renderType, 
               isProjectile: true,
               trailColor: weapon.color 
           };
 
-          // Damage Construction
-          // Projectiles carry a portion of total damage? Or full? 
-          // For shotguns (count > 1), usually split damage. 
-          // Current logic: Full damage per projectile for simplicity unless balanced.
-          // Let's divide base damage by count if count > 1 to balance shotguns
           const damageScale = count > 1 ? 0.7 : 1.0; 
           
           if (stats.damagePacket) {
               bullet.damagePacket = { ...stats.damagePacket };
-              // Scale packet
               bullet.damagePacket.physical *= damageScale;
               bullet.damagePacket.fire *= damageScale;
-              // ... etc
           } else {
               bullet.damagePacket = createEmptyDamagePacket();
               bullet.damagePacket.physical = 10 * damageScale;
@@ -163,7 +157,7 @@ export class PlayerAbilitiesService {
           
           bullet.penetration = stats.penetration;
           bullet.critChance = stats.crit;
-          bullet.hitIds = new Set(); // Reset hit memory
+          bullet.hitIds = new Set(); 
 
           this.world.entities.push(bullet);
       }
@@ -202,27 +196,24 @@ export class PlayerAbilitiesService {
         const shakeIntensity = 2 + newComboIndex;
         this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: { intensity: shakeIntensity, decay: 0.9, x: Math.cos(attackDir), y: Math.sin(attackDir) } });
         
-        this.sound.play('SWOOSH'); // Changed from SHOOT to SWOOSH for melee
+        this.sound.play('SWOOSH'); 
   }
 
-  // Called by PlayerControl via State Machine event usually, or explicitly
-  // Legacy method preserved for the melee state machine callback
   spawnPrimaryAttackHitbox(player: Entity) {
       const stats = this.stats.playerStats();
       const equippedWeapon = this.inventory.equipped().weapon;
-      // ... (existing melee hitbox logic remains unchanged here) ...
-      // Only runs if player.state logic triggers it (which performMeleeAttack sets up)
       
       const combo = player.comboIndex || 0;
       const currentZoneId = this.world.currentZone().id;
       const hitbox = this.entityPool.acquire('HITBOX', undefined, currentZoneId);
       hitbox.source = 'PLAYER';
       
-      if (stats.damagePacket) {
-        hitbox.damagePacket = { ...stats.damagePacket };
-      } else {
-        hitbox.damagePacket = createEmptyDamagePacket();
-        hitbox.damagePacket.physical = 10;
+      hitbox.damagePacket = stats.damagePacket 
+        ? { ...stats.damagePacket } 
+        : createEmptyDamagePacket();
+
+      if (hitbox.damagePacket.physical === 0 && hitbox.damagePacket.fire === 0 && hitbox.damagePacket.cold === 0 && hitbox.damagePacket.lightning === 0 && hitbox.damagePacket.chaos === 0) {
+          hitbox.damagePacket.physical = 10;
       }
       
       if (stats.penetration) hitbox.penetration = { ...stats.penetration };
@@ -250,7 +241,9 @@ export class PlayerAbilitiesService {
       if (hitbox.damagePacket && comboMultiplier !== 1.0) {
           hitbox.damagePacket.physical = Math.floor(hitbox.damagePacket.physical * comboMultiplier);
           hitbox.damagePacket.fire = Math.floor(hitbox.damagePacket.fire * comboMultiplier);
-          // ... scale all
+          hitbox.damagePacket.cold = Math.floor(hitbox.damagePacket.cold * comboMultiplier);
+          hitbox.damagePacket.lightning = Math.floor(hitbox.damagePacket.lightning * comboMultiplier);
+          hitbox.damagePacket.chaos = Math.floor(hitbox.damagePacket.chaos * comboMultiplier);
       }
 
       const offsetDist = 20 + (combo * 5); 
@@ -281,7 +274,6 @@ export class PlayerAbilitiesService {
       this.currentCombo.set(player.comboIndex);
   }
 
-  // ... (Secondary, Dash, Utility methods kept as is) ...
   private useSecondary(player: Entity, stats: any, cds: any) {
         const cost = 50;
         if (cds.secondary > 0 || this.stats.psionicEnergy() < cost) return;

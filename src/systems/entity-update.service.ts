@@ -13,6 +13,7 @@ import { NarrativeService } from '../game/narrative.service';
 import { Entity } from '../models/game.models';
 import { SoundService } from '../services/sound.service';
 import { HapticService } from '../services/haptic.service';
+import { LootService } from '../services/loot.service';
 
 @Injectable({ providedIn: 'root' })
 export class EntityUpdateService {
@@ -28,6 +29,7 @@ export class EntityUpdateService {
   private narrative = inject(NarrativeService);
   private sound = inject(SoundService);
   private haptic = inject(HapticService);
+  private loot = inject(LootService);
 
   update(globalTime: number) {
     const player = this.world.player;
@@ -82,7 +84,7 @@ export class EntityUpdateService {
         e.timer--;
         this.collision.checkHitboxCollisions(e);
       } else if (e.type === 'PICKUP') {
-        this.combat.updatePickup(e);
+        this.loot.updatePickup(e);
         this.physics.updateEntityPhysics(e);
       } else if (e.type === 'SPAWNER') {
         this.spawner.updateSpawner(e);

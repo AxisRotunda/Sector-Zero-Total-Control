@@ -14,6 +14,10 @@ export class CameraService {
   private targetZoom = RENDER_CONFIG.CAMERA.BASE_ZOOM;
   private targetRotation = 0;
   
+  // Public cached trig values to avoid per-frame recalc in other services
+  public rotationCos = 1;
+  public rotationSin = 0;
+  
   // Maximum distance the mouse can offset the camera (screen pixels approx)
   private readonly MOUSE_PEEK_DISTANCE = 300; 
 
@@ -56,8 +60,6 @@ export class CameraService {
     const config = RENDER_CONFIG.CAMERA;
     
     // --- 1. Zoom-Responsive Look-Ahead ---
-    // The "Eye of the Operator" projects focus forward based on velocity.
-    // This projection scales inversely with zoom: when zoomed out (Tactical), we look further ahead.
     const zoomFactor = 1.0 + (1.0 - camera.zoom) * 0.5;
     
     const lookAheadX = player.vx * config.LOOK_AHEAD_DIST * zoomFactor;
@@ -67,20 +69,11 @@ export class CameraService {
     let rawTargetY = player.y + lookAheadY;
     
     // --- 1.5. Mouse Cursor Peeking (PC Optimization) ---
-    // Allows the player to "Look" towards the mouse cursor without moving
     if (this.input.usingKeyboard()) {
         const cursor = this.input.cursorRelative;
-        // Non-linear peek: Only engaging when cursor moves away from center
         const peekX = Math.sign(cursor.x) * Math.pow(Math.abs(cursor.x), 2) * this.MOUSE_PEEK_DISTANCE;
         const peekY = Math.sign(cursor.y) * Math.pow(Math.abs(cursor.y), 2) * this.MOUSE_PEEK_DISTANCE;
         
-        // Rotate Peek Vector to match Camera Rotation
-        // Cursor is Screen Space (Up is Up). World Space rotates.
-        // We need to apply inverse rotation? 
-        // No, lookAheadX is World Space. We want to peek in World Space.
-        // Camera will rotate World. 
-        // If cursor is Up, we want to look at World "Top of Screen".
-        // World "Top of Screen" depends on rotation.
         // WorldVec = Rotate(ScreenVec, -CameraAngle)
         const cos = Math.cos(-camera.rotation);
         const sin = Math.sin(-camera.rotation);
@@ -88,14 +81,11 @@ export class CameraService {
         const worldPeekX = peekX * cos - peekY * sin;
         const worldPeekY = peekX * sin + peekY * cos;
 
-        // Scale peek by zoom level (look further when zoomed out)
         rawTargetX += worldPeekX / camera.zoom;
         rawTargetY += worldPeekY / camera.zoom;
     }
 
     // --- 2. Soft-Clamp Bounds ---
-    // We clamp the TARGET, not the camera position directly. 
-    // This allows the damping (lerp) to naturally decelerate the camera as it approaches the "wall"
     const bounds = this.world.mapBounds;
     const margin = config.BOUNDS_MARGIN;
     
@@ -103,8 +93,6 @@ export class CameraService {
     const clampedTargetY = Math.max(bounds.minY + margin, Math.min(bounds.maxY - margin, rawTargetY));
 
     // --- 3. Smooth Damping (Lerp) ---
-    // Interpolate current position towards the clamped target.
-    // Reduced damping factor slightly for smoother/heavier feel (was 0.08)
     const DAMPING = 0.06;
     camera.x += (clampedTargetX - camera.x) * DAMPING;
     camera.y += (clampedTargetY - camera.y) * DAMPING;
@@ -119,11 +107,14 @@ export class CameraService {
     } else {
         camera.rotation = this.targetRotation;
     }
+    
+    // Update Cached Trig (used by PlayerControl and Renderer)
+    this.rotationCos = Math.cos(camera.rotation);
+    this.rotationSin = Math.sin(camera.rotation);
 
     // --- 5. Apply Screen Shake ---
     const shake = this.playerService.screenShake();
     if (shake.intensity > 0.1) {
-        // Shake decays over time
         this.playerService.screenShake.update(s => ({
             ...s,
             intensity: s.intensity * s.decay,

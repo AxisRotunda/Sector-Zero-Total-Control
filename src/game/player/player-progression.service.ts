@@ -1,5 +1,6 @@
-import { Injectable, signal, computed, inject, OnDestroy } from '@angular/core';
-import { Subscription } from 'rxjs';
+
+import { Injectable, signal, computed, inject } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import * as BALANCE from '../../config/balance.config';
 import { SkillTreeService } from '../../game/skill-tree.service';
 import { SoundService } from '../../services/sound.service';
@@ -7,11 +8,10 @@ import { EventBusService } from '../../core/events/event-bus.service';
 import { GameEvents } from '../../core/events/game-events';
 
 @Injectable({ providedIn: 'root' })
-export class PlayerProgressionService implements OnDestroy {
+export class PlayerProgressionService {
   private skillTree = inject(SkillTreeService);
   private sound = inject(SoundService);
   private eventBus = inject(EventBusService);
-  private subscriptions: Subscription[] = [];
 
   level = signal(1);
   currentXp = signal(0);
@@ -20,11 +20,10 @@ export class PlayerProgressionService implements OnDestroy {
   nextLevelXp = computed(() => this.level() * BALANCE.PLAYER.XP_PER_LEVEL);
 
   constructor() {
-    const sub = this.eventBus.on(GameEvents.PLAYER_DEATH).subscribe(() => this.credits.update(c => Math.floor(c * 0.8)));
-    this.subscriptions.push(sub);
+    this.eventBus.on(GameEvents.PLAYER_DEATH)
+        .pipe(takeUntilDestroyed())
+        .subscribe(() => this.credits.update(c => Math.floor(c * 0.8)));
   }
-
-  ngOnDestroy() { this.subscriptions.forEach(s => s.unsubscribe()); }
 
   gainXp(amount: number) {
       this.currentXp.update(x => x + amount);
