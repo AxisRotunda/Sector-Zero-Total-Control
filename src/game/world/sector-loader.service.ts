@@ -155,6 +155,13 @@ export class SectorLoaderService {
           if (def.data.wanderRadius !== undefined) e.aggroRadius = def.data.wanderRadius;
       }
       
+      // --- ID MAPPING ---
+      // If the definition has a stable ID, persist it in the data bag for runtime lookup
+      if (def.id) {
+          if (!e.data) e.data = {};
+          e.data.id = def.id;
+      }
+      
       // Special logic for NPCs colors if not overridden
       if (e.type === 'NPC' && (!def.data || !def.data.color)) {
           if (!e.radius) e.radius = 25;

@@ -35,6 +35,7 @@ export interface ZoneGeometry {
 }
 
 export interface ZoneEntityDef {
+  id?: string; // Stable identifier for scripting/diffing
   type: 'NPC' | 'ENEMY' | 'DECORATION' | 'SPAWNER' | 'DESTRUCTIBLE' | 'TERMINAL' | 'INTERACTABLE';
   subType?: string;
   x: number;
