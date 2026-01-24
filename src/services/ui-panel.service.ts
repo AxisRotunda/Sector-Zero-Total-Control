@@ -1,5 +1,5 @@
 
-import { Injectable, signal, computed, inject } from '@angular/core';
+import { Injectable, signal, computed, inject, OnDestroy } from '@angular/core';
 import { InputService } from './input.service';
 import { MapService } from './map.service';
 import { GameStateService } from '../game/game-state.service';
@@ -9,7 +9,7 @@ export type PanelType = 'INVENTORY' | 'SKILLS' | 'SHOP' | 'ABILITIES' | 'CODEX' 
 @Injectable({
   providedIn: 'root'
 })
-export class UiPanelService {
+export class UiPanelService implements OnDestroy {
   private input = inject(InputService);
   private mapService = inject(MapService);
   private gameState = inject(GameStateService);
@@ -42,10 +42,16 @@ export class UiPanelService {
                      
       return !uiOpen;
   });
+
+  private resizeListener = () => this.calculateUIScale();
   
   constructor() {
       this.calculateUIScale();
-      window.addEventListener('resize', () => this.calculateUIScale());
+      window.addEventListener('resize', this.resizeListener);
+  }
+
+  ngOnDestroy() {
+      window.removeEventListener('resize', this.resizeListener);
   }
 
   private calculateUIScale() {

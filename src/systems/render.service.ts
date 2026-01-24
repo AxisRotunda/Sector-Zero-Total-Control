@@ -21,6 +21,7 @@ import { LightingService } from './rendering/lighting.service';
 import { TimeService } from '../game/time.service';
 import { MissionService } from '../game/mission.service';
 import { PerformanceManagerService } from '../game/performance-manager.service';
+import { isParticle } from '../utils/type-guards';
 
 @Injectable({
   providedIn: 'root'
@@ -67,6 +68,9 @@ export class RenderService {
   // Performance Monitoring
   private lastFrameTime = 0;
   private currentRenderScale = 1.0;
+  
+  // Cached Resources
+  private vignetteGradient: CanvasGradient | null = null;
 
   init(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -91,6 +95,7 @@ export class RenderService {
   }
 
   resize() {
+    this.vignetteGradient = null; // Invalidate cache
     if (this.canvas) {
       const scale = this.performanceManager.renderScale();
       this.currentRenderScale = scale;
@@ -227,7 +232,7 @@ export class RenderService {
       const len = renderList.length;
       for (let i = 0; i < len; i++) {
           const obj = renderList[i];
-          if ('life' in obj) {
+          if (isParticle(obj)) {
               const p = obj as Particle;
               if (p.emitsLight) {
                   if (p.x >= frustum.minX && p.x <= frustum.maxX && p.y >= frustum.minY && p.y <= frustum.maxY) {
@@ -284,20 +289,23 @@ export class RenderService {
   }
 
   private prepareRenderList(cam: Camera, zone: Zone, dynamicEntities: Entity[], player: Entity, particles: Particle[], w: number, h: number, frustum: any) {
-      this.renderList.length = 0;
+      // Direct array manipulation optimization
+      let renderIndex = 0;
       
       const { buffer: staticBuffer, count: staticCount } = this.chunkManager.getVisibleStaticEntities(cam, w, h);
-      for (let i = 0; i < staticCount; i++) this.renderList.push(staticBuffer[i]);
+      for (let i = 0; i < staticCount; i++) {
+          this.renderList[renderIndex++] = staticBuffer[i];
+      }
       
       const { buffer: dynamicBuffer, count: dynamicCount } = this.spatialHash.queryRectFast(frustum.minX, frustum.minY, frustum.maxX, frustum.maxY, zone.id);
       for (let i = 0; i < dynamicCount; i++) {
           const e = dynamicBuffer[i];
           if (e.type === 'WALL' && e.subType !== 'GATE_SEGMENT') continue;
           if (e.type === 'DECORATION' && (e.subType === 'RUG' || e.subType === 'FLOOR_CRACK' || e.subType === 'GRAFFITI')) continue;
-          this.renderList.push(e);
+          this.renderList[renderIndex++] = e;
       }
       
-      this.renderList.push(player);
+      this.renderList[renderIndex++] = player;
 
       const pLen = particles.length;
       const pLimit = this.performanceManager.particleLimit();
@@ -306,10 +314,16 @@ export class RenderService {
           if (pCount >= pLimit) break;
           const p = particles[i];
           if (p.x >= frustum.minX && p.x <= frustum.maxX && p.y >= frustum.minY && p.y <= frustum.maxY) {
-              this.renderList.push(p);
+              this.renderList[renderIndex++] = p;
               pCount++;
           }
       }
+      
+      // Trim excess if array shrank
+      if (this.renderList.length > renderIndex) {
+          this.renderList.length = renderIndex;
+      }
+      
       this.sorter.sortForRender(this.renderList, cam.rotation);
   }
 
@@ -318,8 +332,11 @@ export class RenderService {
       const len = renderList.length;
       for (let i = 0; i < len; i++) {
           const e = renderList[i];
-          if (!('type' in e)) continue;
+          if (isParticle(e)) continue;
           const ent = e as Entity;
+          
+          // Optimization: Skip off-screen shadows more aggressively? 
+          // For now just checking type.
           if (ent.type === 'PLAYER' || ent.type === 'ENEMY' || ent.type === 'NPC') {
               this.shadowRenderer.drawUnitShadow(this.ctx, ent);
           } else if (ent.type === 'WALL' || ent.type === 'DECORATION') {
@@ -345,6 +362,26 @@ export class RenderService {
       return Math.abs(wall.x - target.x) < combinedRadius && Math.abs(wall.y - target.y) < combinedRadius;
   }
 
+  private checkAnyTargetOcclusion(wall: Entity, player: Entity, zoneId: string): boolean {
+      // 1. Check Player Occlusion (Primary)
+      if (this.checkWallOcclusion(wall, player)) return true;
+
+      // 2. Check Enemy Occlusion (Optimization: Use SpatialHash)
+      // Query reasonably close area around the wall center
+      const searchRadius = Math.max(wall.width || 100, wall.depth || 100);
+      const { buffer, count } = this.spatialHash.queryFast(wall.x, wall.y, searchRadius, zoneId);
+      
+      for (let i = 0; i < count; i++) {
+          const ent = buffer[i];
+          if (ent.type === 'ENEMY' && ent.state !== 'DEAD') {
+              if (this.checkWallOcclusion(wall, ent)) {
+                  return true;
+              }
+          }
+      }
+      return false;
+  }
+
   private drawGeometry(renderList: (Entity | Particle)[], zone: Zone, player: Entity) {
       if (!this.ctx) return;
       const len = renderList.length;
@@ -352,7 +389,7 @@ export class RenderService {
 
       for (let i = 0; i < len; i++) {
           const obj = renderList[i];
-          if ('life' in obj) {
+          if (isParticle(obj)) {
               particles.push(obj as Particle);
               continue;
           }
@@ -361,20 +398,10 @@ export class RenderService {
 
           // Occlusion Handling for Walls
           if (e.type === 'WALL' && e.subType !== 'GATE_SEGMENT') {
-              // Check if wall hides player OR active enemies
-              const hidesPlayer = this.checkWallOcclusion(e, player);
-              let hidesEnemy = false;
-              
-              if (!hidesPlayer) {
-                  // Only check enemies if player isn't hidden (optimization)
-                  // Heuristic: Check enemies that are close to this wall in list? No, random access slow.
-                  // Just standard distance check against a few active threats?
-                  // For performance, we stick to Player occlusion or heavily optimized lookups.
-                  // Let's iterate nearby dynamic entities from render list? Too slow O(N^2).
-                  // We'll stick to Player Occlusion for now as it's the primary UX issue.
-              }
+              // Optimized Occlusion Check
+              const isOccluding = this.checkAnyTargetOcclusion(e, player, zone.id);
 
-              if (hidesPlayer) {
+              if (isOccluding) {
                   this.ctx.globalAlpha = 0.3;
               }
               
@@ -439,10 +466,14 @@ export class RenderService {
       if (!this.ctx) return;
       
       if (this.performanceManager.currentTier().name !== 'LOW') {
-          const grad = this.ctx.createRadialGradient(w/2, h/2, h/2, w/2, h/2, h);
-          grad.addColorStop(0, 'transparent');
-          grad.addColorStop(1, 'rgba(0,0,0,0.85)');
-          this.ctx.fillStyle = grad;
+          // Cached Gradient Usage
+          if (!this.vignetteGradient) {
+              this.vignetteGradient = this.ctx.createRadialGradient(w/2, h/2, h/2, w/2, h/2, h);
+              this.vignetteGradient.addColorStop(0, 'transparent');
+              this.vignetteGradient.addColorStop(1, 'rgba(0,0,0,0.85)');
+          }
+          
+          this.ctx.fillStyle = this.vignetteGradient;
           this.ctx.globalCompositeOperation = 'source-over';
           this.ctx.fillRect(0, 0, w, h);
       }
