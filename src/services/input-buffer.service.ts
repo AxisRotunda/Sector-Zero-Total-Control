@@ -1,7 +1,7 @@
 
 import { Injectable } from '@angular/core';
 
-export type CommandType = 'PRIMARY' | 'SECONDARY' | 'UTILITY' | 'DASH' | 'OVERLOAD';
+export type CommandType = 'PRIMARY' | 'SECONDARY' | 'UTILITY' | 'DASH' | 'OVERLOAD' | 'SHIELD_BASH' | 'WHIRLWIND' | 'DASH_STRIKE';
 
 export interface BufferedCommand {
     type: CommandType;
@@ -10,13 +10,26 @@ export interface BufferedCommand {
     priority: number; // Higher executes first
 }
 
+export interface ComboDefinition {
+  sequence: CommandType[];
+  windowMs: number;
+  result: CommandType;
+}
+
 @Injectable({
   providedIn: 'root'
 })
 export class InputBufferService {
   private buffer: BufferedCommand[] = [];
+  private inputHistory: Array<{ action: CommandType, timestamp: number }> = [];
+  
   private readonly BUFFER_TTL = 300; // ms to keep command alive
   private readonly MAX_BUFFER_SIZE = 3;
+
+  private combos: ComboDefinition[] = [
+    { sequence: ['PRIMARY', 'SECONDARY', 'DASH'], windowMs: 600, result: 'WHIRLWIND' },
+    { sequence: ['DASH', 'PRIMARY', 'PRIMARY'], windowMs: 800, result: 'DASH_STRIKE' }
+  ];
 
   /**
    * Adds a command to the buffer.
@@ -26,7 +39,17 @@ export class InputBufferService {
   addCommand(type: CommandType, angle?: number, priority: number = 1) {
       const now = performance.now();
       
-      // Cleanup expired
+      // 1. Record History for Combos
+      this.inputHistory.push({ action: type, timestamp: now });
+      // Clean up old history (keep last 1s)
+      this.inputHistory = this.inputHistory.filter(i => now - i.timestamp < 1000);
+      
+      // 2. Check for Combos
+      if (this.checkCombos(now)) {
+          return; // If combo triggered, don't buffer the raw input
+      }
+
+      // 3. Regular Buffering
       this.prune(now);
 
       // Add new
@@ -42,6 +65,37 @@ export class InputBufferService {
       if (this.buffer.length > this.MAX_BUFFER_SIZE) {
           this.buffer.pop(); // Remove lowest priority/oldest
       }
+  }
+
+  private checkCombos(now: number): boolean {
+    for (const combo of this.combos) {
+      if (this.inputHistory.length < combo.sequence.length) continue;
+
+      const recent = this.inputHistory.slice(-combo.sequence.length);
+      
+      // Check sequence match
+      const matches = recent.every((input, i) => input.action === combo.sequence[i]);
+      if (!matches) continue;
+      
+      // Check timing window
+      const duration = recent[recent.length - 1].timestamp - recent[0].timestamp;
+      if (duration <= combo.windowMs) {
+        this.triggerCombo(combo.result);
+        this.inputHistory = []; // Clear history after combo
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private triggerCombo(comboName: CommandType) {
+      // Add as high-priority command immediately
+      // Using priority 5 ensures it overrides standard inputs
+      this.buffer.push({ 
+          type: comboName, 
+          timestamp: performance.now(), 
+          priority: 5 
+      });
   }
 
   /**
@@ -62,6 +116,7 @@ export class InputBufferService {
 
   clear() {
       this.buffer = [];
+      this.inputHistory = [];
   }
 
   private prune(now: number) {

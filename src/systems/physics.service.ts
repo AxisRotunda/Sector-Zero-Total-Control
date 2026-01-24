@@ -96,25 +96,52 @@ export class PhysicsService {
     const stepVy = e.vy / steps;
 
     for (let i = 0; i < steps; i++) {
-        // AXIS-SEPARATED COLLISION (Permits Wall Sliding)
-        // Move X
+        // Updated Vector Projection Physics
         const prevX = e.x;
-        e.x += stepVx;
-        if (this.checkCollision(e)) {
-            // Collision detected on X-axis move
-            e.x = prevX; // Revert position
-            e.vx = 0;    // Kill velocity on this axis only
-            if (isPlayer && Math.abs(stepVx) > 0.5) this.spawnWallImpact(e);
-        }
-
-        // Move Y
         const prevY = e.y;
+        
+        e.x += stepVx;
         e.y += stepVy;
-        if (this.checkCollision(e)) {
-            // Collision detected on Y-axis move
-            e.y = prevY; // Revert position
-            e.vy = 0;    // Kill velocity on this axis only
-            if (isPlayer && Math.abs(stepVy) > 0.5) this.spawnWallImpact(e);
+        
+        // Find obstacle
+        const obstacle = this.getCollidingEntity(e);
+        
+        if (obstacle) {
+            // Impact effects
+            if (isPlayer && speed > 5) this.spawnWallImpact(e);
+
+            // Revert slightly to avoid sticking inside
+            e.x = prevX;
+            e.y = prevY;
+
+            // Calculate Normal
+            const normal = this.getCollisionNormal(e, obstacle);
+            
+            // Project velocity along wall surface (remove normal component)
+            // v_new = v - (v . n) * n
+            const dot = e.vx * normal.x + e.vy * normal.y;
+            
+            // Apply friction coefficient (0.7) to sliding to prevent infinite slide
+            e.vx -= dot * normal.x;
+            e.vy -= dot * normal.y;
+            
+            // Slight damping on impact
+            e.vx *= 0.9;
+            e.vy *= 0.9;
+            
+            // Push out of overlap (Slop recovery)
+            // For walls (AABB), strict pushout is handled by revert + slide
+            // For Circles, we might want to push explicitly
+            if (obstacle.type !== 'WALL') {
+                const dx = e.x - obstacle.x;
+                const dy = e.y - obstacle.y;
+                const dist = Math.hypot(dx, dy);
+                const overlap = (e.radius + (obstacle.radius || 20)) - dist;
+                if (overlap > 0 && dist > 0) {
+                    e.x += normal.x * overlap * 0.5;
+                    e.y += normal.y * overlap * 0.5;
+                }
+            }
         }
 
         const bounds = this.world.mapBounds;
@@ -129,7 +156,7 @@ export class PhysicsService {
     }
     
     return isMoving;
-  }
+}
 
   private spawnWallImpact(e: Entity) {
       if (!e.data) e.data = {};
@@ -150,13 +177,12 @@ export class PhysicsService {
       });
   }
 
-  private checkCollision(e: Entity): boolean {
+  private getCollidingEntity(e: Entity): Entity | null {
       const radius = e.radius || 20;
       const zoneId = this.world.currentZone().id;
-      
       const queryRadius = radius * this.COLLISION_QUERY_RATIO;
       
-      // CRITICAL: Use buffer index 1 to avoid overwriting outer loop (buffer 0)
+      // Use buffer 1 to avoid overlap
       const { buffer, count } = this.spatialHash.queryFast(e.x, e.y, queryRadius, zoneId, 1); 
       
       // Check Static Walls
@@ -170,27 +196,11 @@ export class PhysicsService {
           const obs = staticBuffer[i];
           if (obs.type === 'WALL') {
               if (obs.locked === false) continue; 
-
-              const colW = obs.width || 40;
-              const colD = obs.depth ?? (obs.width || 40);
-
-              const halfW = colW / 2;
-              const halfD = colD / 2;
-              
-              const closestX = Math.max(obs.x - halfW, Math.min(e.x, obs.x + halfW));
-              const closestY = Math.max(obs.y - halfD, Math.min(e.y, obs.y + halfD));
-              
-              const dx = e.x - closestX;
-              const dy = e.y - closestY;
-              const distSq = dx * dx + dy * dy;
-              
-              if (distSq < (radius * radius) - 0.1) {
-                  return true;
-              }
+              if (this.checkAABBOverlap(e, obs)) return obs;
           }
       }
 
-      // 2. Dynamic Check (Destructibles)
+      // 2. Dynamic Check
       for (let i = 0; i < count; i++) {
           const obs = buffer[i];
           if (obs.id === e.id) continue;
@@ -198,12 +208,61 @@ export class PhysicsService {
           if (isDestructible(obs) && obs.state !== 'DEAD') {
               const obsR = obs.radius || 20;
               const dist = Math.hypot(e.x - obs.x, e.y - obs.y);
-              if (dist < radius + obsR) {
-                  return true;
-              }
+              if (dist < radius + obsR) return obs;
+          }
+          
+          // Also check dynamic walls (gates)
+          if (obs.type === 'WALL' && obs.locked !== false) {
+              if (this.checkAABBOverlap(e, obs)) return obs;
           }
       }
       
-      return false;
+      return null;
+  }
+
+  private checkAABBOverlap(e: Entity, wall: Entity): boolean {
+      const colW = wall.width || 40;
+      const colD = wall.depth ?? (wall.width || 40);
+      const halfW = colW / 2;
+      const halfD = colD / 2;
+      
+      const closestX = Math.max(wall.x - halfW, Math.min(e.x, wall.x + halfW));
+      const closestY = Math.max(wall.y - halfD, Math.min(e.y, wall.y + halfD));
+      
+      const dx = e.x - closestX;
+      const dy = e.y - closestY;
+      const distSq = dx * dx + dy * dy;
+      
+      return distSq < (e.radius * e.radius) - 0.1;
+  }
+
+  private getCollisionNormal(e: Entity, obstacle: Entity): { x: number, y: number } {
+      if (obstacle.type === 'WALL') {
+          // AABB Normal Logic
+          const halfW = (obstacle.width || 40) / 2;
+          const halfD = (obstacle.depth || 40) / 2;
+          
+          const dx = e.x - obstacle.x;
+          const dy = e.y - obstacle.y;
+          
+          // Calculate penetration depth on each axis relative to bounds
+          const px = halfW + e.radius - Math.abs(dx);
+          const py = halfD + e.radius - Math.abs(dy);
+          
+          // If penetration on X is shallower, collision is horizontal (normal is X)
+          if (px < py) {
+              return { x: Math.sign(dx), y: 0 };
+          } else {
+              return { x: 0, y: Math.sign(dy) };
+          }
+      } else {
+          // Circle Logic
+          const dx = e.x - obstacle.x;
+          const dy = e.y - obstacle.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          
+          if (dist === 0) return { x: 0, y: 1 }; // Fallback
+          return { x: dx / dist, y: dy / dist };
+      }
   }
 }

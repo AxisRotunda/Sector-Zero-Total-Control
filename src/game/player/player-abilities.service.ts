@@ -15,6 +15,7 @@ import { UNARMED_WEAPON, Item } from '../../models/item.models';
 import { PlayerProgressionService } from './player-progression.service';
 import { CollisionService } from '../../systems/collision.service';
 import { createEmptyDamagePacket } from '../../models/damage.model';
+import { CommandType } from '../../services/input-buffer.service';
 
 @Injectable({ providedIn: 'root' })
 export class PlayerAbilitiesService {
@@ -51,7 +52,7 @@ export class PlayerAbilitiesService {
     }));
   }
 
-  useSkill(skill: 'PRIMARY' | 'SECONDARY' | 'DASH' | 'UTILITY' | 'OVERLOAD' | 'SHIELD_BASH', targetAngle?: number) {
+  useSkill(skill: CommandType, targetAngle?: number) {
     const player = this.world.player;
     if (player.hp <= 0 || player.status.stun > 0) return;
     const stats = this.stats.playerStats();
@@ -82,6 +83,65 @@ export class PlayerAbilitiesService {
     else if (skill === 'OVERLOAD') {
         this.useOverload(player, stats);
     }
+    else if (skill === 'WHIRLWIND') {
+        this.useWhirlwind(player, stats);
+    }
+    else if (skill === 'DASH_STRIKE') {
+        this.useDashStrike(player, stats, targetAngle);
+    }
+  }
+
+  // --- COMBO IMPLEMENTATIONS (Basic) ---
+  
+  private useWhirlwind(player: Entity, stats: any) {
+      player.state = 'ATTACK';
+      this.sound.play('SWOOSH');
+      this.haptic.impactHeavy();
+      
+      const hitbox = this.entityPool.acquire('HITBOX', undefined, this.world.currentZone().id);
+      hitbox.source = 'PLAYER';
+      hitbox.x = player.x; hitbox.y = player.y; 
+      hitbox.radius = 120;
+      hitbox.damagePacket = createEmptyDamagePacket();
+      hitbox.damagePacket.physical = stats.damage * 1.5;
+      hitbox.damagePacket.chaos = stats.psyche * 2;
+      hitbox.color = '#f97316';
+      hitbox.timer = 15;
+      hitbox.knockbackForce = 20;
+      
+      this.collisionService.checkHitboxCollisions(hitbox);
+      this.world.entities.push(hitbox);
+      
+      this.particleService.addParticles({ x: player.x, y: player.y, z: 20, count: 20, speed: 10, color: '#f97316', size: 3, type: 'circle', life: 0.5 });
+      this.eventBus.dispatch({ type: GameEvents.FLOATING_TEXT_SPAWN, payload: { onPlayer: true, yOffset: -80, text: "WHIRLWIND", color: '#f97316', size: 24 } });
+  }
+
+  private useDashStrike(player: Entity, stats: any, targetAngle?: number) {
+      const angle = targetAngle ?? player.angle;
+      player.angle = angle;
+      player.vx += Math.cos(angle) * 35;
+      player.vy += Math.sin(angle) * 35;
+      player.state = 'ATTACK';
+      
+      this.sound.play('DASH');
+      this.haptic.impactMedium();
+      
+      const hitbox = this.entityPool.acquire('HITBOX', undefined, this.world.currentZone().id);
+      hitbox.source = 'PLAYER';
+      hitbox.x = player.x; hitbox.y = player.y; 
+      hitbox.radius = 60;
+      hitbox.damagePacket = createEmptyDamagePacket();
+      hitbox.damagePacket.physical = stats.damage * 2.0;
+      hitbox.critChance = 50; // High crit
+      hitbox.color = '#ffffff';
+      hitbox.timer = 10;
+      
+      // Attach to player for duration of dash
+      hitbox.vx = player.vx;
+      hitbox.vy = player.vy;
+      
+      this.world.entities.push(hitbox);
+      this.eventBus.dispatch({ type: GameEvents.FLOATING_TEXT_SPAWN, payload: { onPlayer: true, yOffset: -80, text: "STRIKE", color: '#ffffff', size: 24 } });
   }
 
   // --- ATTACK LOGIC ---

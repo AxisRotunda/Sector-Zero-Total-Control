@@ -18,7 +18,10 @@ export class CameraService {
   public rotationSin = 0;
   
   private readonly MOUSE_PEEK_DISTANCE = 300; 
-  private velocityHistory: {vx: number, vy: number, t: number}[] = [];
+  
+  // Optimization: Circular Buffer for velocity history
+  private velocityBuffer = new Array(20).fill(null).map(() => ({ vx: 0, vy: 0, t: 0 }));
+  private bufferIndex = 0;
 
   // Make zoom reactive for computed signals
   private currentZoom = signal(RENDER_CONFIG.CAMERA.BASE_ZOOM);
@@ -52,20 +55,24 @@ export class CameraService {
     const camera = this.world.camera;
     const config = RENDER_CONFIG.CAMERA;
     
-    // Predictive Smoothing: Velocity History
+    // Predictive Smoothing: Velocity Ring Buffer Update
     const now = Date.now();
-    this.velocityHistory.push({ vx: player.vx, vy: player.vy, t: now });
-    // Keep last 200ms
-    this.velocityHistory = this.velocityHistory.filter(v => now - v.t < 200);
+    this.velocityBuffer[this.bufferIndex] = { vx: player.vx, vy: player.vy, t: now };
+    this.bufferIndex = (this.bufferIndex + 1) % this.velocityBuffer.length;
     
-    // Calculate Average Velocity
-    let avgVx = 0;
-    let avgVy = 0;
-    if (this.velocityHistory.length > 0) {
-        const sum = this.velocityHistory.reduce((acc, v) => ({ x: acc.x + v.vx, y: acc.y + v.vy }), {x:0, y:0});
-        avgVx = sum.x / this.velocityHistory.length;
-        avgVy = sum.y / this.velocityHistory.length;
+    // Calculate Average Velocity (only recent)
+    const cutoff = now - 200;
+    let sumVx = 0, sumVy = 0, count = 0;
+    
+    for (const v of this.velocityBuffer) {
+        if (v.t >= cutoff) { 
+            sumVx += v.vx; 
+            sumVy += v.vy; 
+            count++; 
+        }
     }
+    const avgVx = count > 0 ? sumVx / count : 0;
+    const avgVy = count > 0 ? sumVy / count : 0;
 
     const zoomFactor = 1.0 + (1.0 - camera.zoom) * 0.5;
     
