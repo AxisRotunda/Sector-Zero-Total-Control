@@ -1,99 +1,57 @@
 
 import { Injectable, inject } from '@angular/core';
 import { WorldService } from '../game/world/world.service';
-import { PlayerService } from '../game/player/player.service';
 import { InputService } from '../services/input.service';
 import { PhysicsService } from './physics.service';
-import { SpatialHashService } from './spatial-hash.service';
-import { MapService } from '../services/map.service';
-import { TutorialService } from '../services/tutorial.service';
-import { EntityPoolService } from '../services/entity-pool.service';
-import { NarrativeService } from '../game/narrative.service';
-import * as BALANCE from '../config/balance.config';
-import { Entity } from '../models/game.models';
-import { isEnemy, isDestructible } from '../utils/type-guards';
-import { InputBufferService } from '../services/input-buffer.service';
-import { HapticService } from '../services/haptic.service';
-import { CameraService } from '../game/camera.service';
 import { InteractionService } from '../services/interaction.service';
-import { InventoryService } from '../game/inventory.service';
-import { UNARMED_WEAPON } from '../models/item.models';
+import { CameraService } from '../game/camera.service';
+import { PlayerMovementService } from '../game/player/player-movement.service';
+import { PlayerCombatService } from '../game/player/player-combat.service';
+import { PlayerAnimationService } from '../game/player/player-animation.service';
 
 @Injectable({ providedIn: 'root' })
 export class PlayerControlService {
     private world = inject(WorldService);
-    private playerService = inject(PlayerService);
     private input = inject(InputService);
     private physics = inject(PhysicsService);
-    private spatialHash = inject(SpatialHashService);
-    private mapService = inject(MapService);
-    private tutorial = inject(TutorialService);
-    private entityPool = inject(EntityPoolService);
-    private narrative = inject(NarrativeService);
-    private inputBuffer = inject(InputBufferService);
-    private haptic = inject(HapticService);
     private cameraService = inject(CameraService);
     private interaction = inject(InteractionService);
-    private inventory = inject(InventoryService);
+    
+    // Sub-systems
+    private movement = inject(PlayerMovementService);
+    private combat = inject(PlayerCombatService);
+    private animation = inject(PlayerAnimationService);
 
+    // Facade properties for UI binding
     nearbyInteractable = this.interaction.nearbyInteractable;
     activeInteractable = this.interaction.activeInteractable;
     requestedFloorChange = this.interaction.requestedFloorChange;
 
-    private attackState: 'IDLE' | 'STARTUP' | 'ACTIVE' | 'RECOVERY' = 'IDLE';
-    private _rotatedInput = { x: 0, y: 0 };
-
     update(globalTime: number) {
         const player = this.world.player;
         
+        // Handle Stun
         if (player.status.stun > 0) {
             player.status.stun--; 
             player.vx *= 0.9; 
             player.vy *= 0.9; 
             this.physics.updateEntityPhysics(player); 
-            this.updatePlayerAnimation(player); 
+            this.animation.update(player); 
             this.cameraService.update();
             return;
         }
         
         this.cameraService.update();
-        this.updatePlayerAnimation(player);
+        this.animation.update(player);
 
+        // Movement Logic
         let isMoving = false;
-
         if (player.state !== 'ATTACK') {
-            this.attackState = 'IDLE'; 
-            
-            const stats = this.playerService.playerStats();
-            const prevVx = player.vx;
-            const prevVy = player.vy;
-            
-            const cos = this.cameraService.rotationCos;
-            const sin = -this.cameraService.rotationSin;
-            
-            const input = this.input.inputVector;
-            
-            this._rotatedInput.x = input.x * cos - input.y * sin;
-            this._rotatedInput.y = input.x * sin + input.y * cos;
-
-            isMoving = this.physics.updateEntityPhysics(player, stats, this._rotatedInput);
-            
-            if (Math.hypot(input.x, input.y) > 0.5) {
-                if (!isMoving && (Math.abs(prevVx) > 0.5 || Math.abs(prevVy) > 0.5)) {
-                    if (this.playerService.screenShake().intensity < 1) {
-                        this.haptic.impactLight();
-                    }
-                }
-            }
-
-            if (isMoving) { 
-                player.state = 'MOVE'; 
-                if (globalTime % 10 === 0) this.mapService.updateDiscovery(player.x, player.y); 
-            } else {
-                player.state = 'IDLE';
-            }
+            this.combat.currentAttackState = 'IDLE';
+            isMoving = this.movement.update(player, globalTime);
         }
 
+        // Facing Logic
         if (player.state !== 'ATTACK') {
             if (this.input.aimAngle !== null) {
                 player.angle = this.input.aimAngle - this.world.camera.rotation;
@@ -104,186 +62,6 @@ export class PlayerControlService {
         }
 
         this.interaction.update(player, globalTime);
-        
-        if (!this.world.currentZone().isSafeZone) {
-            this.handleCombatInputs(player, globalTime);
-        }
-    }
-
-    private handleCombatInputs(player: Entity, globalTime: number) {
-        if (this.input.isDown('SKILL_1')) this.inputBuffer.addCommand('SECONDARY', this.input.aimAngle ?? undefined, 2);
-        if (this.input.isDown('SKILL_2')) this.inputBuffer.addCommand('UTILITY', this.input.aimAngle ?? undefined, 2);
-        if (this.input.isDown('SKILL_3')) this.inputBuffer.addCommand('DASH', this.input.aimAngle ?? undefined, 3);
-        if (this.input.isDown('SKILL_4')) this.inputBuffer.addCommand('OVERLOAD', this.input.aimAngle ?? undefined, 3);
-        
-        const manualAttack = this.input.isAttackPressed || this.input.isDown('ATTACK');
-        
-        if (manualAttack) {
-            let targetAngle = this.input.aimAngle;
-            
-            if (targetAngle === null) {
-                const autoTarget = this.findBestTarget(player);
-                // Defensive check to ensure autoTarget is valid before accessing coords
-                if (autoTarget && typeof autoTarget.x === 'number' && typeof autoTarget.y === 'number') {
-                    targetAngle = Math.atan2(autoTarget.y - player.y, autoTarget.x - player.x);
-                } else if (Math.hypot(player.vx, player.vy) > 0.1) {
-                    targetAngle = Math.atan2(player.vy, player.vx);
-                } else {
-                    targetAngle = player.angle;
-                }
-            } else {
-                targetAngle -= this.world.camera.rotation;
-            }
-            
-            this.inputBuffer.addCommand('PRIMARY', targetAngle ?? undefined, 1);
-        }
-
-        const autoCombat = this.playerService.autoCombatEnabled();
-        
-        if (autoCombat && !this.activeInteractable() && player.state !== 'ATTACK' && !manualAttack) {
-             const nextCmd = this.inputBuffer.peekCommand();
-             if (!nextCmd || nextCmd.priority <= 1) {
-                 this.handleAutoAttack(player);
-             }
-        }
-
-        const canInterrupt = player.state === 'ATTACK' && this.attackState === 'RECOVERY';
-        
-        if (player.state !== 'ATTACK' || canInterrupt) {
-            const cmd = this.inputBuffer.peekCommand();
-            if (cmd) {
-                if (player.state === 'ATTACK' && cmd.priority < 1) return;
-
-                this.inputBuffer.consumeCommand();
-                let targetAngle = cmd.angle ?? player.angle;
-                this.playerService.useSkill(cmd.type, targetAngle);
-            }
-        }
-    }
-
-    private findBestTarget(player: Entity): Entity | null {
-        const zoneId = this.world.currentZone().id;
-        const range = 500; 
-        const candidates = this.spatialHash.query(player.x, player.y, range, zoneId);
-        
-        let best: Entity | null = null;
-        let minScore = Infinity;
-        
-        const playerDirX = Math.cos(player.angle);
-        const playerDirY = Math.sin(player.angle);
-
-        for (const e of candidates) {
-            if (e.id === player.id) continue;
-            if (e.state === 'DEAD') continue;
-            if (!isEnemy(e) && !isDestructible(e)) continue;
-            
-            const dx = e.x - player.x;
-            const dy = e.y - player.y;
-            const dist = Math.hypot(dx, dy);
-            
-            const dirX = dx / dist;
-            const dirY = dy / dist;
-            
-            const dot = playerDirX * dirX + playerDirY * dirY;
-            
-            let score = dist;
-            
-            if (dot > 0) {
-                score *= (1 - dot * 0.5); 
-            } else {
-                score += 300; 
-            }
-            
-            if (isDestructible(e)) score += 150;
-
-            if (score < minScore) {
-                minScore = score;
-                best = e;
-            }
-        }
-        return best;
-    }
-
-    private handleAutoAttack(player: Entity) {
-         const zoneId = this.world.currentZone().id;
-         const nearbyTargets = this.spatialHash.query(player.x, player.y, BALANCE.COMBAT.AUTO_ATTACK_RANGE, zoneId);
-         
-         let closest: Entity | null = null; 
-         let minD = BALANCE.COMBAT.AUTO_ATTACK_RANGE;
-         
-         nearbyTargets.forEach(e => {
-            if ((isEnemy(e) || isDestructible(e)) && e.state !== 'DEAD') {
-                const d = Math.hypot(e.x - player.x, e.y - player.y);
-                if (d < minD) { minD = d; closest = e; }
-            }
-        });
-
-        if (closest) {
-             if (isEnemy(closest)) this.tutorial.trigger('COMBAT');
-             const targetAngle = Math.atan2((closest as Entity).y - player.y, (closest as Entity).x - player.x);
-             const speed = Math.hypot(player.vx, player.vy);
-             if (speed < 0.5 && !this.input.usingKeyboard()) {
-                 this.inputBuffer.addCommand('PRIMARY', targetAngle, 0);
-             }
-        }
-    }
-
-    private updatePlayerAnimation(player: Entity) {
-        const weapon = this.inventory.equipped().weapon || UNARMED_WEAPON;
-        const weaponSpeed = weapon.stats['spd'] || 1.0;
-        
-        const comboSpeedMult = player.comboIndex === 2 ? 0.7 : (player.comboIndex === 1 ? 0.85 : 1.0);
-        const attackSpeedStat = this.playerService.stats.playerStats().speed * 0.1; 
-        
-        const baseSpeed = 3;
-        const attackFrameDuration = Math.max(1, Math.floor(baseSpeed / (weaponSpeed + attackSpeedStat) * comboSpeedMult));
-
-        const IDLE_FRAME_DURATION = 12; const IDLE_FRAMES = 4;
-        const MOVE_FRAME_DURATION = 6; const MOVE_FRAMES = 6;
-        
-        const ATTACK_STARTUP_FRAMES = 2; 
-        const ATTACK_ACTIVE_FRAMES = 3; 
-        const ATTACK_TOTAL_FRAMES = 9;
-        
-        player.animFrameTimer++;
-        switch (player.state) {
-            case 'IDLE': 
-                if (player.animFrameTimer >= IDLE_FRAME_DURATION) { 
-                    player.animFrameTimer = 0; player.animFrame = (player.animFrame + 1) % IDLE_FRAMES; 
-                } 
-                break;
-            case 'MOVE': 
-                if (player.animFrameTimer >= MOVE_FRAME_DURATION) { 
-                    player.animFrameTimer = 0; player.animFrame = (player.animFrame + 1) % MOVE_FRAMES; 
-                } 
-                break;
-            case 'ATTACK':
-                if (player.animFrameTimer >= attackFrameDuration) {
-                    player.animFrameTimer = 0; player.animFrame++;
-                    
-                    if (player.animFrame === 0) {
-                        this.attackState = 'STARTUP';
-                        player.animPhase = 'startup';
-                    }
-                    else if (this.attackState === 'STARTUP' && player.animFrame >= ATTACK_STARTUP_FRAMES) {
-                        this.attackState = 'ACTIVE';
-                        player.animPhase = 'active';
-                        this.playerService.abilities.spawnPrimaryAttackHitbox(player);
-                    }
-                    else if (this.attackState === 'ACTIVE' && player.animFrame >= ATTACK_STARTUP_FRAMES + ATTACK_ACTIVE_FRAMES) {
-                        this.attackState = 'RECOVERY';
-                        player.animPhase = 'recovery';
-                    }
-                    if (player.animFrame >= ATTACK_TOTAL_FRAMES) { 
-                        player.state = 'IDLE'; 
-                        player.animFrame = 0; 
-                        player.animPhase = undefined;
-                        this.attackState = 'IDLE';
-                        player.comboIndex = 0;
-                        this.playerService.abilities.currentCombo.set(0);
-                    }
-                } 
-                break;
-        }
+        this.combat.update(player);
     }
 }

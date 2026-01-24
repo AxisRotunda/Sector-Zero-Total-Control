@@ -1,5 +1,5 @@
 
-import { Injectable, inject, computed, signal, effect } from '@angular/core';
+import { Injectable, inject, computed, signal } from '@angular/core';
 import { WorldService } from './world/world.service';
 import { PlayerService } from './player/player.service';
 import { InputService } from '../services/input.service';
@@ -18,6 +18,7 @@ export class CameraService {
   public rotationSin = 0;
   
   private readonly MOUSE_PEEK_DISTANCE = 300; 
+  private velocityHistory: {vx: number, vy: number, t: number}[] = [];
 
   // Make zoom reactive for computed signals
   private currentZoom = signal(RENDER_CONFIG.CAMERA.BASE_ZOOM);
@@ -51,13 +52,26 @@ export class CameraService {
     const camera = this.world.camera;
     const config = RENDER_CONFIG.CAMERA;
     
-    // Predictive Look-Ahead (Velocity Sampling)
-    // We average velocity slightly or just use current if stable
+    // Predictive Smoothing: Velocity History
+    const now = Date.now();
+    this.velocityHistory.push({ vx: player.vx, vy: player.vy, t: now });
+    // Keep last 200ms
+    this.velocityHistory = this.velocityHistory.filter(v => now - v.t < 200);
+    
+    // Calculate Average Velocity
+    let avgVx = 0;
+    let avgVy = 0;
+    if (this.velocityHistory.length > 0) {
+        const sum = this.velocityHistory.reduce((acc, v) => ({ x: acc.x + v.vx, y: acc.y + v.vy }), {x:0, y:0});
+        avgVx = sum.x / this.velocityHistory.length;
+        avgVy = sum.y / this.velocityHistory.length;
+    }
+
     const zoomFactor = 1.0 + (1.0 - camera.zoom) * 0.5;
     
-    // Smoother lookahead
-    const lookAheadX = player.vx * config.LOOK_AHEAD_DIST * zoomFactor;
-    const lookAheadY = player.vy * config.LOOK_AHEAD_DIST * zoomFactor;
+    // Use average velocity for lookahead to reduce jitter
+    const lookAheadX = avgVx * config.LOOK_AHEAD_DIST * zoomFactor;
+    const lookAheadY = avgVy * config.LOOK_AHEAD_DIST * zoomFactor;
     
     let rawTargetX = player.x + lookAheadX;
     let rawTargetY = player.y + lookAheadY;
@@ -83,7 +97,6 @@ export class CameraService {
     const clampedTargetX = Math.max(bounds.minX + margin, Math.min(bounds.maxX - margin, rawTargetX));
     const clampedTargetY = Math.max(bounds.minY + margin, Math.min(bounds.maxY - margin, rawTargetY));
 
-    // Improved Damping
     const DAMPING = config.POSITION_DAMPING || 0.08;
     camera.x += (clampedTargetX - camera.x) * DAMPING;
     camera.y += (clampedTargetY - camera.y) * DAMPING;
