@@ -37,7 +37,15 @@ export class ShadowRendererService {
     const topR_Shadow = { x: baseR.x + shadowX, y: baseR.y + shadowY };
     const topB_Shadow = { x: baseB.x + shadowX, y: baseB.y + shadowY };
 
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+    // Soft Shadow Gradient
+    const gradient = ctx.createLinearGradient(
+      baseL.x, baseL.y,
+      topL_Shadow.x, topL_Shadow.y
+    );
+    gradient.addColorStop(0, 'rgba(0, 0, 0, 0.15)'); // Reduced intensity base
+    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');    // Fade out
+
+    ctx.fillStyle = gradient;
     ctx.beginPath();
     ctx.moveTo(baseL.x, baseL.y);
     ctx.lineTo(topL_Shadow.x, topL_Shadow.y);

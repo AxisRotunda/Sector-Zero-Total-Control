@@ -80,8 +80,12 @@
                    <div class="absolute -left-[28vmin] bottom-[10vmin] animate-in slide-in-from-bottom-2 fade-in">
                        <button (touchstart)="executeInteraction()" (click)="executeInteraction()"
                                class="w-[18vmin] h-[18vmin] max-w-24 max-h-24 bg-emerald-900/90 border-2 border-emerald-400 rounded-full shadow-[0_0_25px_rgba(52,211,153,0.6)] animate-pulse flex flex-col items-center justify-center text-white active:scale-90 transition-transform group">
-                           <span class="text-2xl mb-1 group-active:scale-125 transition-transform">⚡</span>
-                           <span class="text-[9px] font-bold tracking-widest uppercase">{{ interactionService.getInteractLabel(target) }}</span>
+                           <svg class="w-8 h-8 fill-current mb-1 group-active:scale-125 transition-transform" viewBox="0 0 24 24">
+                               <!-- Simple Interaction Icon (Hand) -->
+                               <path d="M9 11.24V7.5C9 6.12 10.12 5 11.5 5S14 6.12 14 7.5v3.74c1.21-.81 2-2.18 2-3.74V2.5a2.5 2.5 0 0 0-5 0v3.26c0-1.56.79-2.93 2-3.74V2.5A4.5 4.5 0 0 1 17.5 7v3.5c0 2.47-1.99 4.5-4.49 4.5-1.91 0-3.56-1.2-4.19-2.92A1.992 1.992 0 0 1 7 11.5c0 .35.09.67.24.95L9 11.24z"></path>
+                               <!-- Lightning Bolt for power/interact if preferred -->
+                               <path d="M7 2v11h3v9l7-12h-4l4-8z" *ngIf="target.type === 'TERMINAL'"></path>
+                           </svg>
                        </button>
                    </div>
                }

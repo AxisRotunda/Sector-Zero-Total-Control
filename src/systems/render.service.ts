@@ -57,7 +57,7 @@ export class RenderService {
 
   private renderList: (Entity | Particle)[] = [];
   
-  // Vector pools for frustum calc to avoid allocations
+  // Vector pools
   private _fp1 = { x: 0, y: 0 };
   private _fp2 = { x: 0, y: 0 };
   private _fp3 = { x: 0, y: 0 };
@@ -72,15 +72,12 @@ export class RenderService {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d', { alpha: false });
     this.inputService.setCanvas(canvas);
-    
-    // Initialize frame time to avoid giant delta on first frame
     this.lastFrameTime = performance.now();
 
     this.resize();
     this.resizeListener = () => this.resize();
     window.addEventListener('resize', this.resizeListener);
     
-    // Init lighting buffer
     if (this.canvas) {
         this.lightingRenderer.init(this.canvas.width, this.canvas.height);
     }
@@ -101,24 +98,15 @@ export class RenderService {
       this.canvas.width = Math.max(window.innerWidth * scale, 320);
       this.canvas.height = Math.max(window.innerHeight * scale, 320);
       
-      // Update lighting buffer size to match new render resolution
       this.lightingRenderer.resize(this.canvas.width, this.canvas.height);
     }
   }
 
   getScreenToWorld(screenX: number, screenY: number, cam: Camera, out: {x: number, y: number} = {x:0, y:0}) {
       if (!this.canvas) return out;
-      
-      // We must temporarily set the IsoUtils context to the current camera state 
-      // to correctly inverse the rotation.
       IsoUtils.setContext(cam.rotation, cam.x, cam.y);
-      
-      // Calculate Center Iso position (pivot)
       IsoUtils.toIso(cam.x, cam.y, 0, this.camCenter);
       
-      // 1. Un-center and Un-zoom (Screen Space -> Iso Space)
-      // Account for Render Scale: Screen Input Coordinates are window-relative (full res), 
-      // but canvas internal res is scaled.
       const scale = this.currentRenderScale;
       const dx = (screenX * scale) - this.canvas.width / 2;
       const dy = (screenY * scale) - this.canvas.height / 2;
@@ -126,9 +114,7 @@ export class RenderService {
       const isoX = this.camCenter.x + dx / cam.zoom;
       const isoY = this.camCenter.y + dy / cam.zoom;
       
-      // 2. Inverse Projection & Rotation via IsoUtils
       IsoUtils.fromIso(isoX, isoY, out);
-      
       return out;
   }
 
@@ -144,16 +130,13 @@ export class RenderService {
   ) {
     if (!this.ctx || !this.canvas) return;
     
-    // Performance Monitoring
     const now = performance.now();
     const delta = now - this.lastFrameTime;
     this.lastFrameTime = now;
     this.performanceManager.monitorFrame(delta);
 
-    // Apply quality settings
     this.lightingRenderer.setResolutionScale(this.performanceManager.lightingScale());
     
-    // Check render scale (adaptive resolution)
     const targetScale = this.performanceManager.renderScale();
     if (Math.abs(targetScale - this.currentRenderScale) > 0.05) {
         this.resize();
@@ -165,16 +148,14 @@ export class RenderService {
     // --- 0. SETUP ROTATION CONTEXT ---
     IsoUtils.setContext(cam.rotation, cam.x, cam.y);
 
-    // Calculate View Frustum (Zero Alloc)
+    // Calculate View Frustum
     this.calculateFrustum(cam, window.innerWidth, window.innerHeight);
 
-    // 1. Prepare Scene (Logic Phase)
+    // 1. Prepare Scene
     this.prepareRenderList(cam, zone, entities, player, particles, window.innerWidth, window.innerHeight, this._frustum);
     
-    // Prepare Lights (Culling & Extraction)
+    // Prepare Lights
     this.prepareLighting(player, this.renderList, cam, window.innerWidth, window.innerHeight, this._frustum);
-    
-    // Update Lighting Animation
     this.lighting.update(1, this.timeService.globalTime);
 
     // 2. Draw Frame
@@ -182,39 +163,35 @@ export class RenderService {
     this.ctx.fillRect(0, 0, w, h);
     this.ctx.save();
     
-    // Camera Transform (Pan & Zoom ONLY)
+    // Camera Transform
     this.applyCameraTransform(cam, w, h, shake);
 
     // 3. Background Pass
     this.floorRenderer.drawFloor(this.ctx, cam, zone, this.world.mapBounds, w, h);
 
-    // 4. Shadow Pass (High End Only, Now Dynamic)
+    // 4. Shadow Pass
     if (this.performanceManager.shadowsEnabled()) {
         this.drawShadows(this.renderList);
     }
 
-    // 5. Main Geometry Pass (Sorted)
-    this.drawGeometry(this.renderList, zone);
+    // 5. Main Geometry Pass (Sorted & Occlusion)
+    this.drawGeometry(this.renderList, zone, player);
 
-    // 6. Occlusion / X-Ray Pass
-    const { buffer, count } = this.chunkManager.getVisibleStaticEntities(cam, window.innerWidth, window.innerHeight);
-    this.drawOcclusion(player, buffer, count, cam.rotation);
-
-    // 7. Visual Effects
+    // 6. Visual Effects
     this.effectRenderer.drawGlobalEffects(this.ctx, this.renderList as Entity[], player, zone, rainDrops);
     
-    // 8. World UI (In-World)
+    // 7. World UI
     this.drawWorldUI(texts, cam);
 
     this.ctx.restore();
     
-    // 9. Lighting & Atmosphere Pass (Screen Space Overlay)
+    // 8. Lighting & Atmosphere Pass
     this.lightingRenderer.drawLighting(this.ctx, this.renderList as Entity[], player, cam, zone, w, h);
 
-    // 10. Post-Processing & HUD Overlays
+    // 9. Post-Processing
     this.applyPostEffects(w, h);
     
-    // 11. Guidance Overlay (Always on top)
+    // 10. Guidance Overlay
     this.effectRenderer.drawGuidanceOverlay(
         this.ctx, 
         this.mission.activeObjective(), 
@@ -250,7 +227,6 @@ export class RenderService {
       const len = renderList.length;
       for (let i = 0; i < len; i++) {
           const obj = renderList[i];
-          
           if ('life' in obj) {
               const p = obj as Particle;
               if (p.emitsLight) {
@@ -269,15 +245,10 @@ export class RenderService {
           }
 
           const ent = obj as Entity;
-
           if (ent.type === 'DECORATION') {
               if (ent.subType === 'STREET_LIGHT') {
                   const lightColor = ent.color && ent.color !== '#ffffff' ? ent.color : presets.STREET_LIGHT.color;
-                  this.lighting.registerLight({ 
-                      id: `L_${ent.id}`, x: ent.x, y: ent.y, type: 'STATIC', 
-                      ...presets.STREET_LIGHT,
-                      color: lightColor 
-                  });
+                  this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, type: 'STATIC', ...presets.STREET_LIGHT, color: lightColor });
               } else if (ent.subType === 'NEON') {
                   this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, color: ent.color, type: 'STATIC', ...presets.NEON });
               } else if (ent.subType === 'DYNAMIC_GLOW') {
@@ -285,15 +256,7 @@ export class RenderService {
               }
           }
           else if (ent.type === 'HITBOX' && ent.source !== 'PLAYER') {
-              this.lighting.registerLight({ 
-                  id: `L_${ent.id}`, 
-                  x: ent.x, y: ent.y, 
-                  color: ent.color, 
-                  type: 'DYNAMIC',
-                  radius: ent.radius * presets.PROJECTILE.radiusMultiplier,
-                  intensity: presets.PROJECTILE.intensity,
-                  z: presets.PROJECTILE.z
-              });
+              this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, color: ent.color, type: 'DYNAMIC', radius: ent.radius * presets.PROJECTILE.radiusMultiplier, intensity: presets.PROJECTILE.intensity, z: presets.PROJECTILE.z });
           }
           else if (ent.type === 'EXIT' && !ent.locked) {
               this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, color: ent.color, type: 'STATIC', ...presets.EXIT });
@@ -302,16 +265,13 @@ export class RenderService {
               this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, type: 'DYNAMIC', ...presets.BOSS_ENEMY });
           }
       }
-
       this.lighting.cullLights(cam, w, h);
   }
 
   private applyCameraTransform(cam: Camera, w: number, h: number, shake: {intensity: number, x: number, y: number}) {
       if (!this.ctx) return;
-      
       IsoUtils.toIso(cam.x, cam.y, 0, this.camCenter);
       this.ctx.translate(w/2, h/2);
-      
       if (shake.intensity > 0.1) {
           let sx = (Math.random()-0.5) * shake.intensity;
           let sy = (Math.random()-0.5) * shake.intensity;
@@ -319,27 +279,15 @@ export class RenderService {
           sy += shake.y * shake.intensity * 0.5;
           this.ctx.translate(sx, sy);
       }
-
       this.ctx.scale(cam.zoom, cam.zoom);
       this.ctx.translate(-this.camCenter.x, -this.camCenter.y);
   }
 
-  private prepareRenderList(
-      cam: Camera, 
-      zone: Zone, 
-      dynamicEntities: Entity[], 
-      player: Entity, 
-      particles: Particle[], 
-      w: number, 
-      h: number,
-      frustum: {minX: number, maxX: number, minY: number, maxY: number}
-  ) {
+  private prepareRenderList(cam: Camera, zone: Zone, dynamicEntities: Entity[], player: Entity, particles: Particle[], w: number, h: number, frustum: any) {
       this.renderList.length = 0;
       
       const { buffer: staticBuffer, count: staticCount } = this.chunkManager.getVisibleStaticEntities(cam, w, h);
-      for (let i = 0; i < staticCount; i++) {
-          this.renderList.push(staticBuffer[i]);
-      }
+      for (let i = 0; i < staticCount; i++) this.renderList.push(staticBuffer[i]);
       
       const { buffer: dynamicBuffer, count: dynamicCount } = this.spatialHash.queryRectFast(frustum.minX, frustum.minY, frustum.maxX, frustum.maxY, zone.id);
       for (let i = 0; i < dynamicCount; i++) {
@@ -354,7 +302,6 @@ export class RenderService {
       const pLen = particles.length;
       const pLimit = this.performanceManager.particleLimit();
       let pCount = 0;
-
       for (let i = 0; i < pLen; i++) {
           if (pCount >= pLimit) break;
           const p = particles[i];
@@ -363,8 +310,6 @@ export class RenderService {
               pCount++;
           }
       }
-
-      // CRITICAL FIX: Pass camera rotation to sorting service
       this.sorter.sortForRender(this.renderList, cam.rotation);
   }
 
@@ -374,7 +319,6 @@ export class RenderService {
       for (let i = 0; i < len; i++) {
           const e = renderList[i];
           if (!('type' in e)) continue;
-          
           const ent = e as Entity;
           if (ent.type === 'PLAYER' || ent.type === 'ENEMY' || ent.type === 'NPC') {
               this.shadowRenderer.drawUnitShadow(this.ctx, ent);
@@ -386,11 +330,24 @@ export class RenderService {
       }
   }
 
-  private drawGeometry(renderList: (Entity | Particle)[], zone: Zone) {
+  private checkWallOcclusion(wall: Entity, target: Entity): boolean {
+      if (!wall.isoDepth || !target.isoDepth) return false;
+      // In Painter's algo (Back-to-Front), larger isoDepth = Front.
+      // If wall.isoDepth > target.isoDepth, Wall is drawn AFTER target (covering it).
+      if (wall.isoDepth <= target.isoDepth) return false;
+
+      // Simple Distance Check
+      const w = wall.width || 40;
+      const d = wall.depth || 40;
+      const h = wall.height || 100;
+      const combinedRadius = (w + d + h) * 0.4;
+      
+      return Math.abs(wall.x - target.x) < combinedRadius && Math.abs(wall.y - target.y) < combinedRadius;
+  }
+
+  private drawGeometry(renderList: (Entity | Particle)[], zone: Zone, player: Entity) {
       if (!this.ctx) return;
       const len = renderList.length;
-      
-      // Batch particles separately from entities for performance
       const particles: Particle[] = [];
 
       for (let i = 0; i < len; i++) {
@@ -402,13 +359,35 @@ export class RenderService {
           
           const e = obj as Entity;
 
-          if (e.type === 'PLAYER') {
+          // Occlusion Handling for Walls
+          if (e.type === 'WALL' && e.subType !== 'GATE_SEGMENT') {
+              // Check if wall hides player OR active enemies
+              const hidesPlayer = this.checkWallOcclusion(e, player);
+              let hidesEnemy = false;
+              
+              if (!hidesPlayer) {
+                  // Only check enemies if player isn't hidden (optimization)
+                  // Heuristic: Check enemies that are close to this wall in list? No, random access slow.
+                  // Just standard distance check against a few active threats?
+                  // For performance, we stick to Player occlusion or heavily optimized lookups.
+                  // Let's iterate nearby dynamic entities from render list? Too slow O(N^2).
+                  // We'll stick to Player Occlusion for now as it's the primary UX issue.
+              }
+
+              if (hidesPlayer) {
+                  this.ctx.globalAlpha = 0.3;
+              }
+              
+              this.structureRenderer.drawStructure(this.ctx, e, zone);
+              this.ctx.globalAlpha = 1.0;
+          } 
+          else if (e.type === 'PLAYER') {
             this.effectRenderer.drawPsionicWave(this.ctx, e); 
             this.unitRenderer.drawHumanoid(this.ctx, e);
           }
           else if (e.type === 'ENEMY') this.unitRenderer.drawHumanoid(this.ctx, e);
           else if (e.type === 'NPC') this.unitRenderer.drawNPC(this.ctx, e);
-          else if (e.type === 'WALL') this.structureRenderer.drawStructure(this.ctx, e, zone);
+          else if (e.type === 'WALL') this.structureRenderer.drawStructure(this.ctx, e, zone); // Gate Segment
           else if (e.type === 'DECORATION') this.entityRenderer.drawDecoration(this.ctx, e);
           else if (e.type === 'EXIT') this.entityRenderer.drawExit(this.ctx, e);
           else if (e.type === 'SHRINE') this.entityRenderer.drawShrine(this.ctx, e);
@@ -426,22 +405,8 @@ export class RenderService {
           }
       }
 
-      // Draw all accumulated particles using optimized batching
       if (particles.length > 0) {
           this.effectRenderer.drawParticles(this.ctx, particles);
-      }
-  }
-
-  private drawOcclusion(player: Entity, staticEntities: Entity[], count: number, rotation: number) {
-      if (!this.ctx) return;
-      if (this.checkOcclusion(player, staticEntities, count, rotation)) {
-          this.ctx.save();
-          this.ctx.globalAlpha = 0.3;
-          this.ctx.globalCompositeOperation = 'source-over'; 
-          this.ctx.shadowColor = '#06b6d4';
-          this.ctx.shadowBlur = 15;
-          this.unitRenderer.drawHumanoid(this.ctx, player);
-          this.ctx.restore();
       }
   }
 
@@ -454,40 +419,6 @@ export class RenderService {
           const label = this.interaction.getInteractLabel(activeTarget);
           this.effectRenderer.drawInteractionIndicator(this.ctx, activeTarget, label);
       }
-  }
-
-  private checkOcclusion(player: Entity, staticEntities: Entity[], count: number, rotation: number): boolean {
-      const margin = 20;
-      const pDepth = IsoUtils.getSortDepth(player.x, player.y, 0, rotation);
-
-      for (let i = 0; i < count; i++) {
-          const e = staticEntities[i];
-          if ((e.type === 'WALL' || (e.type === 'DECORATION' && (e.height || 0) > 80))) {
-              // Calculate entity depth using same rotation logic
-              const eDepth = IsoUtils.getSortDepth(e.x, e.y, 0, rotation);
-              
-              // If entity is behind player (higher depth value means closer to camera in standard sort, 
-              // BUT in painter's algo we sort back-to-front. 
-              // So smaller depth = background. larger depth = foreground.
-              // If entity is in FOREGROUND (larger depth) than player, check collision.
-              if (eDepth <= pDepth) continue; 
-
-              const w = e.width || 40;
-              const d = e.depth || 40;
-              // Expand check slightly for height
-              const hFactor = (e.height || 100) * 0.5; 
-              
-              const halfW = w / 2 + margin;
-              const halfD = d / 2 + margin + hFactor; // Height effectively extends bounding box Y in screen space
-              
-              // Rotated bounding box approximation
-              // Optimization: We check simple radius distance first
-              if (Math.abs(e.x - player.x) < halfW && Math.abs(e.y - player.y) < halfD) {
-                  return true;
-              }
-          }
-      }
-      return false;
   }
 
   private calculateFrustum(cam: Camera, width: number, height: number) {

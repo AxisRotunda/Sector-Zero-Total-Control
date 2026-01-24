@@ -12,6 +12,9 @@ import { NarrativeService } from '../game/narrative.service';
 import { FACTIONS } from '../config/narrative.config';
 import { GlitchTextComponent } from './glitch-text.component';
 import { ICONS } from '../config/icons.config';
+import { UiPanelService } from '../services/ui-panel.service';
+import { InteractionService } from '../services/interaction.service';
+import { Entity } from '../models/game.models';
 
 @Component({
   selector: 'app-hud',
@@ -116,7 +119,8 @@ import { ICONS } from '../config/icons.config';
             <div class="bg-zinc-900/80 border border-zinc-800 p-2 backdrop-blur-sm relative group cursor-pointer" (click)="mission.cycleTracked()">
                 <div class="absolute -top-px left-0 w-8 h-px bg-cyan-500"></div>
                 <div class="text-[9px] text-zinc-500 uppercase tracking-[0.3em] mb-1 font-bold">Current Directive</div>
-                <div class="text-xs text-white font-bold leading-tight">
+                <div class="text-white font-bold leading-tight" 
+                     [style.font-size.rem]="0.75 * ui.uiScale()">
                     @if (mission.trackedMission(); as m) {
                         <app-glitch-text [text]="mission.missionText()" [intensity]="0.05"></app-glitch-text>
                     } @else {
@@ -152,6 +156,8 @@ export class HudComponent {
   world = inject(WorldService);
   mapService = inject(MapService);
   narrative = inject(NarrativeService);
+  ui = inject(UiPanelService);
+  interaction = inject(InteractionService);
 
   openInventory = output<void>();
   openSkills = output<void>();

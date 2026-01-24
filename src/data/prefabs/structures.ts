@@ -180,11 +180,15 @@ export const BUILDING_PREFABS = {
     },
 
     livingQuarters: (x: number, y: number, color: string, idPrefix: string = 'barracks'): PrefabResult => {
+        // Split complex L-shape corners into separate primitives to fix Z-sorting
         const walls: PrefabWall[] = [
-            // Outer boundaries (High walls to see from behind obstacles)
-            { x: x, y: y - 120, w: 300, h: 20, height: 250, color: color }, // Back (Was 100)
-            { x: x, y: y + 120, w: 300, h: 20, height: 250, color: color }, // Front (Was 100)
-            { x: x - 160, y: y, w: 20, h: 260, height: 250, color: color }, // Left (Was 100)
+            // North wall
+            { x: x, y: y - 120, w: 300, h: 20, height: 250, color: color },
+            // South wall  
+            { x: x, y: y + 120, w: 300, h: 20, height: 250, color: color },
+            // West wall (SPLIT INTO SEGMENTS)
+            { x: x - 160, y: y - 60, w: 20, h: 120, height: 250, color: color }, // Top Half
+            { x: x - 160, y: y + 60, w: 20, h: 120, height: 250, color: color }  // Bottom Half
         ];
 
         const entities: ZoneEntityDef[] = [];

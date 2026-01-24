@@ -15,6 +15,9 @@ export class UiPanelService {
   private gameState = inject(GameStateService);
 
   private activePanel = signal<PanelType | null>(null);
+  
+  // Dynamic UI Scale for text sizing
+  uiScale = signal(1.0);
 
   isInventoryOpen = computed(() => this.activePanel() === 'INVENTORY');
   isSkillsOpen = computed(() => this.activePanel() === 'SKILLS');
@@ -30,11 +33,6 @@ export class UiPanelService {
 
   // Consolidated logic for when to hide the cursor (mouse users)
   shouldHideCursor = computed(() => {
-      // Show cursor if using mouse/keyboard AND:
-      // - A panel is open
-      // - Main Menu is open
-      // - Full Map is open
-      // - Settings are open
       if (!this.input.usingKeyboard()) return false;
       
       const uiOpen = this.isAnyPanelOpen() || 
@@ -44,6 +42,20 @@ export class UiPanelService {
                      
       return !uiOpen;
   });
+  
+  constructor() {
+      this.calculateUIScale();
+      window.addEventListener('resize', () => this.calculateUIScale());
+  }
+
+  private calculateUIScale() {
+      const baseWidth = 1920;
+      const dpr = window.devicePixelRatio || 1;
+      // Scale based on width, boosted slightly by DPR for mobile readability
+      const scaleFactor = (window.innerWidth / baseWidth) * (dpr > 1 ? 1.2 : 1.0);
+      // Clamp between 0.8x (Mobile) and 1.5x (4k)
+      this.uiScale.set(Math.max(0.8, Math.min(1.5, scaleFactor)));
+  }
   
   openPanel(panel: PanelType) {
     if (this.activePanel() === panel) {
