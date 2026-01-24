@@ -1,5 +1,5 @@
 
-import { Component, output, signal, inject } from '@angular/core';
+import { Component, output, signal, inject, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HapticService } from '../services/haptic.service';
 
@@ -13,13 +13,16 @@ import { HapticService } from '../services/haptic.service';
          (touchstart)="onTouchStart($event)"
          (touchmove)="onTouchMove($event)"
          (touchend)="onTouchEnd($event)"
-         (touchcancel)="onTouchEnd($event)">
+         (touchcancel)="onTouchEnd($event)"
+         role="slider"
+         aria-label="Movement Joystick"
+         [attr.aria-valuenow]="ariaValue()">
     </div>
 
     <!-- Dynamic Joystick Visuals -->
     @if (isActive()) {
         <div class="absolute w-36 h-36 -ml-18 -mt-18 pointer-events-none transition-opacity duration-150 animate-in fade-in zoom-in-95"
-             [style.transform]="'translate3d(' + centerX() + 'px, ' + centerY() + 'px, 0)'"
+             [style.transform]="containerTransform()"
              style="margin-left: -72px; margin-top: -72px;">
              
              <!-- Outer Ring -->
@@ -30,7 +33,7 @@ import { HapticService } from '../services/haptic.service';
 
              <!-- Thumb Knob -->
              <div class="absolute top-1/2 left-1/2 -ml-8 -mt-8 w-16 h-16 bg-gradient-to-b from-orange-400 to-orange-600 rounded-full shadow-[0_0_20px_rgba(249,115,22,0.4)] border border-orange-300 ring-2 ring-orange-900/50"
-                  [style.transform]="'translate3d(' + knobX() + 'px, ' + knobY() + 'px, 0)'">
+                  [style.transform]="knobTransform()">
                   <!-- Shine effect -->
                   <div class="absolute top-2 left-3 w-6 h-3 bg-white/40 rounded-full blur-[2px]"></div>
              </div>
@@ -48,6 +51,11 @@ export class JoystickComponent {
   centerY = signal(0);
   knobX = signal(0);
   knobY = signal(0);
+  
+  // Computed styles to optimize template
+  containerTransform = computed(() => `translate3d(${this.centerX()}px, ${this.centerY()}px, 0)`);
+  knobTransform = computed(() => `translate3d(${this.knobX()}px, ${this.knobY()}px, 0)`);
+  ariaValue = computed(() => `${Math.round(this.knobX())},${Math.round(this.knobY())}`);
   
   private maxDist = 75; 
   private deadZone = 10;
@@ -87,6 +95,7 @@ export class JoystickComponent {
         const excessX = dx - limitX;
         const excessY = dy - limitY;
         
+        // Drag center slightly if pulling hard
         this.centerX.update(cx => cx + excessX);
         this.centerY.update(cy => cy + excessY);
         
@@ -130,10 +139,20 @@ export class JoystickComponent {
     this.knobY.set(dy);
     
     const outputDist = Math.min(dist, this.maxDist);
-    const normalizedMag = (outputDist - this.deadZone) / (this.maxDist - this.deadZone);
+    const range = this.maxDist - this.deadZone;
+    
+    // Normalize safely
+    const normalizedMag = range > 0 ? (outputDist - this.deadZone) / range : 0;
+    
     const angle = Math.atan2(dy, dx);
     const nx = Math.cos(angle) * normalizedMag;
     const ny = Math.sin(angle) * normalizedMag;
+    
+    // Safety check for NaN
+    if (isNaN(nx) || isNaN(ny)) {
+        this.move.emit({ x: 0, y: 0 });
+        return;
+    }
     
     this.move.emit({ x: nx, y: ny });
   }

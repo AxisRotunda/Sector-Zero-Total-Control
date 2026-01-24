@@ -1,7 +1,6 @@
 
 import { Injectable, signal, OnDestroy } from '@angular/core';
-import { Subject, Observable, fromEvent, merge } from 'rxjs';
-import { map, filter, throttleTime } from 'rxjs/operators';
+import { Subject, fromEvent, Subscription } from 'rxjs';
 
 export type Action = 
   | 'MOVE_UP' | 'MOVE_DOWN' | 'MOVE_LEFT' | 'MOVE_RIGHT'
@@ -39,11 +38,10 @@ export interface InputState {
 @Injectable({
   providedIn: 'root'
 })
-export class InputService {
+export class InputService implements OnDestroy {
   inputVector = { x: 0, y: 0 };
   aimAngle: number | null = null;
   
-  // Normalized cursor position (-1 to 1) for camera peeking
   cursorRelative = { x: 0, y: 0 };
   
   usingKeyboard = signal(false);
@@ -54,13 +52,14 @@ export class InputService {
   bindings = signal<Record<Action, string>>({ ...DEFAULT_BINDINGS });
   
   actionEvents = new Subject<Action>();
-  zoomEvents = new Subject<number>(); // Delta value
-  rotationEvents = new Subject<number>(); // Delta angle in radians
+  zoomEvents = new Subject<number>(); 
+  rotationEvents = new Subject<number>(); 
 
   private inputState$ = new Subject<InputState>();
   private activeKeys = new Set<string>();
   private activeActions = new Set<Action>();
   private canvasRef: HTMLCanvasElement | null = null;
+  private subs: Subscription[] = [];
 
   // Touch Gesture State
   private initialPinchDist: number | null = null;
@@ -73,11 +72,21 @@ export class InputService {
       axes: [0, 0, 0, 0]
   };
   private readonly DEADZONE = 0.15;
+  private rafId: number | null = null;
+
+  // Input Arbitration
+  private lastInputTime = 0;
+  private lastInputSource: 'KEYBOARD' | 'GAMEPAD' | 'TOUCH' = 'KEYBOARD';
 
   constructor() {
     this.loadBindings();
     this.initListeners();
     this.initGamepad();
+  }
+
+  ngOnDestroy() {
+    this.subs.forEach(s => s.unsubscribe());
+    if (this.rafId) cancelAnimationFrame(this.rafId);
   }
 
   setCanvas(canvas: HTMLCanvasElement) {
@@ -86,69 +95,55 @@ export class InputService {
   }
 
   private initListeners() {
-    fromEvent<KeyboardEvent>(window, 'keydown').subscribe(e => this.handleKeyDown(e));
-    fromEvent<KeyboardEvent>(window, 'keyup').subscribe(e => this.handleKeyUp(e));
-    fromEvent<MouseEvent>(window, 'mousemove').subscribe(e => this.handleMouseMove(e));
-    
-    // Mouse Wheel Zoom
-    fromEvent<WheelEvent>(window, 'wheel', { passive: false }).subscribe(e => {
-        if (e.ctrlKey || !this.canvasRef) return; // Allow browser zoom if ctrl is held
-        // e.preventDefault(); // Optional: prevent page scroll
-        this.zoomEvents.next(e.deltaY);
-    });
-    
-    fromEvent<MouseEvent>(window, 'mousedown').subscribe(e => {
-        if (e.button === 0) {
-            this.isAttackPressed = true;
-            this.activeActions.add('ATTACK');
+    this.subs.push(
+        fromEvent<KeyboardEvent>(window, 'keydown').subscribe(e => this.handleKeyDown(e)),
+        fromEvent<KeyboardEvent>(window, 'keyup').subscribe(e => this.handleKeyUp(e)),
+        fromEvent<MouseEvent>(window, 'mousemove').subscribe(e => this.handleMouseMove(e)),
+        fromEvent<WheelEvent>(window, 'wheel', { passive: false }).subscribe(e => {
+            if (e.ctrlKey || !this.canvasRef) return;
+            this.zoomEvents.next(e.deltaY);
+        }),
+        fromEvent<MouseEvent>(window, 'mousedown').subscribe(e => {
+            if (e.button === 0) {
+                this.isAttackPressed = true;
+                this.activeActions.add('ATTACK');
+                this.emitState();
+            }
+        }),
+        fromEvent<MouseEvent>(window, 'mouseup').subscribe(e => {
+            this.isAttackPressed = false;
+            this.activeActions.delete('ATTACK');
             this.emitState();
-        }
-    });
-    
-    fromEvent<MouseEvent>(window, 'mouseup').subscribe(e => {
-        this.isAttackPressed = false;
-        this.activeActions.delete('ATTACK');
-        this.emitState();
-    });
+        })
+    );
   }
 
   private initTouchGestures(canvas: HTMLCanvasElement) {
       canvas.addEventListener('touchmove', (e) => {
           if (e.touches.length === 2) {
-              e.preventDefault(); // Prevent page scroll
+              e.preventDefault(); 
               
               const t1 = e.touches[0];
               const t2 = e.touches[1];
 
-              // --- ZOOM (Distance) ---
-              const dist = Math.hypot(
-                  t1.clientX - t2.clientX,
-                  t1.clientY - t2.clientY
-              );
+              const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
 
               if (this.initialPinchDist === null) {
                   this.initialPinchDist = dist;
               } else {
                   const delta = this.initialPinchDist - dist;
-                  // Only emit if significant change to reduce jitter
                   if (Math.abs(delta) > 2) {
-                      this.zoomEvents.next(delta * 5); // Multiplier to match wheel sensitivity roughly
+                      this.zoomEvents.next(delta * 5); 
                       this.initialPinchDist = dist;
                   }
               }
 
-              // --- ROTATION (Angle) ---
-              const angle = Math.atan2(
-                  t2.clientY - t1.clientY,
-                  t2.clientX - t1.clientX
-              );
+              const angle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX);
 
               if (this.initialPinchAngle === null) {
                   this.initialPinchAngle = angle;
               } else {
                   let deltaAngle = angle - this.initialPinchAngle;
-                  
-                  // Handle Angle Wrap-around (e.g. 179deg to -179deg)
                   if (deltaAngle > Math.PI) deltaAngle -= Math.PI * 2;
                   if (deltaAngle < -Math.PI) deltaAngle += Math.PI * 2;
 
@@ -210,6 +205,11 @@ export class InputService {
       this.inputVector = { x, y };
       this.usingKeyboard.set(false);
       this.usingGamepad.set(false);
+      
+      // Update Arbitration
+      this.lastInputSource = 'TOUCH';
+      this.lastInputTime = performance.now();
+      
       this.emitState();
   }
 
@@ -234,7 +234,10 @@ export class InputService {
     if (stored) {
       try {
         this.bindings.set({ ...DEFAULT_BINDINGS, ...JSON.parse(stored) });
-      } catch (e) { console.error('Failed to load bindings'); }
+      } catch (e) { 
+          console.error('Failed to load bindings, resetting to default', e); 
+          this.resetBindings();
+      }
     }
   }
 
@@ -249,6 +252,8 @@ export class InputService {
       if (['MOVE_UP', 'MOVE_DOWN', 'MOVE_LEFT', 'MOVE_RIGHT'].includes(action)) {
         this.usingKeyboard.set(true);
         this.usingGamepad.set(false);
+        this.lastInputSource = 'KEYBOARD';
+        this.lastInputTime = performance.now();
         this.updateVector();
       }
       this.emitState();
@@ -262,7 +267,10 @@ export class InputService {
     if (action) {
       this.activeActions.delete(action);
       if (['MOVE_UP', 'MOVE_DOWN', 'MOVE_LEFT', 'MOVE_RIGHT'].includes(action)) {
-        this.updateVector();
+        // Only update vector if Keyboard is still the active source
+        if (this.lastInputSource === 'KEYBOARD') {
+            this.updateVector();
+        }
       }
       this.emitState();
     }
@@ -287,7 +295,6 @@ export class InputService {
     const dx = mouseX - canvasCenterX;
     const dy = mouseY - canvasCenterY;
     
-    // Calculate normalized cursor position (-1 to 1) for camera peeking
     this.cursorRelative.x = Math.max(-1, Math.min(1, dx / (rect.width / 2)));
     this.cursorRelative.y = Math.max(-1, Math.min(1, dy / (rect.height / 2)));
     
@@ -296,6 +303,8 @@ export class InputService {
 
   private updateVector() {
       if (this.usingGamepad()) return;
+      // Arbitration check: Ignore keyboard recalc if Touch was recent (100ms)
+      if (this.lastInputSource === 'TOUCH' && performance.now() - this.lastInputTime < 100) return;
       
       let x = 0; let y = 0;
       if (this.isDown('MOVE_UP')) y -= 1;
@@ -324,8 +333,13 @@ export class InputService {
           this.inputVector = { x: lx, y: ly };
           this.usingGamepad.set(true);
           this.usingKeyboard.set(false);
+          this.lastInputSource = 'GAMEPAD';
+          this.lastInputTime = performance.now();
       } else if (this.usingGamepad()) {
-          this.inputVector = { x: 0, y: 0 };
+          // Only zero out if we are the active source
+          if (this.lastInputSource === 'GAMEPAD') {
+              this.inputVector = { x: 0, y: 0 };
+          }
       }
 
       if (Math.abs(rx) > this.DEADZONE || Math.abs(ry) > this.DEADZONE) {
@@ -364,6 +378,6 @@ export class InputService {
       mapButton(14, 'TOGGLE_SKILLS'); // D-Left
       mapButton(15, 'TOGGLE_SHOP'); // D-Right
 
-      requestAnimationFrame(() => this.pollGamepad());
+      this.rafId = requestAnimationFrame(() => this.pollGamepad());
   }
 }

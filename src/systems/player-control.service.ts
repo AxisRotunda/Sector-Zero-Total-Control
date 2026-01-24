@@ -36,21 +36,16 @@ export class PlayerControlService {
     private interaction = inject(InteractionService);
     private inventory = inject(InventoryService);
 
-    // Proxy signals for UI consumption
     nearbyInteractable = this.interaction.nearbyInteractable;
     activeInteractable = this.interaction.activeInteractable;
     requestedFloorChange = this.interaction.requestedFloorChange;
 
-    // Explicit Attack State Machine
     private attackState: 'IDLE' | 'STARTUP' | 'ACTIVE' | 'RECOVERY' = 'IDLE';
-    
-    // Pool for rotated input vector to avoid per-frame allocation
     private _rotatedInput = { x: 0, y: 0 };
 
     update(globalTime: number) {
         const player = this.world.player;
         
-        // Status Effects (Stun)
         if (player.status.stun > 0) {
             player.status.stun--; 
             player.vx *= 0.9; 
@@ -61,25 +56,18 @@ export class PlayerControlService {
             return;
         }
         
-        // Camera & Animation
         this.cameraService.update();
         this.updatePlayerAnimation(player);
 
         let isMoving = false;
 
-        // Movement Physics
         if (player.state !== 'ATTACK') {
-            // Reset attack state if not attacking
             this.attackState = 'IDLE'; 
             
             const stats = this.playerService.playerStats();
             const prevVx = player.vx;
             const prevVy = player.vy;
             
-            // Adjust input vector based on Camera Rotation to ensure Screen-Relative control
-            // Optimization: Use cached trig values from CameraService
-            // Math.cos(-x) = Math.cos(x)
-            // Math.sin(-x) = -Math.sin(x)
             const cos = this.cameraService.rotationCos;
             const sin = -this.cameraService.rotationSin;
             
@@ -90,7 +78,6 @@ export class PlayerControlService {
 
             isMoving = this.physics.updateEntityPhysics(player, stats, this._rotatedInput);
             
-            // Haptic feedback for sudden stops (wall hits)
             if (Math.hypot(input.x, input.y) > 0.5) {
                 if (!isMoving && (Math.abs(prevVx) > 0.5 || Math.abs(prevVy) > 0.5)) {
                     if (this.playerService.screenShake().intensity < 1) {
@@ -107,24 +94,17 @@ export class PlayerControlService {
             }
         }
 
-        // ROTATION LOGIC
         if (player.state !== 'ATTACK') {
             if (this.input.aimAngle !== null) {
-                // Priority: Manual Aim (Right Stick / Mouse)
-                // Adjust manual aim for camera rotation
                 player.angle = this.input.aimAngle - this.world.camera.rotation;
             } else if (isMoving) {
-                // Fallback: Face Movement Direction (Left Stick)
-                // Since we already rotated the movement vector, this angle is correct in World Space
                 const moveAngle = Math.atan2(player.vy, player.vx);
                 player.angle = moveAngle;
             }
         }
 
-        // Delegate Interaction Logic
         this.interaction.update(player, globalTime);
         
-        // Only allow combat inputs if NOT in a safe zone
         if (!this.world.currentZone().isSafeZone) {
             this.handleCombatInputs(player, globalTime);
         }
@@ -141,10 +121,9 @@ export class PlayerControlService {
         if (manualAttack) {
             let targetAngle = this.input.aimAngle;
             
-            // AUTO-TARGETING
             if (targetAngle === null) {
                 const autoTarget = this.findBestTarget(player);
-                // Fix: Ensure autoTarget properties are valid numbers before math
+                // Defensive check to ensure autoTarget is valid before accessing coords
                 if (autoTarget && typeof autoTarget.x === 'number' && typeof autoTarget.y === 'number') {
                     targetAngle = Math.atan2(autoTarget.y - player.y, autoTarget.x - player.x);
                 } else if (Math.hypot(player.vx, player.vy) > 0.1) {

@@ -15,7 +15,6 @@ export class PhysicsService {
   private world = inject(WorldService);
   private particleService = inject(ParticleService);
 
-  // Optimization constants
   private readonly SPATIAL_BUFFER_RATIO = 1.5;
   private readonly COLLISION_QUERY_RATIO = 1.5; 
   private readonly MIN_SEPARATION_FORCE = 0.01;
@@ -24,20 +23,17 @@ export class PhysicsService {
   public updateEntityPhysics(e: Entity, stats?: { speed: number }, inputVec?: { x: number, y: number }): boolean {
     const isPlayer = e.type === 'PLAYER';
     
-    // Tighter controls: Faster acceleration, much higher stopping friction
     const ACCELERATION = isPlayer ? 3.0 : 2.0; 
     const FRICTION_MOVING = 0.85; 
-    const FRICTION_STOPPING = 0.6; // Decays velocity much faster when no input
+    const FRICTION_STOPPING = 0.6; 
     
     const hasInput = isPlayer && inputVec && (Math.abs(inputVec.x) > 0.01 || Math.abs(inputVec.y) > 0.01);
 
-    // 1. Input Acceleration
     if (hasInput && stats) {
         const MAX_SPEED = BALANCE.PLAYER.BASE_SPEED + (stats.speed * BALANCE.PLAYER.SPEED_STAT_SCALE);
         e.vx += inputVec!.x * ACCELERATION; 
         e.vy += inputVec!.y * ACCELERATION;
         
-        // Soft Cap Speed
         const currentSpeed = Math.hypot(e.vx, e.vy);
         if (currentSpeed > MAX_SPEED) { 
             const scale = MAX_SPEED / currentSpeed; 
@@ -46,12 +42,10 @@ export class PhysicsService {
         }
     }
 
-    // 1.5 Separation / Steering Behaviors (Zero-Alloc)
     if ((e.type === 'ENEMY' || e.type === 'PLAYER') && e.state !== 'DEAD') {
         const zoneId = this.world.currentZone().id;
         const queryRadius = e.radius * this.SPATIAL_BUFFER_RATIO;
         
-        // Use Fast Query
         const { buffer, count } = this.spatialHash.queryFast(e.x, e.y, queryRadius, zoneId);
         
         let processedNeighbors = 0;
@@ -81,21 +75,18 @@ export class PhysicsService {
         }
     }
 
-    // 2. Friction
-    // Apply different friction based on whether we are actively moving or stopping
     const friction = hasInput ? FRICTION_MOVING : FRICTION_STOPPING;
     
     e.vx *= friction; 
     e.vy *= friction;
     
-    // Aggressive snap to zero to prevent micro-sliding
     if (Math.abs(e.vx) < 0.1) e.vx = 0; 
     if (Math.abs(e.vy) < 0.1) e.vy = 0;
     
     const isMoving = Math.abs(e.vx) > 0.1 || Math.abs(e.vy) > 0.1;
     if (!isMoving) return false;
 
-    // 3. Sub-stepping
+    // Sub-stepping for collision
     const r = e.radius || 20;
     const speed = Math.hypot(e.vx, e.vy);
     const steps = Math.ceil(speed / (r * 0.5));
@@ -104,21 +95,24 @@ export class PhysicsService {
     const stepVy = e.vy / steps;
 
     for (let i = 0; i < steps; i++) {
+        // AXIS-SEPARATED COLLISION (Permits Wall Sliding)
+        // Move X
         const prevX = e.x;
         e.x += stepVx;
         if (this.checkCollision(e)) {
-            e.x = prevX;
-            e.vx = 0;
-            // Visual feedback for hitting wall
+            // Collision detected on X-axis move
+            e.x = prevX; // Revert position
+            e.vx = 0;    // Kill velocity on this axis only
             if (isPlayer && Math.abs(stepVx) > 0.5) this.spawnWallImpact(e);
         }
 
+        // Move Y
         const prevY = e.y;
         e.y += stepVy;
         if (this.checkCollision(e)) {
-            e.y = prevY;
-            e.vy = 0;
-            // Visual feedback for hitting wall
+            // Collision detected on Y-axis move
+            e.y = prevY; // Revert position
+            e.vy = 0;    // Kill velocity on this axis only
             if (isPlayer && Math.abs(stepVy) > 0.5) this.spawnWallImpact(e);
         }
 
@@ -137,15 +131,14 @@ export class PhysicsService {
   }
 
   private spawnWallImpact(e: Entity) {
-      // Small cooldown to prevent particle spam
       if (!e.data) e.data = {};
       const now = Date.now();
       if (e.data.lastWallHit && now - e.data.lastWallHit < 200) return;
       
       e.data.lastWallHit = now;
       this.particleService.addParticles({
-          x: e.x + e.vx * 2, // Project slightly forward to hit point
-          y: e.y + e.vy * 2,
+          x: e.x,
+          y: e.y,
           z: 20,
           color: '#06b6d4',
           count: 3,
@@ -162,17 +155,15 @@ export class PhysicsService {
       
       const queryRadius = radius * this.COLLISION_QUERY_RATIO;
       
-      // Use Fast Query for Dynamic
       const { buffer, count } = this.spatialHash.queryFast(e.x, e.y, queryRadius, zoneId); 
       
-      // Check Static Entities via Chunk Manager (Wall Optimization)
-      // Pass safe defaults for zoom/screen size, as physics doesn't care about culling
+      // Check Static Walls
       const { buffer: staticBuffer, count: staticCount } = this.chunkManager.getVisibleStaticEntities(
           { x: e.x, y: e.y, zoom: 1 } as any, 
           1000, 1000 
       );
 
-      // 1. Static Check (Walls)
+      // 1. Static Check
       for (let i = 0; i < staticCount; i++) {
           const obs = staticBuffer[i];
           if (obs.type === 'WALL') {
@@ -197,7 +188,7 @@ export class PhysicsService {
           }
       }
 
-      // 2. Dynamic Check (Destructibles) via Buffer
+      // 2. Dynamic Check (Destructibles)
       for (let i = 0; i < count; i++) {
           const obs = buffer[i];
           if (obs.id === e.id) continue;
