@@ -7,7 +7,8 @@ export type Action =
   | 'MOVE_UP' | 'MOVE_DOWN' | 'MOVE_LEFT' | 'MOVE_RIGHT'
   | 'ATTACK' | 'INTERACT' 
   | 'SKILL_1' | 'SKILL_2' | 'SKILL_3' | 'SKILL_4'
-  | 'TOGGLE_INV' | 'TOGGLE_MAP' | 'TOGGLE_SKILLS' | 'TOGGLE_PSI' | 'TOGGLE_CODEX' | 'TOGGLE_SHOP' | 'MENU';
+  | 'TOGGLE_INV' | 'TOGGLE_MAP' | 'TOGGLE_SKILLS' | 'TOGGLE_PSI' | 'TOGGLE_CODEX' | 'TOGGLE_SHOP' | 'MENU'
+  | 'ROTATE_LEFT' | 'ROTATE_RIGHT';
 
 export const DEFAULT_BINDINGS: Record<Action, string> = {
   'MOVE_UP': 'w',
@@ -26,7 +27,9 @@ export const DEFAULT_BINDINGS: Record<Action, string> = {
   'TOGGLE_PSI': 'u',
   'TOGGLE_CODEX': 'l',
   'TOGGLE_SHOP': 'p',
-  'MENU': 'Escape'
+  'MENU': 'Escape',
+  'ROTATE_LEFT': '[',
+  'ROTATE_RIGHT': ']'
 };
 
 export interface InputState {
@@ -55,7 +58,7 @@ export class InputService {
   
   actionEvents = new Subject<Action>();
   zoomEvents = new Subject<number>(); // Delta value
-  rotationEvents = new Subject<number>(); // Delta angle in radians
+  // rotationEvents removed in favor of discrete actions
 
   private inputState$ = new Subject<InputState>();
   private activeKeys = new Set<string>();
@@ -64,7 +67,6 @@ export class InputService {
 
   // Touch Gesture State
   private initialPinchDist: number | null = null;
-  private initialPinchAngle: number | null = null;
 
   // Gamepad State
   private gamepadIndex: number | null = null;
@@ -93,7 +95,6 @@ export class InputService {
     // Mouse Wheel Zoom
     fromEvent<WheelEvent>(window, 'wheel', { passive: false }).subscribe(e => {
         if (e.ctrlKey || !this.canvasRef) return; // Allow browser zoom if ctrl is held
-        // e.preventDefault(); // Optional: prevent page scroll
         this.zoomEvents.next(e.deltaY);
     });
     
@@ -136,34 +137,14 @@ export class InputService {
                       this.initialPinchDist = dist;
                   }
               }
-
-              // --- ROTATION (Angle) ---
-              const angle = Math.atan2(
-                  t2.clientY - t1.clientY,
-                  t2.clientX - t1.clientX
-              );
-
-              if (this.initialPinchAngle === null) {
-                  this.initialPinchAngle = angle;
-              } else {
-                  let deltaAngle = angle - this.initialPinchAngle;
-                  
-                  // Handle Angle Wrap-around (e.g. 179deg to -179deg)
-                  if (deltaAngle > Math.PI) deltaAngle -= Math.PI * 2;
-                  if (deltaAngle < -Math.PI) deltaAngle += Math.PI * 2;
-
-                  if (Math.abs(deltaAngle) > 0.01) {
-                      this.rotationEvents.next(deltaAngle);
-                      this.initialPinchAngle = angle;
-                  }
-              }
+              
+              // Continuous rotation removed for Mobile UX stability
           }
       }, { passive: false });
 
       canvas.addEventListener('touchend', (e) => {
           if (e.touches.length < 2) {
               this.initialPinchDist = null;
-              this.initialPinchAngle = null;
           }
       });
   }
@@ -363,6 +344,10 @@ export class InputService {
       mapButton(13, 'TOGGLE_CODEX'); // D-Down
       mapButton(14, 'TOGGLE_SKILLS'); // D-Left
       mapButton(15, 'TOGGLE_SHOP'); // D-Right
+
+      // Bumpers/Triggers for Rotation
+      mapButton(6, 'ROTATE_LEFT'); // LT
+      mapButton(7, 'ROTATE_RIGHT'); // RT
 
       requestAnimationFrame(() => this.pollGamepad());
   }

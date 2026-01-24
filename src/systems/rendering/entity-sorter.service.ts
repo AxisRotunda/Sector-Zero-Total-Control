@@ -1,6 +1,7 @@
 
 import { Injectable } from '@angular/core';
 import { Entity, Particle } from '../../models/game.models';
+import { IsoUtils } from '../../utils/iso-utils';
 
 @Injectable({ providedIn: 'root' })
 export class EntitySorterService {
@@ -8,9 +9,8 @@ export class EntitySorterService {
   /**
    * Sorts entities for Isometric Rendering (Back to Front).
    * 
-   * Primary Sort Key: (x + y) (Isometric Depth)
-   * 
    * Updates objects in-place with `isoDepth` to avoid recalculation during the sort comparator.
+   * Leverages IsoUtils which is pre-configured with the current frame's camera rotation.
    */
   sortForRender(renderList: (Entity | Particle)[], player: Entity): void {
     
@@ -20,12 +20,10 @@ export class EntitySorterService {
     for (let i = 0; i < len; i++) {
         const e = renderList[i];
         
-        // Base Iso Depth: x + y
-        let depth = e.x + e.y;
+        // Base Iso Depth: Use rotation-aware helper
+        let depth = IsoUtils.getSortDepth(e.x, e.y);
         
         // --- Layer Biasing ---
-        // Note: Using 'in' operator or explicit property checks is safer/faster than repeated casting if structure is known
-        
         // Floor Decorations: Always Deepest
         if ('subType' in e && e.type === 'DECORATION') {
             if (e.subType === 'RUG' || e.subType === 'FLOOR_CRACK' || e.subType === 'GRAFFITI') {
@@ -34,6 +32,7 @@ export class EntitySorterService {
         }
         
         // Floating Objects: Bias based on Z to ensure they draw on top of their ground position
+        // e.g. A flying drone at (x,y, z=50) should draw AFTER a ground unit at (x,y, z=0)
         if (e.z > 0) {
              depth += 1;
         }
@@ -43,8 +42,6 @@ export class EntitySorterService {
     }
 
     // 2. Sort In-Place
-    // JavaScript's Array.sort is efficient (TimSort). 
-    // We sort the pre-allocated buffer directly.
     renderList.sort(this.depthComparator);
   }
 

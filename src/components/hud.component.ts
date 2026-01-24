@@ -12,6 +12,7 @@ import { NarrativeService } from '../game/narrative.service';
 import { FACTIONS } from '../config/narrative.config';
 import { GlitchTextComponent } from './glitch-text.component';
 import { ICONS } from '../config/icons.config';
+import { CameraService } from '../game/camera.service';
 
 @Component({
   selector: 'app-hud',
@@ -57,16 +58,28 @@ import { ICONS } from '../config/icons.config';
 
           <!-- RIGHT: MAP & MENU -->
           <div class="flex flex-col items-end gap-2">
-             <div class="relative group">
-                 <app-map mode="MINI" (mousedown)="mapService.toggleFullMap()" class="cursor-pointer border-2 border-zinc-800 hover:border-cyan-500 transition-colors shadow-lg bg-black"></app-map>
-                 
-                 <div class="absolute top-0 right-0 max-w-[180px] bg-black/80 rounded-bl text-right p-1 pointer-events-none border-b border-l border-zinc-800 flex flex-col items-end">
-                     <div class="text-[9px] text-cyan-500 font-bold uppercase truncate tracking-tight">{{ world.currentZone().name }}</div>
-                     <div class="flex items-center gap-2">
-                         @if (world.currentZone().isSafeZone) {
-                             <span class="text-[7px] font-bold text-green-500 bg-green-900/30 px-1 rounded border border-green-900/50 tracking-widest animate-pulse">SAFE ZONE</span>
-                         }
-                         <div class="text-[7px] text-zinc-600 uppercase tracking-widest">Depth {{ world.currentZone().minDepth }}</div>
+             <div class="flex items-center gap-1">
+                 <!-- Camera Controls -->
+                 <div class="flex flex-col gap-1 mr-1">
+                     <button (click)="camera.snapRotation(-1)" class="w-8 h-8 bg-black/60 border border-zinc-700 text-zinc-400 hover:text-white flex items-center justify-center rounded-sm">
+                        ↺
+                     </button>
+                     <button (click)="camera.snapRotation(1)" class="w-8 h-8 bg-black/60 border border-zinc-700 text-zinc-400 hover:text-white flex items-center justify-center rounded-sm">
+                        ↻
+                     </button>
+                 </div>
+
+                 <div class="relative group">
+                     <app-map mode="MINI" (mousedown)="mapService.toggleFullMap()" class="cursor-pointer border-2 border-zinc-800 hover:border-cyan-500 transition-colors shadow-lg bg-black"></app-map>
+                     
+                     <div class="absolute top-0 right-0 max-w-[180px] bg-black/80 rounded-bl text-right p-1 pointer-events-none border-b border-l border-zinc-800 flex flex-col items-end">
+                         <div class="text-[9px] text-cyan-500 font-bold uppercase truncate tracking-tight">{{ world.currentZone().name }}</div>
+                         <div class="flex items-center gap-2">
+                             @if (world.currentZone().isSafeZone) {
+                                 <span class="text-[7px] font-bold text-green-500 bg-green-900/30 px-1 rounded border border-green-900/50 tracking-widest animate-pulse">SAFE ZONE</span>
+                             }
+                             <div class="text-[7px] text-zinc-600 uppercase tracking-widest">Depth {{ world.currentZone().minDepth }}</div>
+                         </div>
                      </div>
                  </div>
              </div>
@@ -152,6 +165,7 @@ export class HudComponent {
   world = inject(WorldService);
   mapService = inject(MapService);
   narrative = inject(NarrativeService);
+  camera = inject(CameraService);
 
   openInventory = output<void>();
   openSkills = output<void>();

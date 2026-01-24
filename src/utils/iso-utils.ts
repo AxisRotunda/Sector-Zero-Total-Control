@@ -25,7 +25,6 @@ export const IsoUtils = {
    */
   toIso: function(x: number, y: number, z: number = 0, out: {x: number, y: number} = {x:0, y:0}) {
     // 1. Rotate around camera center
-    // Optimization: If rotation is effectively zero, skip math
     let rx = x;
     let ry = y;
 
@@ -51,9 +50,6 @@ export const IsoUtils = {
     const y = screenY; 
     const x = screenX; 
     
-    // Derived from:
-    // isoX = rx - ry
-    // isoY = (rx + ry)/2
     const ry = y - 0.5 * x;
     const rx = y + 0.5 * x;
 
@@ -62,8 +58,7 @@ export const IsoUtils = {
         const dx = rx - this._cx;
         const dy = ry - this._cy;
         
-        // Inverse rotation matrix (transpose of rotation matrix)
-        // cos stays same, sin becomes -sin
+        // Inverse rotation matrix
         out.x = dx * this._cos - dy * (-this._sin) + this._cx;
         out.y = dx * (-this._sin) + dy * this._cos + this._cy;
     } else {
@@ -72,5 +67,28 @@ export const IsoUtils = {
     }
     
     return out;
+  },
+
+  /**
+   * Calculates a depth sort key based on the current rotation context.
+   * This approximates the visual "distance" from the back of the scene to the front.
+   * Essential for Z-Sorting entities correctly when the camera rotates.
+   */
+  getSortDepth(x: number, y: number): number {
+      // If rotation is zero, standard diagonal depth (x + y) works
+      if (this._rotation === 0) {
+          return x + y;
+      }
+
+      // If rotated, we must sort by the projected Y-coordinate of the object's footprint.
+      // Objects "higher" on the screen (lower projected Y) are behind objects "lower" on screen.
+      // Rotated X (rx) = x * cos - y * sin
+      // Rotated Y (ry) = x * sin + y * cos
+      // Projected Y ~ rx + ry
+      
+      const rx = x * this._cos - y * this._sin;
+      const ry = x * this._sin + y * this._cos;
+      
+      return rx + ry;
   }
 };
