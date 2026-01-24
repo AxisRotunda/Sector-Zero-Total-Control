@@ -54,4 +54,21 @@ export class PlayerMovementService {
 
     return isMoving;
   }
+
+  /**
+   * Updates physics with zero input vector.
+   * Useful for preserving momentum (sliding/lunging) during states where control is locked (e.g. ATTACK).
+   * Does NOT modify player.state.
+   */
+  updateMomentum(player: Entity, globalTime: number) {
+      const stats = this.playerService.playerStats();
+      
+      // Pass zero input to apply friction/slide logic only
+      const isMoving = this.physics.updateEntityPhysics(player, stats, {x: 0, y: 0});
+      
+      // Still trigger discovery if the momentum carries us into new chunks
+      if (isMoving && globalTime % 10 === 0) {
+          this.mapService.updateDiscovery(player.x, player.y);
+      }
+  }
 }

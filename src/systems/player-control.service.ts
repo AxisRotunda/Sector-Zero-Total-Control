@@ -45,17 +45,19 @@ export class PlayerControlService {
         this.animation.update(player);
 
         // Movement Logic
-        let isMoving = false;
         if (player.state !== 'ATTACK') {
             this.combat.currentAttackState = 'IDLE';
-            isMoving = this.movement.update(player, globalTime);
+            this.movement.update(player, globalTime);
+        } else {
+            // CRITICAL: Continue physics simulation during attack to allow lunges/slides
+            this.movement.updateMomentum(player, globalTime);
         }
 
         // Facing Logic
         if (player.state !== 'ATTACK') {
             if (this.input.aimAngle !== null) {
                 player.angle = this.input.aimAngle - this.world.camera.rotation;
-            } else if (isMoving) {
+            } else if (Math.abs(player.vx) > 0.1 || Math.abs(player.vy) > 0.1) {
                 const moveAngle = Math.atan2(player.vy, player.vx);
                 player.angle = moveAngle;
             }
