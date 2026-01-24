@@ -74,21 +74,22 @@ export const IsoUtils = {
    * This approximates the visual "distance" from the back of the scene to the front.
    * Essential for Z-Sorting entities correctly when the camera rotates.
    */
-  getSortDepth(x: number, y: number): number {
-      // If rotation is zero, standard diagonal depth (x + y) works
-      if (this._rotation === 0) {
-          return x + y;
-      }
-
-      // If rotated, we must sort by the projected Y-coordinate of the object's footprint.
-      // Objects "higher" on the screen (lower projected Y) are behind objects "lower" on screen.
-      // Rotated X (rx) = x * cos - y * sin
-      // Rotated Y (ry) = x * sin + y * cos
-      // Projected Y ~ rx + ry
+  getSortDepth(x: number, y: number, z: number = 0): number {
+      // Calculate rotated coordinates relative to the camera center (0,0 is sufficient for relative depth)
+      // rx = x * cos - y * sin
+      // ry = x * sin + y * cos
+      // In standard isometric projection (45 deg Y-axis compression), 
+      // objects with higher transformed 'Y' are closer to the viewer.
+      // Objects with higher transformed 'X' are to the right.
       
       const rx = x * this._cos - y * this._sin;
       const ry = x * this._sin + y * this._cos;
       
-      return rx + ry;
+      // Depth formula:
+      // Primary factor: Transformed Y (Rows).
+      // Secondary tie-breaker: Transformed X (Cols).
+      // Z (Height) adds to sort value (drawn later = on top)
+      
+      return (ry * 10000) + (rx * 100) + z;
   }
 };

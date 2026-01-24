@@ -1,5 +1,5 @@
 
-import { Injectable, inject, computed } from '@angular/core';
+import { Injectable, inject, computed, signal } from '@angular/core';
 import { WorldService } from './world/world.service';
 import { PlayerService } from './player/player.service';
 import { InputService, Action } from '../services/input.service';
@@ -18,8 +18,14 @@ export class CameraService {
   private startRotation = 0;
   private rotationStartTime = 0;
   private isRotating = false;
-  private readonly ROTATION_DURATION = 250; // ms
   private readonly ROTATION_STEP = Math.PI / 4; // 45 degrees
+  
+  // Exposed for UI
+  currentRotation = computed(() => this.world.camera.rotation);
+  rotationDegrees = computed(() => {
+      const deg = (this.currentRotation() * 180 / Math.PI) % 360;
+      return deg < 0 ? deg + 360 : deg;
+  });
   
   // Maximum distance the mouse can offset the camera (screen pixels approx)
   private readonly MOUSE_PEEK_DISTANCE = 300; 
@@ -51,6 +57,11 @@ export class CameraService {
       });
   }
 
+  private getPlatformDuration(): number {
+      const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
+      return isMobile ? 250 : 150; // Faster on PC for responsiveness
+  }
+
   snapRotation(direction: 1 | -1) {
       if (this.isRotating) return; // Debounce
       
@@ -68,8 +79,9 @@ export class CameraService {
     
     // --- 1. Rotation Tween ---
     if (this.isRotating) {
+        const duration = this.getPlatformDuration();
         const elapsed = now - this.rotationStartTime;
-        const t = Math.min(1, elapsed / this.ROTATION_DURATION);
+        const t = Math.min(1, elapsed / duration);
         
         // Quadratic Ease Out
         const ease = t * (2 - t); 

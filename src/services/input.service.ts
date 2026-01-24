@@ -20,7 +20,7 @@ export const DEFAULT_BINDINGS: Record<Action, string> = {
   'SKILL_1': 'e',
   'SKILL_2': 'r',
   'SKILL_3': 'Shift',
-  'SKILL_4': 'q',
+  'SKILL_4': 'z', // Remapped from 'q' to free up rotation
   'TOGGLE_INV': 'i',
   'TOGGLE_MAP': 'm',
   'TOGGLE_SKILLS': 'n',
@@ -28,8 +28,8 @@ export const DEFAULT_BINDINGS: Record<Action, string> = {
   'TOGGLE_CODEX': 'l',
   'TOGGLE_SHOP': 'p',
   'MENU': 'Escape',
-  'ROTATE_LEFT': '[',
-  'ROTATE_RIGHT': ']'
+  'ROTATE_LEFT': 'q', // PC Standard
+  'ROTATE_RIGHT': 'e' // PC Standard
 };
 
 export interface InputState {
@@ -58,7 +58,6 @@ export class InputService {
   
   actionEvents = new Subject<Action>();
   zoomEvents = new Subject<number>(); // Delta value
-  // rotationEvents removed in favor of discrete actions
 
   private inputState$ = new Subject<InputState>();
   private activeKeys = new Set<string>();
@@ -67,6 +66,10 @@ export class InputService {
 
   // Touch Gesture State
   private initialPinchDist: number | null = null;
+
+  // Mouse State
+  private isMiddleMouseDown = false;
+  private lastMouseX = 0;
 
   // Gamepad State
   private gamepadIndex: number | null = null;
@@ -90,33 +93,47 @@ export class InputService {
   private initListeners() {
     fromEvent<KeyboardEvent>(window, 'keydown').subscribe(e => this.handleKeyDown(e));
     fromEvent<KeyboardEvent>(window, 'keyup').subscribe(e => this.handleKeyUp(e));
-    fromEvent<MouseEvent>(window, 'mousemove').subscribe(e => this.handleMouseMove(e));
+    
+    // Mouse Movement (Aiming + Rotation)
+    fromEvent<MouseEvent>(window, 'mousemove').subscribe(e => {
+        this.handleMouseMove(e);
+        this.handleMouseRotation(e);
+    });
     
     // Mouse Wheel Zoom
     fromEvent<WheelEvent>(window, 'wheel', { passive: false }).subscribe(e => {
-        if (e.ctrlKey || !this.canvasRef) return; // Allow browser zoom if ctrl is held
+        if (e.ctrlKey || !this.canvasRef) return; 
         this.zoomEvents.next(e.deltaY);
     });
     
+    // Mouse Interaction
     fromEvent<MouseEvent>(window, 'mousedown').subscribe(e => {
-        if (e.button === 0) {
+        if (e.button === 0) { // Left Click
             this.isAttackPressed = true;
             this.activeActions.add('ATTACK');
             this.emitState();
+        } else if (e.button === 1) { // Middle Click
+            this.isMiddleMouseDown = true;
+            this.lastMouseX = e.clientX;
+            e.preventDefault(); // Prevent scroll cursor
         }
     });
     
     fromEvent<MouseEvent>(window, 'mouseup').subscribe(e => {
-        this.isAttackPressed = false;
-        this.activeActions.delete('ATTACK');
-        this.emitState();
+        if (e.button === 0) {
+            this.isAttackPressed = false;
+            this.activeActions.delete('ATTACK');
+            this.emitState();
+        } else if (e.button === 1) {
+            this.isMiddleMouseDown = false;
+        }
     });
   }
 
   private initTouchGestures(canvas: HTMLCanvasElement) {
       canvas.addEventListener('touchmove', (e) => {
           if (e.touches.length === 2) {
-              e.preventDefault(); // Prevent page scroll
+              e.preventDefault(); 
               
               const t1 = e.touches[0];
               const t2 = e.touches[1];
@@ -131,14 +148,11 @@ export class InputService {
                   this.initialPinchDist = dist;
               } else {
                   const delta = this.initialPinchDist - dist;
-                  // Only emit if significant change to reduce jitter
                   if (Math.abs(delta) > 2) {
-                      this.zoomEvents.next(delta * 5); // Multiplier to match wheel sensitivity roughly
+                      this.zoomEvents.next(delta * 5); 
                       this.initialPinchDist = dist;
                   }
               }
-              
-              // Continuous rotation removed for Mobile UX stability
           }
       }, { passive: false });
 
@@ -151,7 +165,6 @@ export class InputService {
 
   private initGamepad() {
       window.addEventListener("gamepadconnected", (e) => {
-          console.log("Gamepad connected:", e.gamepad.id);
           this.gamepadIndex = e.gamepad.index;
           this.pollGamepad();
       });
@@ -268,11 +281,22 @@ export class InputService {
     const dx = mouseX - canvasCenterX;
     const dy = mouseY - canvasCenterY;
     
-    // Calculate normalized cursor position (-1 to 1) for camera peeking
     this.cursorRelative.x = Math.max(-1, Math.min(1, dx / (rect.width / 2)));
     this.cursorRelative.y = Math.max(-1, Math.min(1, dy / (rect.height / 2)));
     
     this.aimAngle = Math.atan2(dy, dx);
+  }
+
+  private handleMouseRotation(e: MouseEvent) {
+      if (!this.isMiddleMouseDown) return;
+
+      const deltaX = e.clientX - this.lastMouseX;
+      // Threshold to trigger rotation (prevent jitter)
+      if (Math.abs(deltaX) > 50) {
+          const dir = deltaX > 0 ? 1 : -1;
+          this.actionEvents.next(dir > 0 ? 'ROTATE_RIGHT' : 'ROTATE_LEFT');
+          this.lastMouseX = e.clientX;
+      }
   }
 
   private updateVector() {
