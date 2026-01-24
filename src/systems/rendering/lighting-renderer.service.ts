@@ -14,6 +14,7 @@ export class LightingRendererService {
   
   // Sprite Optimization: Cached radial gradient image
   private lightSprite: HTMLCanvasElement | OffscreenCanvas | null = null;
+  private coloredLightCache = new Map<string, HTMLCanvasElement | OffscreenCanvas>();
   
   private _iso = { x: 0, y: 0 }; 
   
@@ -88,6 +89,49 @@ export class LightingRendererService {
       
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, w, h);
+  }
+
+  // Pre-render a colored version of the light sprite
+  private getColoredLightSprite(color: string): HTMLCanvasElement | OffscreenCanvas {
+      if (this.coloredLightCache.has(color)) {
+          return this.coloredLightCache.get(color)!;
+      }
+
+      // Limit cache size to prevent memory leaks with dynamic colors
+      if (this.coloredLightCache.size > 20) {
+          const firstKey = this.coloredLightCache.keys().next().value;
+          if (firstKey) this.coloredLightCache.delete(firstKey);
+      }
+
+      let sprite: HTMLCanvasElement | OffscreenCanvas;
+      if (typeof OffscreenCanvas !== 'undefined') {
+          sprite = new OffscreenCanvas(256, 256);
+      } else {
+          sprite = document.createElement('canvas');
+          sprite.width = 256;
+          sprite.height = 256;
+      }
+
+      const ctx = sprite.getContext('2d') as CanvasRenderingContext2D;
+      const w = sprite.width;
+      const h = sprite.height;
+      const cx = w/2;
+      const cy = h/2;
+      const radius = w/2;
+
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+      // Ensure we use the full color with alpha 1, scaling comes later via globalAlpha
+      const c = this.hexToRgba(color, 1.0);
+      const transparent = this.hexToRgba(color, 0);
+
+      grad.addColorStop(0, c);
+      grad.addColorStop(1, transparent);
+      
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, w, h);
+
+      this.coloredLightCache.set(color, sprite);
+      return sprite;
   }
 
   resize(width: number, height: number) {
@@ -183,18 +227,12 @@ export class LightingRendererService {
   private drawColoredLight(ctx: any, x: number, y: number, z: number, radius: number, intensity: number, color: string) {
       IsoUtils.toIso(x, y, z, this._iso);
       
-      const grad = ctx.createRadialGradient(this._iso.x, this._iso.y, radius * 0.1, this._iso.x, this._iso.y, radius);
+      const sprite = this.getColoredLightSprite(color);
+      const size = radius * 2;
       
-      const c = this.hexToRgba(color, intensity);
-      const transparent = this.hexToRgba(color, 0);
-
-      grad.addColorStop(0, c);
-      grad.addColorStop(1, transparent);
-      
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(this._iso.x, this._iso.y, radius, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.globalAlpha = intensity;
+      ctx.drawImage(sprite, this._iso.x - radius, this._iso.y - radius, size, size);
+      ctx.globalAlpha = 1.0;
   }
 
   private hexToRgba(hex: string, alpha: number): string {

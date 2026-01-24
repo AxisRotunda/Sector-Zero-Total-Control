@@ -1,7 +1,6 @@
 
 import { Injectable, signal, inject, OnDestroy } from '@angular/core';
-import { Entity, FloatingText, Zone, Camera, SectorId } from '../../models/game.models';
-import * as CONFIG from '../../config/game.config';
+import { Entity, FloatingText, Zone, Camera } from '../../models/game.models';
 import { EntityPoolService } from '../../services/entity-pool.service';
 import { ParticleService } from '../../systems/particle.service';
 import { EventBusService } from '../../core/events/event-bus.service';
@@ -11,6 +10,21 @@ import { ChunkManagerService } from './chunk-manager.service';
 import { WorldGeneratorService } from './world-generator.service';
 import { Subscription } from 'rxjs';
 import { migrateEntities } from '../../utils/damage-migration.util';
+
+// Fallback "Boot Zone" to ensure Renderer has valid data before ZoneManager finishes loading the HUB
+const BOOT_ZONE: Zone = {
+    id: 'BOOT',
+    name: 'Initializing...',
+    theme: 'INDUSTRIAL',
+    groundColor: '#09090b',
+    wallColor: '#27272a',
+    detailColor: '#333',
+    minDepth: 0,
+    difficultyMult: 1.0,
+    weather: 'NONE',
+    floorPattern: 'PLAIN',
+    isSafeZone: true
+};
 
 @Injectable({ providedIn: 'root' })
 export class WorldService implements OnDestroy {
@@ -34,7 +48,9 @@ export class WorldService implements OnDestroy {
   public mapBounds = { minX: -2000, maxX: 2000, minY: -2000, maxY: 2000 };
   public rainDrops: {x: number, y: number, z: number, speed: number}[] = [];
   public floatingTexts: FloatingText[] = [];
-  currentZone = signal<Zone>(CONFIG.ZONES[0]);
+  
+  // Initialize with safe BOOT_ZONE
+  currentZone = signal<Zone>(BOOT_ZONE);
 
   constructor() {
     for(let i=0; i<100; i++) this.rainDrops.push({ x: Math.random() * 2000, y: Math.random() * 2000, z: Math.random() * 500, speed: 15 + Math.random() * 10 });
@@ -78,9 +94,6 @@ export class WorldService implements OnDestroy {
     return { id: 0, type: 'PLAYER', x: 0, y: 0, z: 0, vx: 0, vy: 0, angle: -Math.PI/4, radius: 20, hp: 100, maxHp: 100, armor: 5, color: '#e4e4e7', state: 'IDLE', animFrame: 0, animFrameTimer: 0, timer: 0, speed: 0, hitFlash: 0, xpValue: 0, trail: [], status: { stun: 0, slow: 0, poison: null, burn: null, weakness: null, bleed: null } };
   }
 
-  /**
-   * Spawns enemy with automatic damage type configuration.
-   */
   public spawnEnemy(
     x: number,
     y: number,
@@ -90,30 +103,23 @@ export class WorldService implements OnDestroy {
     const zoneId = this.currentZone().id;
     const enemy = this.entityPool.acquire('ENEMY', subType as any, zoneId);
 
-    // Position
     enemy.x = x;
     enemy.y = y;
 
-    // Level (affects damage scaling in entityPool.acquire)
     if (level) {
         enemy.level = level;
     } else {
         enemy.level = 1;
     }
 
-    // Health scaling
     enemy.maxHp = this.calculateEnemyHP(enemy.level || 1, subType);
     enemy.hp = enemy.maxHp;
 
-    // Add to world
     this.entities.push(enemy);
 
     return enemy;
   }
 
-  /**
-   * Calculates enemy HP based on level and tier.
-   */
   private calculateEnemyHP(level: number, subType: string): number {
     const BASE_HP = 50;
     const PER_LEVEL = 15;
@@ -121,7 +127,6 @@ export class WorldService implements OnDestroy {
 
     let baseHP = BASE_HP + (level * PER_LEVEL) + (level * level * QUADRATIC);
 
-    // Tier multipliers
     if (subType === 'BOSS' || subType.includes('BOSS')) {
       baseHP *= 5;
     } else if (subType.includes('ELITE')) {
@@ -131,9 +136,6 @@ export class WorldService implements OnDestroy {
     return Math.floor(baseHP);
   }
 
-  /**
-   * Batch migration for loading saved games.
-   */
   public migrateLoadedEntities(): void {
     migrateEntities(this.entities);
   }
@@ -146,10 +148,9 @@ export class WorldService implements OnDestroy {
      for (let i = this.entities.length - 1; i >= 0; i--) { 
         const e = this.entities[i];
         if (e.type === 'SPAWNER' || e.type === 'SHRINE' || e.type === 'WALL') continue;
-        if (this.currentZone().name === 'Liminal Citadel') {
-            if (e.x < this.mapBounds.minX - 100 || e.x > this.mapBounds.maxX + 100 || e.y < this.mapBounds.minY - 100 || e.y > this.mapBounds.maxY + 100) {
-                this.entities.splice(i, 1);
-            }
+        // Simple bounds check cleanup
+        if (e.x < this.mapBounds.minX - 500 || e.x > this.mapBounds.maxX + 500 || e.y < this.mapBounds.minY - 500 || e.y > this.mapBounds.maxY + 500) {
+            this.entities.splice(i, 1);
         }
      }
   }

@@ -1,7 +1,7 @@
 
 import { Injectable, inject, signal } from '@angular/core';
-import { Entity, Zone, FloatingText, Camera, Particle } from '../../models/game.models';
-import { WorldService } from '../../game/world/world.service';
+import { Entity, Zone, FloatingText, Camera, Particle } from '../models/game.models';
+import { WorldService } from '../game/world/world.service';
 import { FloorRendererService } from './rendering/floor-renderer.service';
 import { StructureRendererService } from './rendering/structure-renderer.service';
 import { UnitRendererService } from './rendering/unit-renderer.service';
@@ -9,18 +9,18 @@ import { ShadowRendererService } from './rendering/shadow-renderer.service';
 import { EffectRendererService } from './rendering/effect-renderer.service';
 import { EntityRendererService } from './rendering/entity-renderer.service'; 
 import { LightingRendererService } from './rendering/lighting-renderer.service';
-import { IsoUtils } from '../../utils/iso-utils';
-import { PlayerService } from '../../game/player/player.service';
+import { IsoUtils } from '../utils/iso-utils';
+import { PlayerService } from '../game/player/player.service';
 import { EntitySorterService } from './rendering/entity-sorter.service';
 import { RENDER_CONFIG } from './rendering/render.config';
-import { InputService } from '../../services/input.service';
-import { SpatialHashService } from '../spatial-hash.service';
-import { InteractionService } from '../../services/interaction.service';
-import { ChunkManagerService } from '../../game/world/chunk-manager.service';
+import { InputService } from '../services/input.service';
+import { SpatialHashService } from './spatial-hash.service';
+import { InteractionService } from '../services/interaction.service';
+import { ChunkManagerService } from '../game/world/chunk-manager.service';
 import { LightingService } from './rendering/lighting.service';
-import { TimeService } from '../../game/time.service';
-import { MissionService } from '../../game/mission.service';
-import { PerformanceManagerService } from '../../game/performance-manager.service';
+import { TimeService } from '../game/time.service';
+import { MissionService } from '../game/mission.service';
+import { PerformanceManagerService } from '../game/performance-manager.service';
 
 @Injectable({
   providedIn: 'root'
@@ -66,6 +66,7 @@ export class RenderService {
 
   // Performance Monitoring
   private lastFrameTime = 0;
+  private currentRenderScale = 1.0;
 
   init(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -89,8 +90,13 @@ export class RenderService {
 
   resize() {
     if (this.canvas) {
-      this.canvas.width = Math.max(window.innerWidth, 320);
-      this.canvas.height = Math.max(window.innerHeight, 320);
+      const scale = this.performanceManager.renderScale();
+      this.currentRenderScale = scale;
+      
+      this.canvas.width = Math.max(window.innerWidth * scale, 320);
+      this.canvas.height = Math.max(window.innerHeight * scale, 320);
+      
+      // Update lighting buffer size to match new render resolution
       this.lightingRenderer.resize(this.canvas.width, this.canvas.height);
     }
   }
@@ -106,8 +112,11 @@ export class RenderService {
       IsoUtils.toIso(cam.x, cam.y, 0, this.camCenter);
       
       // 1. Un-center and Un-zoom (Screen Space -> Iso Space)
-      const dx = screenX - this.canvas.width / 2;
-      const dy = screenY - this.canvas.height / 2;
+      // Account for Render Scale: Screen Input Coordinates are window-relative (full res), 
+      // but canvas internal res is scaled.
+      const scale = this.currentRenderScale;
+      const dx = (screenX * scale) - this.canvas.width / 2;
+      const dy = (screenY * scale) - this.canvas.height / 2;
       
       const isoX = this.camCenter.x + dx / cam.zoom;
       const isoY = this.camCenter.y + dy / cam.zoom;
@@ -138,6 +147,12 @@ export class RenderService {
 
     // Apply quality settings
     this.lightingRenderer.setResolutionScale(this.performanceManager.lightingScale());
+    
+    // Check render scale (adaptive resolution)
+    const targetScale = this.performanceManager.renderScale();
+    if (Math.abs(targetScale - this.currentRenderScale) > 0.05) {
+        this.resize();
+    }
 
     const w = this.canvas.width;
     const h = this.canvas.height;
@@ -146,14 +161,13 @@ export class RenderService {
     IsoUtils.setContext(cam.rotation, cam.x, cam.y);
 
     // Calculate View Frustum (Zero Alloc)
-    this.calculateFrustum(cam, w, h);
+    this.calculateFrustum(cam, window.innerWidth, window.innerHeight);
 
     // 1. Prepare Scene (Logic Phase)
-    // Gather renderable entities and sort them
-    this.prepareRenderList(cam, zone, entities, player, particles, w, h, this._frustum);
+    this.prepareRenderList(cam, zone, entities, player, particles, window.innerWidth, window.innerHeight, this._frustum);
     
     // Prepare Lights (Culling & Extraction)
-    this.prepareLighting(player, this.renderList, cam, w, h, this._frustum);
+    this.prepareLighting(player, this.renderList, cam, window.innerWidth, window.innerHeight, this._frustum);
     
     // Update Lighting Animation
     this.lighting.update(1, this.timeService.globalTime);
@@ -178,8 +192,7 @@ export class RenderService {
     this.drawGeometry(this.renderList, zone);
 
     // 6. Occlusion / X-Ray Pass
-    // We need to pass the static list source to check occlusion properly
-    const { buffer, count } = this.chunkManager.getVisibleStaticEntities(cam, w, h);
+    const { buffer, count } = this.chunkManager.getVisibleStaticEntities(cam, window.innerWidth, window.innerHeight);
     this.drawOcclusion(player, buffer, count);
 
     // 7. Visual Effects
@@ -221,7 +234,6 @@ export class RenderService {
       this.lighting.clear();
       const presets = RENDER_CONFIG.LIGHTING.PRESETS;
       
-      // Player Dynamic Light
       this.lighting.registerLight({
           id: 'PLAYER_MAIN',
           x: player.x,
@@ -230,22 +242,19 @@ export class RenderService {
           ...presets.PLAYER_MAIN
       });
 
-      // Extract Lights from Render List
       const len = renderList.length;
       for (let i = 0; i < len; i++) {
           const obj = renderList[i];
           
           if ('life' in obj) {
-              // Particle Light
               const p = obj as Particle;
               if (p.emitsLight) {
-                  // Culling check for particles before registering light
                   if (p.x >= frustum.minX && p.x <= frustum.maxX && p.y >= frustum.minY && p.y <= frustum.maxY) {
                       this.lighting.registerLight({
-                          id: `LP_${i}`, // Safe since list is rebuilt per frame
+                          id: `LP_${i}`,
                           x: p.x, y: p.y, z: p.z || presets.PARTICLE.z,
                           radius: p.sizeStart * presets.PARTICLE.radiusMultiplier,
-                          intensity: p.life, // Fade with life
+                          intensity: p.life,
                           color: p.color,
                           type: 'DYNAMIC'
                       });
@@ -289,16 +298,13 @@ export class RenderService {
           }
       }
 
-      // Perform Culling
       this.lighting.cullLights(cam, w, h);
   }
 
   private applyCameraTransform(cam: Camera, w: number, h: number, shake: {intensity: number, x: number, y: number}) {
       if (!this.ctx) return;
       
-      // Calculate pivot point in Iso space (Center of screen)
       IsoUtils.toIso(cam.x, cam.y, 0, this.camCenter);
-      
       this.ctx.translate(w/2, h/2);
       
       if (shake.intensity > 0.1) {
@@ -325,16 +331,12 @@ export class RenderService {
   ) {
       this.renderList.length = 0;
       
-      // OPTIMIZED: Use Zero-Alloc ChunkManager API for static entities
       const { buffer: staticBuffer, count: staticCount } = this.chunkManager.getVisibleStaticEntities(cam, w, h);
-      
       for (let i = 0; i < staticCount; i++) {
           this.renderList.push(staticBuffer[i]);
       }
       
-      // OPTIMIZED: Use Zero-Alloc SpatialHash query for dynamic entities
       const { buffer: dynamicBuffer, count: dynamicCount } = this.spatialHash.queryRectFast(frustum.minX, frustum.minY, frustum.maxX, frustum.maxY, zone.id);
-      
       for (let i = 0; i < dynamicCount; i++) {
           const e = dynamicBuffer[i];
           if (e.type === 'WALL' && e.subType !== 'GATE_SEGMENT') continue;
@@ -344,13 +346,12 @@ export class RenderService {
       
       this.renderList.push(player);
 
-      // Particle Culling and Limiting based on Performance Tier
       const pLen = particles.length;
       const pLimit = this.performanceManager.particleLimit();
       let pCount = 0;
 
       for (let i = 0; i < pLen; i++) {
-          if (pCount >= pLimit) break; // Hard cap
+          if (pCount >= pLimit) break;
           const p = particles[i];
           if (p.x >= frustum.minX && p.x <= frustum.maxX && p.y >= frustum.minY && p.y <= frustum.maxY) {
               this.renderList.push(p);
@@ -467,7 +468,6 @@ export class RenderService {
   }
 
   private calculateFrustum(cam: Camera, width: number, height: number) {
-      // Reuse vector pools
       this.getScreenToWorld(0, 0, cam, this._fp1);
       this.getScreenToWorld(width, 0, cam, this._fp2);
       this.getScreenToWorld(0, height, cam, this._fp3);
@@ -484,7 +484,6 @@ export class RenderService {
   private applyPostEffects(w: number, h: number) {
       if (!this.ctx) return;
       
-      // Skip expensive gradients on LOW quality
       if (this.performanceManager.currentTier().name !== 'LOW') {
           const grad = this.ctx.createRadialGradient(w/2, h/2, h/2, w/2, h/2, h);
           grad.addColorStop(0, 'transparent');

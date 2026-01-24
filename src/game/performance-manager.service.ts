@@ -13,6 +13,7 @@ export class PerformanceManagerService {
   readonly currentTier = computed(() => QUALITY_TIERS[this.currentTierIndex()]);
   readonly shadowsEnabled = computed(() => this.currentTier().shadow);
   readonly lightingScale = computed(() => this.currentTier().lightScale);
+  readonly renderScale = computed(() => this.currentTier().renderScale || 1.0);
   readonly particleLimit = computed(() => this.currentTier().particleCap);
 
   private fpsAccumulator = 0;

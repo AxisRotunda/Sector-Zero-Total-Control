@@ -52,7 +52,7 @@ export const RENDER_CONFIG = {
 };
 
 export const QUALITY_TIERS = [
-  { name: 'LOW', shadow: false, lightScale: 0.25, particleCap: 100 },
-  { name: 'MEDIUM', shadow: false, lightScale: 0.5, particleCap: 300 },
-  { name: 'HIGH', shadow: true, lightScale: 0.75, particleCap: 600 }
+  { name: 'LOW', shadow: false, lightScale: 0.25, renderScale: 0.75, particleCap: 100 },
+  { name: 'MEDIUM', shadow: false, lightScale: 0.5, renderScale: 0.9, particleCap: 300 },
+  { name: 'HIGH', shadow: true, lightScale: 0.75, renderScale: 1.0, particleCap: 600 }
 ];

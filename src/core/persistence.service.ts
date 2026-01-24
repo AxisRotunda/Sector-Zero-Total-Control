@@ -46,7 +46,7 @@ export class PersistenceService {
 
   async checkSaveData() {
       // Check both storage methods for migration support
-      const localData = localStorage.getItem(this.saveKey);
+      const localData = localStorage.getItem(this.saveKey + '_meta');
       if (localData) {
           this.hasSaveData.set(true);
           return;
@@ -57,6 +57,7 @@ export class PersistenceService {
   }
 
   async saveGame() {
+      // Collect snapshots from all persistent systems
       const payload: SaveFile = {
           version: this.CURRENT_VERSION,
           timestamp: Date.now(),
@@ -72,27 +73,29 @@ export class PersistenceService {
       };
       
       try {
+          // Asynchronously write to IndexedDB
           await this.db.save(this.saveKey, payload);
-          // Keep a minimal flag in local storage for fast synchronous checks if needed
+          
+          // Use a lightweight local flag for sync UI checks
           localStorage.setItem(this.saveKey + '_meta', Date.now().toString());
           this.hasSaveData.set(true);
-          console.log("Game Saved to DB.");
+          console.log("[Persistence] Game Saved to IndexedDB.");
       } catch (e) {
-          console.error("Save Failed", e);
+          console.error("[Persistence] Save Failed", e);
       }
   }
 
   async loadGame(): Promise<boolean> {
       try {
-          // 1. Try IndexedDB
+          // 1. Primary: Load from IndexedDB
           let raw = await this.db.load(this.saveKey);
           
-          // 2. Fallback / Migration from LocalStorage
+          // 2. Migration: Check legacy LocalStorage if DB is empty
           if (!raw) {
               const json = localStorage.getItem(this.saveKey);
               if (json) {
                   raw = JSON.parse(json);
-                  console.log("Migrating save from LocalStorage to IndexedDB...");
+                  console.log("[Persistence] Migrating legacy save to IndexedDB...");
                   await this.db.save(this.saveKey, raw);
               }
           }
@@ -100,18 +103,11 @@ export class PersistenceService {
           if (!raw) return false;
 
           let data = raw;
-
-          // Version check
           if (raw.version !== undefined) {
-              if (raw.version !== this.CURRENT_VERSION) {
-                  console.warn("Save version mismatch. Attempting migration.");
-              }
               data = raw.data;
-          } else {
-              // Legacy save support
-              data = raw;
           }
           
+          // Deserialize into services
           if(data.player) this.player.loadSaveData(data.player);
           if (data.inventory) this.inventory.loadSaveData(data.inventory);
           if (data.skillTree) this.skillTree.loadSaveData(data.skillTree);
@@ -119,15 +115,19 @@ export class PersistenceService {
           if (data.narrative) this.narrative.loadSaveData(data.narrative);
           if (data.worldState) this.worldState.loadSaveData(data.worldState);
           
-          // Init world after loading player state (which contains currentSectorId)
+          // Initialize world manager with the saved sector ID
           await this.zoneManager.initWorld(this.player.currentSectorId());
           
           if (data.map) this.mapService.loadSaveData(data.map);
 
-          this.eventBus.dispatch({ type: GameEvents.FLOATING_TEXT_SPAWN, payload: { onPlayer: true, yOffset: -80, text: "SYSTEM RESTORED", color: '#22c55e', size: 30 } });
+          this.eventBus.dispatch({ 
+            type: GameEvents.FLOATING_TEXT_SPAWN, 
+            payload: { onPlayer: true, yOffset: -80, text: "UPLINK RESTORED", color: '#22c55e', size: 30 } 
+          });
+          
           return true;
       } catch (e) {
-          console.error("Save Corrupted", e);
+          console.error("[Persistence] Load Failed", e);
           return false;
       }
   }

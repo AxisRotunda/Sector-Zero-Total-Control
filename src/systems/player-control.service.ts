@@ -1,5 +1,5 @@
 
-import { Injectable, inject, computed } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { WorldService } from '../game/world/world.service';
 import { PlayerService } from '../game/player/player.service';
 import { InputService } from '../services/input.service';
@@ -112,9 +112,7 @@ export class PlayerControlService {
         if (player.state !== 'ATTACK') {
             if (this.input.aimAngle !== null) {
                 // Priority: Manual Aim (Right Stick / Mouse)
-                // Also needs rotation adjustment if it's relative to screen
-                // Mouse logic in InputService calculates angle relative to screen center.
-                // We need to add inverse camera rotation to this angle.
+                // Adjust manual aim for camera rotation
                 player.angle = this.input.aimAngle - this.world.camera.rotation;
             } else if (isMoving) {
                 // Fallback: Face Movement Direction (Left Stick)
@@ -196,34 +194,52 @@ export class PlayerControlService {
         }
     }
 
+    /**
+     * Mobile-Optimized Targeting
+     * Prioritizes enemies in the direction the player is facing/moving ("Cone of Attention").
+     * Heavily penalizes targets behind the player.
+     */
     private findBestTarget(player: Entity): Entity | null {
         const zoneId = this.world.currentZone().id;
-        const range = 450; // Scan range for auto-target
+        const range = 500; 
         const candidates = this.spatialHash.query(player.x, player.y, range, zoneId);
         
         let best: Entity | null = null;
         let minScore = Infinity;
         
+        const playerDirX = Math.cos(player.angle);
+        const playerDirY = Math.sin(player.angle);
+
         for (const e of candidates) {
             if (e.id === player.id) continue;
             if (e.state === 'DEAD') continue;
-            // Prioritize Enemies over Crates
             if (!isEnemy(e) && !isDestructible(e)) continue;
             
-            const dist = Math.hypot(e.x - player.x, e.y - player.y);
+            const dx = e.x - player.x;
+            const dy = e.y - player.y;
+            const dist = Math.hypot(dx, dy);
             
-            // Score Calculation
-            // Lower score is better
+            // Normalized direction to target
+            const dirX = dx / dist;
+            const dirY = dy / dist;
+            
+            // Dot product (1.0 = directly in front, -1.0 = directly behind)
+            const dot = playerDirX * dirX + playerDirY * dirY;
+            
+            // Score Calculation (Lower is better)
+            // Base score is distance
             let score = dist;
             
-            // Angle bias: Prefer targets in front of player
-            const angleToTarget = Math.atan2(e.y - player.y, e.x - player.x);
-            const angleDiff = Math.abs(angleToTarget - player.angle);
-            // Penalize targets behind
-            if (angleDiff > Math.PI / 2) score += 200; 
+            // Angle Bias: Reduce effective distance score for targets in front
+            // Increase score massively for targets behind
+            if (dot > 0) {
+                score *= (1 - dot * 0.5); // Up to 50% "closer" if directly in front
+            } else {
+                score += 300; // Heavy penalty for being behind
+            }
             
-            // Bias towards Enemies over Objects
-            if (isDestructible(e)) score += 100;
+            // Prioritize enemies over boxes
+            if (isDestructible(e)) score += 150;
 
             if (score < minScore) {
                 minScore = score;
@@ -251,6 +267,7 @@ export class PlayerControlService {
              if (isEnemy(closest)) this.tutorial.trigger('COMBAT');
              const targetAngle = Math.atan2((closest as Entity).y - player.y, (closest as Entity).x - player.x);
              const speed = Math.hypot(player.vx, player.vy);
+             // Allow auto-attack if not moving fast, or if using joystick
              if (speed < 0.5 && !this.input.usingKeyboard()) {
                  this.inputBuffer.addCommand('PRIMARY', targetAngle, 0);
              }
@@ -264,10 +281,9 @@ export class PlayerControlService {
         
         // Faster animations for later combo steps
         const comboSpeedMult = player.comboIndex === 2 ? 0.7 : (player.comboIndex === 1 ? 0.85 : 1.0);
-        const attackSpeedStat = this.playerService.stats.playerStats().speed * 0.1; // Minor impact from Agility
+        const attackSpeedStat = this.playerService.stats.playerStats().speed * 0.1; 
         
         const baseSpeed = 3;
-        // Formula: Higher speed stat -> Lower duration
         const attackFrameDuration = Math.max(1, Math.floor(baseSpeed / (weaponSpeed + attackSpeedStat) * comboSpeedMult));
 
         const IDLE_FRAME_DURATION = 12; const IDLE_FRAMES = 4;
@@ -294,34 +310,24 @@ export class PlayerControlService {
                     player.animFrameTimer = 0; player.animFrame++;
                     
                     // --- ATTACK STATE MACHINE ---
-                    
-                    // 1. Initial State
                     if (player.animFrame === 0) {
                         this.attackState = 'STARTUP';
                         player.animPhase = 'startup';
                     }
-                    
-                    // 2. Startup -> Active (Hitbox Spawn)
                     else if (this.attackState === 'STARTUP' && player.animFrame >= ATTACK_STARTUP_FRAMES) {
                         this.attackState = 'ACTIVE';
                         player.animPhase = 'active';
-                        // Frame-Locked Hitbox Spawn
                         this.playerService.abilities.spawnPrimaryAttackHitbox(player);
                     }
-                    
-                    // 3. Active -> Recovery
                     else if (this.attackState === 'ACTIVE' && player.animFrame >= ATTACK_STARTUP_FRAMES + ATTACK_ACTIVE_FRAMES) {
                         this.attackState = 'RECOVERY';
                         player.animPhase = 'recovery';
                     }
-                    
-                    // 4. End of Animation
                     if (player.animFrame >= ATTACK_TOTAL_FRAMES) { 
                         player.state = 'IDLE'; 
                         player.animFrame = 0; 
                         player.animPhase = undefined;
                         this.attackState = 'IDLE';
-                        // If we didn't chain, reset combo
                         player.comboIndex = 0;
                         this.playerService.abilities.currentCombo.set(0);
                     }
