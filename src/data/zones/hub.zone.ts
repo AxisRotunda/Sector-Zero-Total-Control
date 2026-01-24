@@ -23,19 +23,28 @@ const CORNER_BLOCKS = [
   type: 'PILLAR'
 }));
 
-// Re-position prefabs
+// Re-position existing prefabs
 const spire = BUILDING_PREFABS.spire(0, -200); 
 const medBay = BUILDING_PREFABS.medBay(-400, 100); 
 const shop = BUILDING_PREFABS.shop(400, 100); 
 const training = BUILDING_PREFABS.trainingChamber(-600, -300); 
 const southGate = BUILDING_PREFABS.gateAssembly(1000, true);
 
-// Retexture prefabs to Frozen theme
-[...spire.walls, ...medBay.walls, ...shop.walls, ...training.walls, ...southGate.walls].forEach(w => {
-    if (['#52525b', '#27272a', '#3f3f46', '#334155'].includes(w.color || '')) {
-        w.color = COLOR_FROZEN_METAL;
-    }
-});
+// New Expansions
+const barracks = BUILDING_PREFABS.livingQuarters(800, -300, COLOR_FROZEN_WALL);
+const messHall = BUILDING_PREFABS.messHall(-800, 100, COLOR_FROZEN_WALL);
+const supplies = BUILDING_PREFABS.supplyDepot(600, -600);
+
+// Helper to retexture walls
+const retexture = (walls: any[]) => {
+    walls.forEach(w => {
+        if (['#52525b', '#27272a', '#3f3f46', '#334155'].includes(w.color || '')) {
+            w.color = COLOR_FROZEN_METAL;
+        }
+    });
+};
+
+retexture([...spire.walls, ...medBay.walls, ...shop.walls, ...training.walls, ...southGate.walls, ...barracks.walls, ...messHall.walls, ...supplies.walls]);
 spire.walls[0].color = ''; 
 
 export const HUB_ZONE: ZoneTemplate = {
@@ -63,6 +72,9 @@ export const HUB_ZONE: ZoneTemplate = {
       ...medBay.walls,
       ...shop.walls,
       ...training.walls,
+      ...barracks.walls,
+      ...messHall.walls,
+      ...supplies.walls,
       { x: -800, y: 0, w: 40, h: 1600, height: 300, color: COLOR_FROZEN_WALL },
       { x: 800, y: 0, w: 40, h: 1600, height: 300, color: COLOR_FROZEN_WALL },
       // North Wall - Gap for station
@@ -100,6 +112,9 @@ export const HUB_ZONE: ZoneTemplate = {
       ...medBay.entities,
       ...shop.entities,
       ...training.entities,
+      ...barracks.entities,
+      ...messHall.entities,
+      ...supplies.entities,
 
       // --- PROPAGANDA DECORATIONS ---
       { type: 'DECORATION', subType: 'BANNER', x: -820, y: -200, data: { z: 150, color: '#06b6d4' } },

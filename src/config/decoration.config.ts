@@ -47,5 +47,10 @@ export const DECORATIONS: Record<string, DecorationDef> = {
     
     // PROPAGANDA & SYMBOLS
     'BANNER': { id: 'BANNER', width: 60, depth: 10, height: 180, baseColor: '#06b6d4', isStaticFloor: false, renderStyle: 'CUSTOM' },
-    'HOLO_SIGN': { id: 'HOLO_SIGN', width: 100, depth: 10, height: 60, baseColor: '#06b6d4', isStaticFloor: false, renderStyle: 'CUSTOM' }
+    'HOLO_SIGN': { id: 'HOLO_SIGN', width: 100, depth: 10, height: 60, baseColor: '#06b6d4', isStaticFloor: false, renderStyle: 'CUSTOM' },
+
+    // DOMESTIC / HUB EXPANSION
+    'BED': { id: 'BED', width: 40, depth: 80, height: 20, baseColor: '#52525b', isStaticFloor: false, renderStyle: 'PRISM', detailStyle: 'NONE' },
+    'LOCKER': { id: 'LOCKER', width: 30, depth: 30, height: 120, baseColor: '#3f3f46', isStaticFloor: false, renderStyle: 'PRISM', detailStyle: 'RIVETS' },
+    'TABLE': { id: 'TABLE', width: 80, depth: 40, height: 30, baseColor: '#27272a', isStaticFloor: false, renderStyle: 'PRISM', detailStyle: 'NONE' }
 };

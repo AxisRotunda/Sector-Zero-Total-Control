@@ -99,13 +99,9 @@ export const BUILDING_PREFABS = {
             { x: -140, y: y - 120, w: 20, h: 100, height: 200, color: '#3f3f46' },
             { x: -200, y: y - 120, w: 140, h: 100, height: 20, color: '#27272a', data: { z: 200 } },
 
-            // Detention Cell (Right of Gate) - Redesigned for Maximum Visibility
-            // Back Walls (North and West) - Keep solid/high for structure
+            // Detention Cell (Right of Gate)
             { x: cellX, y: cellY - cellHalf, w: cellSize, h: wallThick, height: 180, color: '#3f3f46' }, // North
             { x: cellX - cellHalf, y: cellY, w: wallThick, h: cellSize, height: 180, color: '#3f3f46' }, // West
-
-            // Front Walls (South and East) - Convert to Low Curbs (Height 20) to prevent occlusion
-            // These walls provide collision but don't block the camera view.
             { x: cellX, y: cellY + cellHalf, w: cellSize, h: wallThick, height: 20, color: '#27272a' }, // South (Curb)
             { x: cellX + cellHalf, y: cellY, w: wallThick, h: cellSize, height: 20, color: '#27272a' }, // East (Curb)
         ];
@@ -116,27 +112,15 @@ export const BUILDING_PREFABS = {
             // Lights
             { type: 'DECORATION', subType: 'NEON', x: -D.PILLAR_OFFSET_X, y: y, data: { z: 300, color: '#ef4444', width: 20, height: 40 } },
             { type: 'DECORATION', subType: 'NEON', x: D.PILLAR_OFFSET_X, y: y, data: { z: 300, color: '#ef4444', width: 20, height: 40 } },
-            
-            // Visual Barriers (Transparent Forcefields on South and East faces)
-            { 
-                type: 'DECORATION', subType: 'BARRIER', 
-                x: cellX, y: cellY + cellHalf, 
-                data: { width: cellSize, height: 150, color: '#ef4444' } 
-            },
-            { 
-                type: 'DECORATION', subType: 'BARRIER', 
-                x: cellX + cellHalf, y: cellY, 
-                data: { width: 20, depth: cellSize, height: 150, color: '#ef4444' } // Rotated via depth
-            },
-
-            // Prisoner (Inside Cell) - Positioned centrally
+            // Visual Barriers
+            { type: 'DECORATION', subType: 'BARRIER', x: cellX, y: cellY + cellHalf, data: { width: cellSize, height: 150, color: '#ef4444' } },
+            { type: 'DECORATION', subType: 'BARRIER', x: cellX + cellHalf, y: cellY, data: { width: 20, depth: cellSize, height: 150, color: '#ef4444' } },
+            // Prisoner
             { type: 'NPC', subType: 'CITIZEN', x: cellX, y: cellY, data: { dialogueId: 'prisoner_bark', behavior: 'COWER', color: '#f97316' } },
-            
-            // Refugees Queue (Waiting for entry)
+            // Refugees Queue
             { type: 'NPC', subType: 'CITIZEN', x: -350, y: y - 200, data: { dialogueId: 'refugee_context', behavior: 'COWER', color: '#a1a1aa' } },
             { type: 'NPC', subType: 'CITIZEN', x: -320, y: y - 250, data: { dialogueId: 'citizen_bark', behavior: 'IDLE', color: '#a1a1aa' } },
-            
-            // Refugee Luggage / Supplies
+            // Refugee Luggage
             { type: 'DECORATION', subType: 'CRATE', x: -370, y: y - 210, data: { width: 20, height: 15, depth: 10, color: '#854d0e' } },
             { type: 'DECORATION', subType: 'CRATE', x: -300, y: y - 260, data: { width: 25, height: 20, depth: 15, color: '#3f3f46' } }
         ];
@@ -159,18 +143,87 @@ export const BUILDING_PREFABS = {
                 { x: x, y: y, w: 300, h: 10, height: 5, color: '#06b6d4', type: 'DYNAMIC_GLOW', data: { glowIntensity: 0.4, pulseSpeed: 1.5 } }
             ],
             entities: [
-                {
-                    type: 'INTERACTABLE',
-                    subType: 'ZONE_TRANSITION',
-                    x: x,
-                    y: y - 100,
-                    data: {
-                        targetZone: 'HUB_TRAINING',
-                        promptText: 'ENTER SIMULATION',
-                        isTransition: true
-                    }
-                }
+                { type: 'INTERACTABLE', subType: 'ZONE_TRANSITION', x: x, y: y - 100, data: { targetZone: 'HUB_TRAINING', promptText: 'ENTER SIMULATION', isTransition: true } }
             ]
         };
+    },
+
+    // --- NEW PREFABS FOR HUB EXPANSION ---
+
+    livingQuarters: (x: number, y: number, color: string): PrefabResult => {
+        const walls: PrefabWall[] = [
+            // Outer boundaries (Low walls to see inside)
+            { x: x, y: y - 120, w: 300, h: 20, height: 100, color: color }, // Back
+            { x: x, y: y + 120, w: 300, h: 20, height: 100, color: color }, // Front
+            { x: x - 160, y: y, w: 20, h: 260, height: 100, color: color }, // Left
+        ];
+
+        const entities: ZoneEntityDef[] = [];
+        
+        // Rows of Bunks
+        for(let i = -1; i <= 1; i++) {
+            const bx = x - 80 + (i * 80);
+            // Top Row
+            entities.push({ type: 'DECORATION', subType: 'BED', x: bx, y: y - 80, data: { color: '#3f3f46' } });
+            entities.push({ type: 'DECORATION', subType: 'LOCKER', x: bx, y: y - 110, data: { color: '#52525b' } });
+            
+            // Bottom Row
+            entities.push({ type: 'DECORATION', subType: 'BED', x: bx, y: y + 80, data: { color: '#3f3f46' } });
+            entities.push({ type: 'DECORATION', subType: 'LOCKER', x: bx, y: y + 110, data: { color: '#52525b' } });
+        }
+
+        // Sleeping Citizen
+        entities.push({ type: 'NPC', subType: 'CITIZEN', x: x, y: y + 80, data: { behavior: 'IDLE', color: '#94a3b8' } });
+
+        // Floor
+        entities.push({ type: 'DECORATION', subType: 'RUG', x: x, y: y, data: { width: 320, height: 260, color: '#1e293b' } });
+
+        return { walls, entities };
+    },
+
+    messHall: (x: number, y: number, color: string): PrefabResult => {
+        const walls: PrefabWall[] = [
+            // Open air canteen structure (Pillars + Roof suggestion via structure type?)
+            // Just low walls for now
+            { x: x, y: y - 100, w: 250, h: 20, height: 120, color: color },
+            { x: x - 135, y: y, w: 20, h: 220, height: 120, color: color },
+        ];
+
+        const entities: ZoneEntityDef[] = [];
+        
+        // Tables
+        entities.push({ type: 'DECORATION', subType: 'TABLE', x: x - 50, y: y - 40, data: {} });
+        entities.push({ type: 'DECORATION', subType: 'TABLE', x: x + 50, y: y - 40, data: {} });
+        entities.push({ type: 'DECORATION', subType: 'TABLE', x: x, y: y + 40, data: {} });
+
+        // Vending
+        entities.push({ type: 'DECORATION', subType: 'VENDING_MACHINE', x: x + 100, y: y - 90, data: {} });
+        entities.push({ type: 'DECORATION', subType: 'VENDING_MACHINE', x: x + 60, y: y - 90, data: {} });
+
+        // Citizens eating
+        entities.push({ type: 'NPC', subType: 'CITIZEN', x: x - 50, y: y - 60, data: { behavior: 'IDLE', color: '#a1a1aa' } });
+        entities.push({ type: 'NPC', subType: 'CITIZEN', x: x, y: y + 60, data: { behavior: 'IDLE', color: '#64748b' } });
+
+        // Floor
+        entities.push({ type: 'DECORATION', subType: 'RUG', x: x, y: y, data: { width: 280, height: 240, color: '#27272a' } });
+
+        return { walls, entities };
+    },
+
+    supplyDepot: (x: number, y: number): PrefabResult => {
+        const walls: PrefabWall[] = [
+            { x: x, y: y, w: 200, h: 100, height: 150, color: '#3f3f46' } // Backstop wall
+        ];
+        
+        const entities: ZoneEntityDef[] = [
+            { type: 'DECORATION', subType: 'CRATE', x: x - 60, y: y + 30, data: { width: 50, height: 50, depth: 50 } },
+            { type: 'DECORATION', subType: 'CRATE', x: x - 60, y: y + 80, data: { width: 50, height: 50, depth: 50 } }, // Stack
+            { type: 'DECORATION', subType: 'BARREL', x: x + 50, y: y + 40, data: {} },
+            { type: 'DECORATION', subType: 'BARREL', x: x + 80, y: y + 30, data: {} },
+            { type: 'DECORATION', subType: 'BARREL', x: x + 60, y: y + 60, data: {} },
+            { type: 'DECORATION', subType: 'TRASH', x: x, y: y + 100, data: { width: 200, depth: 100 } }
+        ];
+
+        return { walls, entities };
     }
 };
