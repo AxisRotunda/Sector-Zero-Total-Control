@@ -39,16 +39,17 @@ export class PlayerAbilitiesService {
   activeComboStep = signal<ComboStep | null>(null);
   
   // Combo Timing Window
-  private comboWindowTimer = 0;
-  private readonly COMBO_WINDOW_MS = 500; // Time after attack end to input next combo
+  // Converted to signal for reactive UI binding
+  comboWindowTimer = signal(0);
+  readonly COMBO_WINDOW_MS = 500; // Time after attack end to input next combo
 
   updateCooldowns() {
     const c = this.cooldowns();
     
     // Decrement combo window logic
-    if (this.comboWindowTimer > 0) {
-        this.comboWindowTimer -= 16.67; // Approx 60fps frame time in ms
-        if (this.comboWindowTimer <= 0) {
+    if (this.comboWindowTimer() > 0) {
+        this.comboWindowTimer.update(t => t - 16.67); // Approx 60fps frame time in ms
+        if (this.comboWindowTimer() <= 0) {
             this.resetCombo();
         }
     }
@@ -255,7 +256,7 @@ export class PlayerAbilitiesService {
       }
   }
 
-  private getWeaponArchetype(weapon: Item | null): WeaponArchetype {
+  public getWeaponArchetype(weapon: Item | null): WeaponArchetype {
       if (!weapon) return MELEE_COMBOS['STANDARD'];
       if (weapon.type === 'PSI_BLADE') return MELEE_COMBOS['FAST'];
       if (weapon.shape === 'hammer' || weapon.shape === 'axe') return MELEE_COMBOS['HEAVY'];
@@ -264,7 +265,7 @@ export class PlayerAbilitiesService {
 
   private performMeleeAttack(player: Entity, stats: any, weapon: Item | null, targetAngle?: number) {
         // Can combo if in recovery phase OR within the forgiveness window
-        const canCombo = (player.state === 'ATTACK' && player.animPhase === 'recovery') || this.comboWindowTimer > 0;
+        const canCombo = (player.state === 'ATTACK' && player.animPhase === 'recovery') || this.comboWindowTimer() > 0;
         const cds = this.cooldowns();
         
         // If cooldown active AND we are not in a valid combo window, block input
@@ -295,7 +296,7 @@ export class PlayerAbilitiesService {
         this.cooldowns.update(c => ({...c, primary: cooldownFrames}));
         
         // Reset Combo Window to allow buffer after this attack finishes
-        this.comboWindowTimer = this.COMBO_WINDOW_MS;
+        this.comboWindowTimer.set(this.COMBO_WINDOW_MS);
 
         // 5. Physics & State
         const attackDir = targetAngle ?? player.angle;
@@ -475,7 +476,7 @@ export class PlayerAbilitiesService {
   resetCombo() {
       this.currentComboIndex.set(0);
       this.activeComboStep.set(null);
-      this.comboWindowTimer = 0;
+      this.comboWindowTimer.set(0);
   }
 
   reset() { 

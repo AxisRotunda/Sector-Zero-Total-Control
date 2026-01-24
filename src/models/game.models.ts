@@ -215,6 +215,7 @@ export interface Particle {
   rotSpeed: number;
   composite?: GlobalCompositeOperation;
   emitsLight?: boolean;
+  priority?: number; // Optimization: Higher priority survives culling
   
   // Render Sorting
   isoDepth?: number;

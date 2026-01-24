@@ -7,6 +7,7 @@ import { IsoUtils } from '../../utils/iso-utils';
 import { InteractionService } from '../../services/interaction.service';
 import { PlayerStatsService } from '../../game/player/player-stats.service';
 import { PlayerAbilitiesService } from '../../game/player/player-abilities.service';
+import { WorldService } from '../../game/world/world.service';
 
 interface StatusIcon { type: 'poison' | 'burn' | 'stun' | 'weakness' | 'slow' | 'bleed'; timer: number; maxTimer: number; icon: string; color: string; }
 
@@ -16,6 +17,7 @@ export class UnitRendererService {
   private interaction = inject(InteractionService);
   private playerStats = inject(PlayerStatsService);
   private abilities = inject(PlayerAbilitiesService);
+  private world = inject(WorldService);
   
   private _iso = { x: 0, y: 0 };
   private _isoLeg = { x: 0, y: 0 };
@@ -45,7 +47,27 @@ export class UnitRendererService {
   drawHumanoid(ctx: CanvasRenderingContext2D, e: Entity) {
       if (e.state === 'DEAD') return;
 
+      // LOD Check
+      const player = this.world.player;
+      const distToPlayer = Math.hypot(e.x - player.x, e.y - player.y);
       const isPlayer = e.type === 'PLAYER'; 
+      
+      // LOD 0: FAR (Simple shapes)
+      if (!isPlayer && distToPlayer > 800) {
+          IsoUtils.toIso(e.x, e.y, e.z, this._iso);
+          ctx.save();
+          ctx.translate(this._iso.x, this._iso.y);
+          ctx.fillStyle = e.visuals?.colors.primary || e.color;
+          ctx.beginPath();
+          ctx.arc(0, -20, 10, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          return;
+      }
+
+      // LOD 1: MEDIUM (Simplified Geometry)
+      const useSimpleGeo = !isPlayer && distToPlayer > 400;
+
       const isGuard = e.subType === 'GUARD'; 
       const isNPC = e.type === 'NPC' && !isGuard; 
       const isCitizen = e.subType === 'CITIZEN'; 
@@ -217,9 +239,9 @@ export class UnitRendererService {
       const scaleW = vis.scaleWidth || 1;
       const scaleH = vis.scaleHeight || 1;
 
-      // 1. Back Accessories
+      // 1. Back Accessories (LOD Checked)
       const pWaist = transformToIso(0, 0, 18, this._isoBody);
-      if (!isHit && vis.accessoryType === 'CAPE') {
+      if (!isHit && !useSimpleGeo && vis.accessoryType === 'CAPE') {
           const pShoulders = transformToIso(0, 0, 38 * scaleH, this._iso);
           const capeEnd = transformToIso(-20 * Math.sin(legCycle), 0, 5, this._isoLeg); 
           ctx.fillStyle = vis.colors.primary;
@@ -259,7 +281,7 @@ export class UnitRendererService {
       ctx.lineTo(pShoulders.x, pShoulders.y);
       ctx.stroke();
       
-      if (vis.clothingType === 'ARMOR' || vis.clothingType === 'VEST') {
+      if (!useSimpleGeo && (vis.clothingType === 'ARMOR' || vis.clothingType === 'VEST')) {
           ctx.strokeStyle = vis.colors.secondary;
           ctx.lineWidth = 10 * scaleW;
           ctx.beginPath();
@@ -274,7 +296,7 @@ export class UnitRendererService {
       ctx.fillStyle = isHit ? '#fff' : vis.colors.skin;
       ctx.beginPath(); ctx.arc(pHead.x, pHead.y, 8 * scaleW, 0, Math.PI * 2); ctx.fill();
       
-      if (!isHit) {
+      if (!isHit && !useSimpleGeo) {
           if (vis.headType === 'HELMET') {
               ctx.fillStyle = vis.colors.primary;
               ctx.beginPath(); ctx.arc(pHead.x, pHead.y - 2, 9 * scaleW, Math.PI, 0); ctx.fill();

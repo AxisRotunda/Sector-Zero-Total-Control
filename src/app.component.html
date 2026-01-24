@@ -61,6 +61,8 @@
                (openCodex)="ui.openPanel('CODEX')"
                (openJournal)="ui.openPanel('JOURNAL')"
                (openShop)="ui.openPanel('SHOP')"></app-hud>
+      
+      <app-combo-indicator></app-combo-indicator>
 
       @if (!ui.isAnyPanelOpen() && !mapService.isFullMapOpen() && !mapService.isSettingsOpen()) {
           

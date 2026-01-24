@@ -31,11 +31,12 @@ import { DialogueOverlayComponent } from './components/dialogue-overlay.componen
 import { CodexComponent } from './components/codex.component';
 import { MissionJournalComponent } from './components/mission-journal.component';
 import { WorldMapModalComponent } from './components/world-map-modal.component';
+import { ComboIndicatorComponent } from './components/combo-indicator.component';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, HudComponent, InventoryComponent, SkillTreeComponent, JoystickComponent, ItemTooltipComponent, ShopComponent, MapComponent, SettingsComponent, AbilitiesPanelComponent, DialogueOverlayComponent, CodexComponent, MissionJournalComponent, WorldMapModalComponent],
+  imports: [CommonModule, HudComponent, InventoryComponent, SkillTreeComponent, JoystickComponent, ItemTooltipComponent, ShopComponent, MapComponent, SettingsComponent, AbilitiesPanelComponent, DialogueOverlayComponent, CodexComponent, MissionJournalComponent, WorldMapModalComponent, ComboIndicatorComponent],
   templateUrl: './app.component.html',
   host: {
     '(contextmenu)': 'onRightClick($event)',
