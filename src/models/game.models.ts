@@ -4,6 +4,14 @@ import { DamagePacket, Resistances, Penetration, DamageConversion, StatusEffects
 
 export type SectorId = string;
 
+export enum RenderLayer {
+  FLOOR = 0,           // z < 5: Ground tiles, shadows
+  GROUND = 1,          // z < 80: Characters, low decorations
+  ELEVATED = 2,        // z >= 80: Platforms, bridges
+  OVERHEAD = 3,        // z >= 300: Roofs, flying entities
+  UI = 4               // Always on top
+}
+
 // Standardized Interface for 3D Structures
 export interface Volumetric {
     width?: number;  // X-axis span
@@ -45,8 +53,11 @@ export interface Entity extends Volumetric {
   // Persistence Lifecycle
   persistenceTag?: 'PERSISTENT' | 'SESSION' | 'TEMPORARY';
 
-  // Render Sorting
+  // Render Sorting & Layers
   isoDepth?: number; 
+  renderLayer?: RenderLayer;
+  // Transient sorting metadata (calculated per frame, not saved)
+  _sortMeta?: { min: number, max: number, center: number };
 
   vx: number;
   vy: number;
@@ -201,4 +212,5 @@ export interface Particle {
   
   // Render Sorting
   isoDepth?: number;
+  renderLayer?: RenderLayer; // Layer override for particles
 }

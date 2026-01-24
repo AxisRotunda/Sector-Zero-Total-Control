@@ -1,6 +1,6 @@
 
 import { Injectable, inject, signal } from '@angular/core';
-import { Entity, Zone, FloatingText, Camera, Particle } from '../models/game.models';
+import { Entity, Zone, FloatingText, Camera, Particle, RenderLayer } from '../models/game.models';
 import { WorldService } from '../game/world/world.service';
 import { FloorRendererService } from './rendering/floor-renderer.service';
 import { StructureRendererService } from './rendering/structure-renderer.service';
@@ -180,6 +180,7 @@ export class RenderService {
     }
 
     // 5. Main Geometry Pass (Sorted & Occlusion)
+    // Note: Render list is already sorted by Layer then Depth
     this.drawGeometry(this.renderList, zone, player);
 
     // 6. Visual Effects
@@ -210,14 +211,7 @@ export class RenderService {
     IsoUtils.setContext(0, 0, 0);
   }
 
-  private prepareLighting(
-      player: Entity, 
-      renderList: (Entity | Particle)[], 
-      cam: Camera, 
-      w: number, 
-      h: number,
-      frustum: {minX: number, maxX: number, minY: number, maxY: number}
-  ) {
+  private prepareLighting(player: Entity, renderList: (Entity | Particle)[], cam: Camera, w: number, h: number, frustum: any) {
       this.lighting.clear();
       const presets = RENDER_CONFIG.LIGHTING.PRESETS;
       
@@ -289,7 +283,6 @@ export class RenderService {
   }
 
   private prepareRenderList(cam: Camera, zone: Zone, dynamicEntities: Entity[], player: Entity, particles: Particle[], w: number, h: number, frustum: any) {
-      // Direct array manipulation optimization
       let renderIndex = 0;
       
       const { buffer: staticBuffer, count: staticCount } = this.chunkManager.getVisibleStaticEntities(cam, w, h);
@@ -319,7 +312,6 @@ export class RenderService {
           }
       }
       
-      // Trim excess if array shrank
       if (this.renderList.length > renderIndex) {
           this.renderList.length = renderIndex;
       }
@@ -335,8 +327,6 @@ export class RenderService {
           if (isParticle(e)) continue;
           const ent = e as Entity;
           
-          // Optimization: Skip off-screen shadows more aggressively? 
-          // For now just checking type.
           if (ent.type === 'PLAYER' || ent.type === 'ENEMY' || ent.type === 'NPC') {
               this.shadowRenderer.drawUnitShadow(this.ctx, ent);
           } else if (ent.type === 'WALL' || ent.type === 'DECORATION') {
@@ -347,34 +337,64 @@ export class RenderService {
       }
   }
 
-  private checkWallOcclusion(wall: Entity, target: Entity): boolean {
-      if (!wall.isoDepth || !target.isoDepth) return false;
-      // In Painter's algo (Back-to-Front), larger isoDepth = Front.
-      // If wall.isoDepth > target.isoDepth, Wall is drawn AFTER target (covering it).
-      if (wall.isoDepth <= target.isoDepth) return false;
+  // --- SCREEN-SPACE OCCLUSION ---
+  private checkScreenSpaceOcclusion(wall: Entity, target: Entity): boolean {
+      // 1. World Depth Check (Topological Sort Hint)
+      // If the Wall is logically "Behind" the target, it can't occlude it.
+      if ((wall.isoDepth || 0) < (target.isoDepth || 0)) return false;
 
-      // Simple Distance Check
-      const w = wall.width || 40;
-      const d = wall.depth || 40;
-      const h = wall.height || 100;
-      const combinedRadius = (w + d + h) * 0.4;
+      // 2. Screen Space Overlap
+      // Get Wall Bounds
+      const wWidth = wall.width || 40;
+      const wDepth = wall.depth || 40;
+      const wHeight = wall.height || 100;
       
-      return Math.abs(wall.x - target.x) < combinedRadius && Math.abs(wall.y - target.y) < combinedRadius;
+      // We check center base point for approximate logic
+      const wallBaseIso = { x: 0, y: 0 };
+      const targetBaseIso = { x: 0, y: 0 };
+      
+      IsoUtils.toIso(wall.x, wall.y, 0, wallBaseIso);
+      IsoUtils.toIso(target.x, target.y, 0, targetBaseIso);
+      
+      // Simple Bounding Box in Screen Space
+      // Wall Bounding Rect (Approximate)
+      // Iso width roughly Width + Depth. 
+      // Height is Height + (Width+Depth)*0.5
+      const wallScreenW = (wWidth + wDepth) * 1.2;
+      const wallScreenH = wHeight + (wWidth + wDepth) * 0.5;
+      
+      const wx = wallBaseIso.x - wallScreenW / 2;
+      const wy = wallBaseIso.y - wallScreenH; // Bottom anchored
+      
+      // Target Bounding Rect
+      const tRadius = target.radius || 20;
+      const tHeight = 60; // Approx unit height
+      const tx = targetBaseIso.x - tRadius;
+      const ty = targetBaseIso.y - tHeight;
+      const tw = tRadius * 2;
+      const th = tHeight;
+
+      // AABB Intersection
+      if (wx < tx + tw && wx + wallScreenW > tx &&
+          wy < ty + th && wy + wallScreenH > ty) {
+          return true;
+      }
+      
+      return false;
   }
 
   private checkAnyTargetOcclusion(wall: Entity, player: Entity, zoneId: string): boolean {
-      // 1. Check Player Occlusion (Primary)
-      if (this.checkWallOcclusion(wall, player)) return true;
+      // Check Player
+      if (this.checkScreenSpaceOcclusion(wall, player)) return true;
 
-      // 2. Check Enemy Occlusion (Optimization: Use SpatialHash)
-      // Query reasonably close area around the wall center
+      // Check Nearby Enemies
       const searchRadius = Math.max(wall.width || 100, wall.depth || 100);
       const { buffer, count } = this.spatialHash.queryFast(wall.x, wall.y, searchRadius, zoneId);
       
       for (let i = 0; i < count; i++) {
           const ent = buffer[i];
           if (ent.type === 'ENEMY' && ent.state !== 'DEAD') {
-              if (this.checkWallOcclusion(wall, ent)) {
+              if (this.checkScreenSpaceOcclusion(wall, ent)) {
                   return true;
               }
           }
@@ -398,13 +418,10 @@ export class RenderService {
 
           // Occlusion Handling for Walls
           if (e.type === 'WALL' && e.subType !== 'GATE_SEGMENT') {
-              // Optimized Occlusion Check
               const isOccluding = this.checkAnyTargetOcclusion(e, player, zone.id);
-
               if (isOccluding) {
                   this.ctx.globalAlpha = 0.3;
               }
-              
               this.structureRenderer.drawStructure(this.ctx, e, zone);
               this.ctx.globalAlpha = 1.0;
           } 
@@ -466,7 +483,6 @@ export class RenderService {
       if (!this.ctx) return;
       
       if (this.performanceManager.currentTier().name !== 'LOW') {
-          // Cached Gradient Usage
           if (!this.vignetteGradient) {
               this.vignetteGradient = this.ctx.createRadialGradient(w/2, h/2, h/2, w/2, h/2, h);
               this.vignetteGradient.addColorStop(0, 'transparent');
