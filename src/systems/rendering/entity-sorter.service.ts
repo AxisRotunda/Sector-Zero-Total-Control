@@ -21,20 +21,26 @@ export class EntitySorterService {
         const e = renderList[i];
         
         // Base Iso Depth: Use rotation-aware helper
-        let depth = IsoUtils.getSortDepth(e.x, e.y);
+        // Uses (rx + ry) * 10000 + z * 10 formula
+        let depth = IsoUtils.getSortDepth(e.x, e.y, e.z);
         
         // --- Layer Biasing ---
-        // Floor Decorations: Always Deepest
-        if ('subType' in e && e.type === 'DECORATION') {
-            if (e.subType === 'RUG' || e.subType === 'FLOOR_CRACK' || e.subType === 'GRAFFITI') {
-                depth -= 100000;
-            }
-        }
+        // Special handling to force certain types to render strictly before or after others
         
-        // Floating Objects: Bias based on Z to ensure they draw on top of their ground position
-        // e.g. A flying drone at (x,y, z=50) should draw AFTER a ground unit at (x,y, z=0)
-        if (e.z > 0) {
-             depth += 1;
+        if ('type' in e) {
+            const ent = e as Entity;
+            
+            // Floor Decorations: Always Deepest
+            // We apply a massive negative bias to ensure they are drawn before any standing entities
+            // in the same vicinity.
+            if (ent.type === 'DECORATION') {
+                if (ent.subType === 'RUG' || ent.subType === 'FLOOR_CRACK' || ent.subType === 'GRAFFITI') {
+                    depth -= 500000;
+                }
+            }
+            
+            // Wall segments or Gates might need bias if they are visually 'behind' but mathematically 'front'
+            // For now, the improved Iso formula handles most structure/unit overlap correctly.
         }
 
         // Store calculated depth on the object (transiently)

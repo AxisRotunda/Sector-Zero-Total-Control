@@ -71,25 +71,25 @@ export const IsoUtils = {
 
   /**
    * Calculates a depth sort key based on the current rotation context.
-   * This approximates the visual "distance" from the back of the scene to the front.
-   * Essential for Z-Sorting entities correctly when the camera rotates.
+   * Fixes verticality Z-fighting by separating footprint depth from elevation bias.
    */
   getSortDepth(x: number, y: number, z: number = 0): number {
-      // Calculate rotated coordinates relative to the camera center (0,0 is sufficient for relative depth)
-      // rx = x * cos - y * sin
-      // ry = x * sin + y * cos
-      // In standard isometric projection (45 deg Y-axis compression), 
-      // objects with higher transformed 'Y' are closer to the viewer.
-      // Objects with higher transformed 'X' are to the right.
-      
+      // Calculate rotated coordinates relative to camera context
       const rx = x * this._cos - y * this._sin;
       const ry = x * this._sin + y * this._cos;
       
-      // Depth formula:
-      // Primary factor: Transformed Y (Rows).
-      // Secondary tie-breaker: Transformed X (Cols).
-      // Z (Height) adds to sort value (drawn later = on top)
+      // 1. Footprint Depth
+      // In iso projection, X+Y corresponds roughly to distance from top of screen.
+      // We scale this massively so it acts as the primary sort key (Rows/Layers).
+      const footprintDepth = (rx + ry) * 10000;
       
-      return (ry * 10000) + (rx * 100) + z;
+      // 2. Elevation Bias
+      // Z adds to the sort value (drawn later = on top), but with a smaller scale
+      // so it only affects sorting within the same footprint band.
+      // This prevents tall objects from popping behind ground objects 
+      // while ensuring objects at the same location layer correctly by height.
+      const elevationBias = z * 10;
+      
+      return footprintDepth + elevationBias;
   }
 };

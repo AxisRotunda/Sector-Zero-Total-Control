@@ -206,15 +206,20 @@ export class RenderService {
     // 8. World UI (In-World)
     this.drawWorldUI(texts, cam);
 
+    // 9. DEBUG: Depth Sort Values
+    if (this.debugMode()) {
+        this.drawDebugDepth(this.renderList);
+    }
+
     this.ctx.restore();
     
-    // 9. Lighting & Atmosphere Pass (Screen Space Overlay)
+    // 10. Lighting & Atmosphere Pass (Screen Space Overlay)
     this.lightingRenderer.drawLighting(this.ctx, this.renderList as Entity[], player, cam, zone, w, h);
 
-    // 10. Post-Processing & HUD Overlays
+    // 11. Post-Processing & HUD Overlays
     this.applyPostEffects(w, h);
     
-    // 11. Guidance Overlay (Always on top)
+    // 12. Guidance Overlay (Always on top)
     this.effectRenderer.drawGuidanceOverlay(
         this.ctx, 
         this.mission.activeObjective(), 
@@ -226,6 +231,32 @@ export class RenderService {
     
     // --- CLEANUP ---
     IsoUtils.setContext(0, 0, 0);
+  }
+
+  private drawDebugDepth(renderList: (Entity | Particle)[]) {
+      if (!this.ctx) return;
+      this.ctx.font = '10px monospace';
+      this.ctx.fillStyle = 'white';
+      this.ctx.textAlign = 'center';
+      
+      const len = renderList.length;
+      const _pos = { x: 0, y: 0 };
+
+      for (let i = 0; i < len; i++) {
+          const e = renderList[i];
+          const z = e.z || 0;
+          
+          IsoUtils.toIso(e.x, e.y, z, _pos);
+          
+          const depth = IsoUtils.getSortDepth(e.x, e.y, z);
+          
+          // Draw text slightly above entity
+          this.ctx.fillText(
+              `D:${depth.toFixed(0)} Z:${z.toFixed(0)}`, 
+              _pos.x, 
+              _pos.y - (('height' in e) ? (e.height || 0) : 20) - 20
+          );
+      }
   }
 
   private prepareLighting(
@@ -459,12 +490,14 @@ export class RenderService {
       const margin = 20;
       const px = player.x;
       const py = player.y;
-      const pDepth = px + py;
+      
+      // Use new depth sort logic for occlusion check consistency
+      const pDepth = IsoUtils.getSortDepth(px, py, player.z);
 
       for (let i = 0; i < count; i++) {
           const e = staticEntities[i];
           if ((e.type === 'WALL' || (e.type === 'DECORATION' && (e.height || 0) > 80))) {
-              const eDepth = e.x + e.y;
+              const eDepth = IsoUtils.getSortDepth(e.x, e.y, e.z);
               if (eDepth <= pDepth) continue; 
 
               const w = e.width || 40;
