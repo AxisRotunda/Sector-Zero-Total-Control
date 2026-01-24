@@ -31,8 +31,39 @@ export interface PrefabResult {
     entities: ZoneEntityDef[];
 }
 
+// Dimensions for the Transit Station
+const STATION_DIMS = {
+  TRAIN: { width: 800, height: 120, depth: 160 },
+  BARRIER: { width: 200, depth: 20, height: 100 }
+};
+
 export const BUILDING_PREFABS = {
     
+    transitStation: (x: number, y: number): PrefabResult => ({
+        walls: [
+            // Train Hull
+            { x: x, y: y - 80, w: STATION_DIMS.TRAIN.width, h: STATION_DIMS.TRAIN.height, height: STATION_DIMS.TRAIN.depth, color: '#0ea5e9', type: 'MAGLEV_TRAIN' },
+            // Platform Barriers
+            { x: x - 300, y: y, w: STATION_DIMS.BARRIER.width, h: STATION_DIMS.BARRIER.depth, height: STATION_DIMS.BARRIER.height, color: '#ef4444', type: 'BARRIER' },
+            { x: x + 300, y: y, w: STATION_DIMS.BARRIER.width, h: STATION_DIMS.BARRIER.depth, height: STATION_DIMS.BARRIER.height, color: '#ef4444', type: 'BARRIER' },
+            { x: x, y: y, w: STATION_DIMS.BARRIER.width, h: STATION_DIMS.BARRIER.depth, height: STATION_DIMS.BARRIER.height, color: '#ef4444', type: 'BARRIER' },
+            // Roof Supports
+            { x: x - 300, y: y + 100, w: 20, h: 20, height: 350, color: '#94a3b8' },
+            { x: x + 300, y: y + 100, w: 20, h: 20, height: 350, color: '#94a3b8' },
+            // Gates
+            { x: x - 100, y: y + 200, w: 10, h: 40, height: 40, color: '#ef4444', type: 'BARRIER' },
+            { x: x + 100, y: y + 200, w: 10, h: 40, height: 40, color: '#ef4444', type: 'BARRIER' },
+            { x: x - 200, y: y + 200, w: 200, h: 10, height: 40, color: '#334155' },
+            { x: x + 200, y: y + 200, w: 200, h: 10, height: 40, color: '#334155' },
+        ],
+        entities: [
+            // Default Station Entities
+            { id: `station_kiosk_w`, type: 'DECORATION', subType: 'INFO_KIOSK', x: x - 150, y: y + 100 },
+            { id: `station_kiosk_e`, type: 'DECORATION', subType: 'INFO_KIOSK', x: x + 150, y: y + 100 },
+            { type: 'DECORATION', subType: 'NEON', x: x, y: y + 100, data: { width: 600, height: 20, z: 300, color: '#bae6fd' } }
+        ]
+    }),
+
     medBay: (x: number, y: number): PrefabResult => ({
         walls: [
             { x: x, y: y, w: 20, h: 300, height: 120, color: '#52525b' },
@@ -148,9 +179,7 @@ export const BUILDING_PREFABS = {
         };
     },
 
-    // --- NEW PREFABS FOR HUB EXPANSION ---
-
-    livingQuarters: (x: number, y: number, color: string): PrefabResult => {
+    livingQuarters: (x: number, y: number, color: string, idPrefix: string = 'barracks'): PrefabResult => {
         const walls: PrefabWall[] = [
             // Outer boundaries (Low walls to see inside)
             { x: x, y: y - 120, w: 300, h: 20, height: 100, color: color }, // Back
@@ -159,21 +188,24 @@ export const BUILDING_PREFABS = {
         ];
 
         const entities: ZoneEntityDef[] = [];
+        let ctr = 0;
         
         // Rows of Bunks
         for(let i = -1; i <= 1; i++) {
             const bx = x - 80 + (i * 80);
             // Top Row
-            entities.push({ type: 'DECORATION', subType: 'BED', x: bx, y: y - 80, data: { color: '#3f3f46' } });
-            entities.push({ type: 'DECORATION', subType: 'LOCKER', x: bx, y: y - 110, data: { color: '#52525b' } });
+            entities.push({ id: `${idPrefix}_bed_${ctr}`, type: 'DECORATION', subType: 'BED', x: bx, y: y - 80, data: { color: '#3f3f46' } });
+            entities.push({ id: `${idPrefix}_locker_${ctr}`, type: 'DECORATION', subType: 'LOCKER', x: bx, y: y - 110, data: { color: '#52525b' } });
+            ctr++;
             
             // Bottom Row
-            entities.push({ type: 'DECORATION', subType: 'BED', x: bx, y: y + 80, data: { color: '#3f3f46' } });
-            entities.push({ type: 'DECORATION', subType: 'LOCKER', x: bx, y: y + 110, data: { color: '#52525b' } });
+            entities.push({ id: `${idPrefix}_bed_${ctr}`, type: 'DECORATION', subType: 'BED', x: bx, y: y + 80, data: { color: '#3f3f46' } });
+            entities.push({ id: `${idPrefix}_locker_${ctr}`, type: 'DECORATION', subType: 'LOCKER', x: bx, y: y + 110, data: { color: '#52525b' } });
+            ctr++;
         }
 
         // Sleeping Citizen
-        entities.push({ type: 'NPC', subType: 'CITIZEN', x: x, y: y + 80, data: { behavior: 'IDLE', color: '#94a3b8' } });
+        entities.push({ id: `${idPrefix}_sleeper`, type: 'NPC', subType: 'CITIZEN', x: x, y: y + 80, data: { behavior: 'IDLE', color: '#94a3b8' } });
 
         // Floor
         entities.push({ type: 'DECORATION', subType: 'RUG', x: x, y: y, data: { width: 320, height: 260, color: '#1e293b' } });
@@ -181,10 +213,9 @@ export const BUILDING_PREFABS = {
         return { walls, entities };
     },
 
-    messHall: (x: number, y: number, color: string): PrefabResult => {
+    messHall: (x: number, y: number, color: string, idPrefix: string = 'mess'): PrefabResult => {
         const walls: PrefabWall[] = [
-            // Open air canteen structure (Pillars + Roof suggestion via structure type?)
-            // Just low walls for now
+            // Open air canteen structure
             { x: x, y: y - 100, w: 250, h: 20, height: 120, color: color },
             { x: x - 135, y: y, w: 20, h: 220, height: 120, color: color },
         ];
@@ -192,17 +223,17 @@ export const BUILDING_PREFABS = {
         const entities: ZoneEntityDef[] = [];
         
         // Tables
-        entities.push({ type: 'DECORATION', subType: 'TABLE', x: x - 50, y: y - 40, data: {} });
-        entities.push({ type: 'DECORATION', subType: 'TABLE', x: x + 50, y: y - 40, data: {} });
-        entities.push({ type: 'DECORATION', subType: 'TABLE', x: x, y: y + 40, data: {} });
+        entities.push({ id: `${idPrefix}_table_1`, type: 'DECORATION', subType: 'TABLE', x: x - 50, y: y - 40, data: {} });
+        entities.push({ id: `${idPrefix}_table_2`, type: 'DECORATION', subType: 'TABLE', x: x + 50, y: y - 40, data: {} });
+        entities.push({ id: `${idPrefix}_table_3`, type: 'DECORATION', subType: 'TABLE', x: x, y: y + 40, data: {} });
 
         // Vending
-        entities.push({ type: 'DECORATION', subType: 'VENDING_MACHINE', x: x + 100, y: y - 90, data: {} });
-        entities.push({ type: 'DECORATION', subType: 'VENDING_MACHINE', x: x + 60, y: y - 90, data: {} });
+        entities.push({ id: `${idPrefix}_vending_1`, type: 'DECORATION', subType: 'VENDING_MACHINE', x: x + 100, y: y - 90, data: {} });
+        entities.push({ id: `${idPrefix}_vending_2`, type: 'DECORATION', subType: 'VENDING_MACHINE', x: x + 60, y: y - 90, data: {} });
 
         // Citizens eating
-        entities.push({ type: 'NPC', subType: 'CITIZEN', x: x - 50, y: y - 60, data: { behavior: 'IDLE', color: '#a1a1aa' } });
-        entities.push({ type: 'NPC', subType: 'CITIZEN', x: x, y: y + 60, data: { behavior: 'IDLE', color: '#64748b' } });
+        entities.push({ id: `${idPrefix}_eater_1`, type: 'NPC', subType: 'CITIZEN', x: x - 50, y: y - 60, data: { behavior: 'IDLE', color: '#a1a1aa' } });
+        entities.push({ id: `${idPrefix}_eater_2`, type: 'NPC', subType: 'CITIZEN', x: x, y: y + 60, data: { behavior: 'IDLE', color: '#64748b' } });
 
         // Floor
         entities.push({ type: 'DECORATION', subType: 'RUG', x: x, y: y, data: { width: 280, height: 240, color: '#27272a' } });
@@ -210,17 +241,17 @@ export const BUILDING_PREFABS = {
         return { walls, entities };
     },
 
-    supplyDepot: (x: number, y: number): PrefabResult => {
+    supplyDepot: (x: number, y: number, idPrefix: string = 'supply'): PrefabResult => {
         const walls: PrefabWall[] = [
             { x: x, y: y, w: 200, h: 100, height: 150, color: '#3f3f46' } // Backstop wall
         ];
         
         const entities: ZoneEntityDef[] = [
-            { type: 'DECORATION', subType: 'CRATE', x: x - 60, y: y + 30, data: { width: 50, height: 50, depth: 50 } },
-            { type: 'DECORATION', subType: 'CRATE', x: x - 60, y: y + 80, data: { width: 50, height: 50, depth: 50 } }, // Stack
-            { type: 'DECORATION', subType: 'BARREL', x: x + 50, y: y + 40, data: {} },
-            { type: 'DECORATION', subType: 'BARREL', x: x + 80, y: y + 30, data: {} },
-            { type: 'DECORATION', subType: 'BARREL', x: x + 60, y: y + 60, data: {} },
+            { id: `${idPrefix}_crate_1`, type: 'DECORATION', subType: 'CRATE', x: x - 60, y: y + 30, data: { width: 50, height: 50, depth: 50 } },
+            { id: `${idPrefix}_crate_stack`, type: 'DECORATION', subType: 'CRATE', x: x - 60, y: y + 80, data: { width: 50, height: 50, depth: 50 } }, 
+            { id: `${idPrefix}_barrel_1`, type: 'DECORATION', subType: 'BARREL', x: x + 50, y: y + 40, data: {} },
+            { id: `${idPrefix}_barrel_2`, type: 'DECORATION', subType: 'BARREL', x: x + 80, y: y + 30, data: {} },
+            { id: `${idPrefix}_barrel_3`, type: 'DECORATION', subType: 'BARREL', x: x + 60, y: y + 60, data: {} },
             { type: 'DECORATION', subType: 'TRASH', x: x, y: y + 100, data: { width: 200, depth: 100 } }
         ];
 

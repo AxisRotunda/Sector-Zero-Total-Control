@@ -59,23 +59,6 @@ const PERIMETER_WALLS: PrefabWall[] = [
     { x: 500, y: -800, w: 600, h: 40, height: 300, color: COLOR_FROZEN_WALL },
 ];
 
-const STATION_GEOMETRY: PrefabWall[] = [
-    // Train Hull
-    { x: 0, y: -880, w: DIMS.TRAIN.width, h: DIMS.TRAIN.height, height: DIMS.TRAIN.depth, color: '#0ea5e9', type: 'MAGLEV_TRAIN' },
-    // Platform Barriers
-    { x: -300, y: -800, w: DIMS.BARRIER.width, h: DIMS.BARRIER.depth, height: DIMS.BARRIER.height, color: '#ef4444', type: 'BARRIER' },
-    { x: 300, y: -800, w: DIMS.BARRIER.width, h: DIMS.BARRIER.depth, height: DIMS.BARRIER.height, color: '#ef4444', type: 'BARRIER' },
-    { x: 0, y: -800, w: DIMS.BARRIER.width, h: DIMS.BARRIER.depth, height: DIMS.BARRIER.height, color: '#ef4444', type: 'BARRIER' },
-    // Roof Supports
-    { x: -300, y: -700, w: 20, h: 20, height: 350, color: '#94a3b8' },
-    { x: 300, y: -700, w: 20, h: 20, height: 350, color: '#94a3b8' },
-    // Gates
-    { x: -100, y: -600, w: 10, h: 40, height: 40, color: '#ef4444', type: 'BARRIER' },
-    { x: 100, y: -600, w: 10, h: 40, height: 40, color: '#ef4444', type: 'BARRIER' },
-    { x: -200, y: -600, w: 200, h: 10, height: 40, color: '#334155' },
-    { x: 200, y: -600, w: 200, h: 10, height: 40, color: '#334155' },
-];
-
 // 2. Instantiate Prefabs (Districts)
 const districts: Record<string, PrefabResult> = {
     spire: BUILDING_PREFABS.spire(0, -200),
@@ -83,9 +66,12 @@ const districts: Record<string, PrefabResult> = {
     shop: BUILDING_PREFABS.shop(400, 100),
     training: BUILDING_PREFABS.trainingChamber(-600, -300),
     southGate: BUILDING_PREFABS.gateAssembly(1000, true),
-    barracks: BUILDING_PREFABS.livingQuarters(800, -300, COLOR_FROZEN_WALL),
-    messHall: BUILDING_PREFABS.messHall(-800, 100, COLOR_FROZEN_WALL),
-    supplies: BUILDING_PREFABS.supplyDepot(600, -600)
+    station: BUILDING_PREFABS.transitStation(0, -800),
+    
+    // Expansion Areas (Added in commit 75c8a2e)
+    barracks: BUILDING_PREFABS.livingQuarters(800, -300, COLOR_FROZEN_WALL, 'hub_barracks'),
+    messHall: BUILDING_PREFABS.messHall(-800, 100, COLOR_FROZEN_WALL, 'hub_mess'),
+    supplies: BUILDING_PREFABS.supplyDepot(600, -600, 'hub_supply')
 };
 
 // 3. Aggregate Geometry & Entities (Linear Complexity)
@@ -93,7 +79,7 @@ const zoneWalls: PrefabWall[] = [];
 const zoneStaticEntities: ZoneEntityDef[] = [];
 
 // Add Manual Geometry
-zoneWalls.push(...CORNER_BLOCKS, ...PERIMETER_WALLS, ...STATION_GEOMETRY);
+zoneWalls.push(...CORNER_BLOCKS, ...PERIMETER_WALLS);
 
 // Add Districts
 Object.values(districts).forEach(district => {
@@ -104,12 +90,6 @@ Object.values(districts).forEach(district => {
     zoneWalls.push(...processedWalls);
     zoneStaticEntities.push(...district.entities);
 });
-
-// Special Overrides (e.g. Spire base reset)
-// Note: Since we cloned the arrays, we must find the spire walls in the main array or apply before pushing.
-// Since we aggregated linearly, we can just check if Spire was added. 
-// However, specific overrides on prefabs are better done via the prefab function arguments or post-processing map.
-// For now, we will leave the spire override out as the immutable pattern handles the "frozen" look safely.
 
 // 4. Manual Static Entities (Decorations not part of a prefab)
 // Now with Stable IDs for logic/scripting access.
@@ -128,9 +108,6 @@ const manualEntities: ZoneEntityDef[] = [
     // Station
     { type: 'DECORATION', subType: 'RUG', x: 0, y: -700, data: { width: 800, height: 200, color: '#1e293b' } },
     { type: 'DECORATION', subType: 'RUG', x: 0, y: -790, data: { width: 800, height: 20, color: '#eab308' } },
-    { type: 'DECORATION', subType: 'INFO_KIOSK', x: -150, y: -700 },
-    { type: 'DECORATION', subType: 'INFO_KIOSK', x: 150, y: -700 },
-    { type: 'DECORATION', subType: 'NEON', x: 0, y: -700, data: { width: 600, height: 20, z: 300, color: '#bae6fd' } },
     { type: 'DECORATION', subType: 'GRAFFITI', x: 0, y: 800, data: { label: "SECTOR 9 ACCESS ↓", color: '#f59e0b', width: 400 } },
     { type: 'DECORATION', subType: 'GRAFFITI', x: 0, y: -650, data: { label: "TRANSIT DOCK 04", color: '#06b6d4', width: 300 } },
 
