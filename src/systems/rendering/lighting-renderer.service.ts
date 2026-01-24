@@ -12,8 +12,10 @@ export class LightingRendererService {
   private canvas: HTMLCanvasElement | OffscreenCanvas | null = null;
   private ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null = null;
   
-  // Sprite Optimization: Cached radial gradient image
+  // Base light sprite (white/black gradient for cutting holes)
   private lightSprite: HTMLCanvasElement | OffscreenCanvas | null = null;
+  
+  // Optimization: Colored light cache to prevent createRadialGradient every frame for dynamic lights
   private coloredLightCache = new Map<string, HTMLCanvasElement | OffscreenCanvas>();
   
   private _iso = { x: 0, y: 0 }; 
@@ -35,11 +37,9 @@ export class LightingRendererService {
   }
 
   private updateCanvasDimensions() {
-    // Current Scale is updated via setResolutionScale()
     const w = Math.floor(this.currentWidth * this.currentScale);
     const h = Math.floor(this.currentHeight * this.currentScale);
 
-    // Only recreate if dimensions actually changed
     if (this.canvas && this.canvas.width === w && this.canvas.height === h) return;
 
     if (typeof OffscreenCanvas !== 'undefined') {
@@ -58,7 +58,7 @@ export class LightingRendererService {
     
     this.ctx = this.canvas.getContext('2d', { alpha: true }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
     
-    // Re-render sprite if canvas changed to ensure validity (though sprite is separate, context might need fresh sprite on some platforms)
+    // Clear cache on resize to be safe, though not strictly necessary for offscreen resources
     this.renderLightSprite();
   }
 
@@ -69,6 +69,7 @@ export class LightingRendererService {
       }
   }
 
+  // Pre-render the "Hole Cutter" sprite (Alpha Mask essentially)
   private renderLightSprite() {
       if (!this.lightSprite) return;
       const ctx = this.lightSprite.getContext('2d') as CanvasRenderingContext2D;
@@ -80,8 +81,6 @@ export class LightingRendererService {
 
       ctx.clearRect(0, 0, w, h);
 
-      // FIX: Use BLACK gradient for proper destination-out blending behavior
-      // White gradients can cause "white fog" artifacts on some compositors when using destination-out
       const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
       grad.addColorStop(0, 'rgba(0, 0, 0, 1)');
       grad.addColorStop(0.2, 'rgba(0, 0, 0, 0.8)');
@@ -91,36 +90,39 @@ export class LightingRendererService {
       ctx.fillRect(0, 0, w, h);
   }
 
-  // Pre-render a colored version of the light sprite
+  // Optimized: Cache the Colored Light Sprites
+  // This is used for the "Lighter" composite pass
   private getColoredLightSprite(color: string): HTMLCanvasElement | OffscreenCanvas {
       if (this.coloredLightCache.has(color)) {
           return this.coloredLightCache.get(color)!;
       }
 
-      // Limit cache size to prevent memory leaks with dynamic colors
-      if (this.coloredLightCache.size > 20) {
+      // Cap cache size to prevent memory leaks with procedural colors
+      if (this.coloredLightCache.size > 50) {
+          // Clear oldest (Map iterates in insertion order)
           const firstKey = this.coloredLightCache.keys().next().value;
           if (firstKey) this.coloredLightCache.delete(firstKey);
       }
 
       let sprite: HTMLCanvasElement | OffscreenCanvas;
+      const size = 256; // Standard tile size
+
       if (typeof OffscreenCanvas !== 'undefined') {
-          sprite = new OffscreenCanvas(256, 256);
+          sprite = new OffscreenCanvas(size, size);
       } else {
           sprite = document.createElement('canvas');
-          sprite.width = 256;
-          sprite.height = 256;
+          sprite.width = size;
+          sprite.height = size;
       }
 
       const ctx = sprite.getContext('2d') as CanvasRenderingContext2D;
-      const w = sprite.width;
-      const h = sprite.height;
-      const cx = w/2;
-      const cy = h/2;
-      const radius = w/2;
+      const cx = size/2;
+      const cy = size/2;
+      const radius = size/2;
 
       const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
-      // Ensure we use the full color with alpha 1, scaling comes later via globalAlpha
+      
+      // Ensure we use the full color with alpha 1, intensity scaling happens at draw time
       const c = this.hexToRgba(color, 1.0);
       const transparent = this.hexToRgba(color, 0);
 
@@ -128,7 +130,7 @@ export class LightingRendererService {
       grad.addColorStop(1, transparent);
       
       ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, w, h);
+      ctx.fillRect(0, 0, size, size);
 
       this.coloredLightCache.set(color, sprite);
       return sprite;
@@ -169,7 +171,6 @@ export class LightingRendererService {
     // Camera Transform for Light Map
     ctx.save();
     
-    // Calculate center relative to camera
     IsoUtils.toIso(cam.x, cam.y, 0, this._iso);
     
     ctx.translate(w/2, h/2);
@@ -184,17 +185,20 @@ export class LightingRendererService {
 
     const visibleLights = this.lightingService.visibleLights;
     const len = visibleLights.length;
+    
+    // Draw "Holes" for all lights
     for (let i = 0; i < len; i++) {
         const light = visibleLights[i];
         this.drawLightSprite(ctx, light.x, light.y, light.z || 0, light.radius, light.intensity);
     }
 
-    // --- PASS 2: EMISSIVE LIGHTS (Color) ---
+    // --- PASS 2: EMISSIVE LIGHTS (Color Additive) ---
     ctx.globalCompositeOperation = 'lighter'; 
 
     for (let i = 0; i < len; i++) {
         const light = visibleLights[i];
         // Skip white/black lights in emissive pass to avoid blowing out the scene
+        // White lights just cut holes (above), colored lights add tint (here)
         if (light.color === '#ffffff' || light.color === '#000000') continue; 
         
         this.drawColoredLight(ctx, light.x, light.y, light.z || 0, light.radius * 0.8, light.intensity * 0.6, light.color);
@@ -220,6 +224,7 @@ export class LightingRendererService {
       
       const size = radius * 2;
       ctx.globalAlpha = intensity;
+      // Draw standard cached sprite scaled to size
       ctx.drawImage(this.lightSprite, this._iso.x - radius, this._iso.y - radius, size, size);
       ctx.globalAlpha = 1.0;
   }
@@ -227,6 +232,7 @@ export class LightingRendererService {
   private drawColoredLight(ctx: any, x: number, y: number, z: number, radius: number, intensity: number, color: string) {
       IsoUtils.toIso(x, y, z, this._iso);
       
+      // Retrieve cached gradient for this color
       const sprite = this.getColoredLightSprite(color);
       const size = radius * 2;
       

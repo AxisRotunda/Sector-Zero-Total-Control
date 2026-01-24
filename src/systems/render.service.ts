@@ -79,6 +79,11 @@ export class RenderService {
     this.resize();
     this.resizeListener = () => this.resize();
     window.addEventListener('resize', this.resizeListener);
+    
+    // Init lighting buffer
+    if (this.canvas) {
+        this.lightingRenderer.init(this.canvas.width, this.canvas.height);
+    }
   }
 
   destroy() {
@@ -384,10 +389,13 @@ export class RenderService {
       if (!this.ctx) return;
       const len = renderList.length;
       
+      // Batch particles separately from entities for performance
+      const particles: Particle[] = [];
+
       for (let i = 0; i < len; i++) {
           const obj = renderList[i];
           if ('life' in obj) {
-              this.effectRenderer.drawParticleIso(this.ctx, obj as Particle);
+              particles.push(obj as Particle);
               continue;
           }
           
@@ -415,6 +423,11 @@ export class RenderService {
           if (this.debugMode() && e.radius) {
               this.effectRenderer.drawDebugHitbox(this.ctx, e);
           }
+      }
+
+      // Draw all accumulated particles using optimized batching
+      if (particles.length > 0) {
+          this.effectRenderer.drawParticles(this.ctx, particles);
       }
   }
 

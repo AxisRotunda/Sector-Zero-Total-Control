@@ -10,28 +10,73 @@ export class EffectRendererService {
   // Reusable vector to avoid allocation in particle loop
   private _pos = { x: 0, y: 0 };
 
-  drawParticleIso(ctx: CanvasRenderingContext2D, p: Particle) {
+  drawParticles(ctx: CanvasRenderingContext2D, particles: Particle[]) {
+      if (particles.length === 0) return;
+
+      // 1. Sort by composite mode to minimize context state changes
+      // 'source-over' is default, 'lighter'/'screen' are common additives
+      particles.sort((a, b) => {
+          const cA = a.composite || 'source-over';
+          const cB = b.composite || 'source-over';
+          return cA.localeCompare(cB);
+      });
+
+      let currentComposite = ctx.globalCompositeOperation;
+
+      // 2. Iterate and draw
+      for (const p of particles) {
+          const comp = p.composite || 'source-over';
+          
+          if (currentComposite !== comp) {
+              ctx.globalCompositeOperation = comp;
+              currentComposite = comp;
+          }
+          
+          this.drawParticleInternal(ctx, p);
+      }
+
+      // Reset to default
+      if (currentComposite !== 'source-over') {
+          ctx.globalCompositeOperation = 'source-over';
+      }
+  }
+
+  // Optimized internal draw without save/restore for composite operations
+  // Still handles transform via translate/rotate manually or minimal save/restore
+  private drawParticleInternal(ctx: CanvasRenderingContext2D, p: Particle) {
       IsoUtils.toIso(p.x, p.y, p.z, this._pos);
       
-      ctx.save();
       const lifeInv = 1.0 - p.life; 
       const size = p.sizeStart + (p.sizeEnd - p.sizeStart) * lifeInv; 
       const alpha = p.alphaStart + (p.alphaEnd - p.alphaStart) * lifeInv;
       
-      ctx.globalAlpha = Math.max(0, alpha); 
-      if (p.composite) ctx.globalCompositeOperation = p.composite;
+      // Skip invisible
+      if (alpha <= 0.01) return;
+
+      ctx.save(); // Needed for Transform
+      ctx.globalAlpha = alpha; 
       
-      ctx.fillStyle = p.color; 
       ctx.translate(this._pos.x, this._pos.y); 
       if (p.rotation) ctx.rotate(p.rotation * Math.PI/180);
       
-      if (p.shape === 'square') { ctx.fillRect(-size/2, -size/2, size, size); } 
-      else if (p.shape === 'star') { ctx.beginPath(); ctx.moveTo(0, -size); ctx.lineTo(size/4, -size/4); ctx.lineTo(size, 0); ctx.lineTo(size/4, size/4); ctx.lineTo(0, size); ctx.lineTo(-size/4, size/4); ctx.lineTo(-size, 0); ctx.lineTo(-size/4, -size/4); ctx.fill(); } 
-      else if (p.shape === 'spark') { ctx.beginPath(); ctx.ellipse(0, 0, size, size * 0.1, 0, 0, Math.PI*2); ctx.fill(); } 
-      else { ctx.beginPath(); ctx.arc(0, 0, size/2, 0, Math.PI*2); ctx.fill(); }
+      ctx.fillStyle = p.color; 
+      
+      if (p.shape === 'square') { 
+          ctx.fillRect(-size/2, -size/2, size, size); 
+      } else if (p.shape === 'star') { 
+          ctx.beginPath(); ctx.moveTo(0, -size); ctx.lineTo(size/4, -size/4); ctx.lineTo(size, 0); ctx.lineTo(size/4, size/4); ctx.lineTo(0, size); ctx.lineTo(-size/4, size/4); ctx.lineTo(-size, 0); ctx.lineTo(-size/4, -size/4); ctx.fill(); 
+      } else if (p.shape === 'spark') { 
+          ctx.beginPath(); ctx.ellipse(0, 0, size, size * 0.1, 0, 0, Math.PI*2); ctx.fill(); 
+      } else { 
+          ctx.beginPath(); ctx.arc(0, 0, size/2, 0, Math.PI*2); ctx.fill(); 
+      }
       
       ctx.restore(); 
-      ctx.globalAlpha = 1;
+  }
+
+  // Legacy/Individual draw method (maintained for compatibility if needed elsewhere)
+  drawParticleIso(ctx: CanvasRenderingContext2D, p: Particle) {
+      this.drawParticleInternal(ctx, p);
   }
 
   drawHitboxIso(ctx: CanvasRenderingContext2D, e: Entity) {
@@ -52,10 +97,6 @@ export class EffectRendererService {
       IsoUtils.toIso(e.x, e.y, e.z, this._pos);
       ctx.save();
       ctx.translate(this._pos.x, this._pos.y);
-      
-      // Calculate rotation from velocity
-      // Note: vx/vy are World Cartesian. We need to project that to Screen Iso? 
-      // Or just draw line. Projectile moves in world space.
       
       const p1 = this._pos; // Current Iso Pos
       // Trail tail position (previous frame approx)

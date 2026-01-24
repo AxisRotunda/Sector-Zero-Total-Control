@@ -34,7 +34,7 @@ import { ICONS } from '../config/icons.config';
             </div>
             <div class="h-2 md:h-3 w-full bg-zinc-950 border border-zinc-800 relative overflow-hidden">
                <div class="h-full bg-gradient-to-r from-red-900 to-red-600 transition-all duration-200" 
-                    [style.width.%]="(player.stats.playerHp() / player.stats.playerStats().hpMax) * 100"></div>
+                    [style.width.%]="player.stats.healthPercentage()"></div>
             </div>
 
             <div class="flex justify-between text-[10px] font-bold text-zinc-400 tracking-wider mt-1">
@@ -43,7 +43,7 @@ import { ICONS } from '../config/icons.config';
             </div>
             <div class="h-2 md:h-3 w-full bg-zinc-950 border border-zinc-800 relative overflow-hidden">
                <div class="h-full bg-gradient-to-r from-purple-900 to-purple-600 transition-all duration-200" 
-                    [style.width.%]="(player.stats.psionicEnergy() / player.stats.maxPsionicEnergy()) * 100"></div>
+                    [style.width.%]="player.stats.energyPercentage()"></div>
             </div>
 
             <div class="flex justify-between items-center mt-1">

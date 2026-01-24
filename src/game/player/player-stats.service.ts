@@ -1,3 +1,4 @@
+
 import { Injectable, inject, signal, computed, OnDestroy } from '@angular/core';
 import { InventoryService } from '../inventory.service';
 import { Subscription } from 'rxjs';
@@ -11,7 +12,6 @@ import {
   DamagePacket,
   Resistances,
   Penetration,
-  createEmptyDamagePacket,
   createDefaultResistances,
   createZeroPenetration
 } from '../../models/damage.model';
@@ -61,28 +61,18 @@ export class PlayerStatsService implements OnDestroy {
       this.playerHp.set(this.playerStats().hpMax);
     });
     this.subscriptions.push(sub);
-
-    // ✅ DEBUG: Log on init
-    console.log('🎮 PlayerStatsService Initialized');
-    console.log('   Base Damage Packet:', this.baseStats().baseDamagePacket);
   }
 
   ngOnDestroy() { 
     this.subscriptions.forEach(s => s.unsubscribe()); 
   }
 
-  /**
-   * ✅ NUCLEAR FIX: Explicit damage packet construction with extensive logging
-   */
   public playerStats = computed(() => {
     const base = this.baseStats();
     const tree = this.skillTree.totalStats();
     const equipped = this.inventory.equipped();
     const gearStats = this.inventory.equipmentStats();
 
-    // ========================================
-    // STEP 1: INITIALIZE FRESH PACKETS
-    // ========================================
     const damagePacket: DamagePacket = {
       physical: 0,
       fire: 0,
@@ -107,25 +97,17 @@ export class PlayerStatsService implements OnDestroy {
       chaos: 0
     };
 
-    // ========================================
-    // STEP 2: APPLY BASE DAMAGE (ALWAYS)
-    // ========================================
     damagePacket.physical += base.baseDamagePacket?.physical ?? 10;
     damagePacket.physical += tree?.damage ?? 0;
 
-    // Apply base penetration
     penetration.physical += base.basePenetration?.physical ?? 0;
     penetration.physical += (tree?.armorPen ?? 0) / 100;
 
-    // ========================================
-    // STEP 3: WEAPON CONFIGURATION
-    // ========================================
     const hasWeapon = !!equipped?.weapon;
     
     if (hasWeapon) {
       const weapon = equipped.weapon!;
       
-      // Check for new damage packet system
       if (weapon.damagePacket) {
         damagePacket.physical += weapon.damagePacket.physical ?? 0;
         damagePacket.fire += weapon.damagePacket.fire ?? 0;
@@ -133,12 +115,10 @@ export class PlayerStatsService implements OnDestroy {
         damagePacket.lightning += weapon.damagePacket.lightning ?? 0;
         damagePacket.chaos += weapon.damagePacket.chaos ?? 0;
       }
-      // Legacy weapon damage
       else if (weapon.stats?.['dmg']) {
         damagePacket.physical += weapon.stats['dmg'];
       }
 
-      // Weapon penetration
       if (weapon.penetration) {
         penetration.physical += weapon.penetration.physical ?? 0;
         penetration.fire += weapon.penetration.fire ?? 0;
@@ -146,52 +126,30 @@ export class PlayerStatsService implements OnDestroy {
         penetration.lightning += weapon.penetration.lightning ?? 0;
         penetration.chaos += weapon.penetration.chaos ?? 0;
       }
-      // Legacy armorPen
       else if (weapon.stats?.['armorPen']) {
         penetration.physical += (weapon.stats['armorPen'] / 100);
       }
 
-      // Psionic Blade special scaling
       if (weapon.type === 'PSI_BLADE') {
         const psyBonus = ((tree?.psyche ?? 0) + (gearStats?.psy ?? 0)) * 1.5;
         damagePacket.chaos += psyBonus;
       }
     } else {
-      // ========================================
-      // UNARMED COMBAT (THE BUG FIX)
-      // ========================================
       const levelBonus = (base.level - 1) * 2;
       damagePacket.physical += levelBonus;
       
-      // Add gear damage bonuses (rings, etc)
       if (gearStats?.dmg) {
         damagePacket.physical += gearStats.dmg;
       }
-
-      // ✅ DEBUG: Log unarmed damage calculation
-      console.log('👊 Unarmed Damage:', {
-        base: base.baseDamagePacket.physical,
-        tree: tree?.damage ?? 0,
-        level: levelBonus,
-        gear: gearStats?.dmg ?? 0,
-        total: damagePacket.physical
-      });
     }
 
-    // ========================================
-    // STEP 4: ARMOR / RESISTANCES
-    // ========================================
     if (equipped?.armor?.stats?.['armor']) {
       resistances.physical += equipped.armor.stats['armor'];
     }
     resistances.physical += gearStats?.armor ?? 0;
 
-    // Cap penetration at 90%
     penetration.physical = Math.min(0.9, penetration.physical);
 
-    // ========================================
-    // STEP 5: SECONDARY STATS
-    // ========================================
     const finalHpMax = base.hpMax + (tree?.hpMax ?? 0) + (gearStats?.hp ?? 0);
     const finalCrit = base.crit + (gearStats?.crit ?? 0);
     const finalCritMult = base.critMult;
@@ -200,7 +158,6 @@ export class PlayerStatsService implements OnDestroy {
     const finalCdr = (tree?.cdr ?? 0) + (gearStats?.cdr ?? 0);
     const finalPsyche = (tree?.psyche ?? 0) + (gearStats?.psy ?? 0);
 
-    // Calculate total damage for legacy systems
     const totalDamage = 
       damagePacket.physical + 
       damagePacket.fire + 
@@ -208,23 +165,14 @@ export class PlayerStatsService implements OnDestroy {
       damagePacket.lightning + 
       damagePacket.chaos;
 
-    // ========================================
-    // RETURN STATS OBJECT
-    // ========================================
-    const stats = {
+    return {
       level: base.level,
-      
-      // ✅ NEW SYSTEM (PRIMARY)
       damagePacket,
       resistances,
       penetration,
-      
-      // Legacy compatibility
       damage: totalDamage,
       armor: resistances.physical,
       armorPen: penetration.physical,
-      
-      // Other stats
       hpMax: finalHpMax,
       crit: finalCrit,
       critMult: finalCritMult,
@@ -233,19 +181,19 @@ export class PlayerStatsService implements OnDestroy {
       cdr: finalCdr,
       psyche: finalPsyche
     };
-
-    // ✅ DEBUG: Log final stats
-    console.log('📊 Player Stats Computed:', {
-      hasWeapon,
-      damagePacket: stats.damagePacket,
-      totalDamage: stats.damage
-    });
-
-    return stats;
   });
 
   public maxPsionicEnergy = computed(() => 100 + (this.playerStats().psyche * 5));
   public psionicRegenRate = computed(() => (1.5 + (this.playerStats().psyche * 0.25)) / 60);
+
+  // Performance Optimizations: Pre-computed percentages for UI
+  public healthPercentage = computed(() => 
+    (this.playerHp() / this.playerStats().hpMax) * 100
+  );
+
+  public energyPercentage = computed(() => 
+    (this.psionicEnergy() / this.maxPsionicEnergy()) * 100
+  );
 
   update() {
     if (this.isDead()) return;
