@@ -96,7 +96,6 @@ export class PhysicsService {
     const stepVy = e.vy / steps;
 
     for (let i = 0; i < steps; i++) {
-        // Updated Vector Projection Physics
         const prevX = e.x;
         const prevY = e.y;
         
@@ -110,18 +109,18 @@ export class PhysicsService {
             // Impact effects
             if (isPlayer && speed > 5) this.spawnWallImpact(e);
 
-            // Revert slightly to avoid sticking inside
+            // 1. Revert to position before collision to un-stick
             e.x = prevX;
             e.y = prevY;
 
-            // Calculate Normal
+            // 2. Calculate Slide Normal
             const normal = this.getCollisionNormal(e, obstacle);
             
-            // Project velocity along wall surface (remove normal component)
+            // 3. Project velocity along wall surface (remove normal component)
             // v_new = v - (v . n) * n
             const dot = e.vx * normal.x + e.vy * normal.y;
             
-            // Apply friction coefficient (0.7) to sliding to prevent infinite slide
+            // Apply friction coefficient to sliding to prevent infinite slide
             e.vx -= dot * normal.x;
             e.vy -= dot * normal.y;
             
@@ -129,9 +128,15 @@ export class PhysicsService {
             e.vx *= 0.9;
             e.vy *= 0.9;
             
+            // 4. Re-apply step with NEW projected velocity so we don't freeze for a frame
+            const projectedStepX = (e.vx / steps);
+            const projectedStepY = (e.vy / steps);
+            e.x += projectedStepX;
+            e.y += projectedStepY;
+
             // Push out of overlap (Slop recovery)
             // For walls (AABB), strict pushout is handled by revert + slide
-            // For Circles, we might want to push explicitly
+            // For Circles, we might want to push explicitly if we are still stuck
             if (obstacle.type !== 'WALL') {
                 const dx = e.x - obstacle.x;
                 const dy = e.y - obstacle.y;
@@ -182,7 +187,7 @@ export class PhysicsService {
       const zoneId = this.world.currentZone().id;
       const queryRadius = radius * this.COLLISION_QUERY_RATIO;
       
-      // Use buffer 1 to avoid overlap
+      // Use buffer 1 to avoid overlap with outer physics loop
       const { buffer, count } = this.spatialHash.queryFast(e.x, e.y, queryRadius, zoneId, 1); 
       
       // Check Static Walls

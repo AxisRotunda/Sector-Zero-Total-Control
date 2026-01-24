@@ -15,7 +15,7 @@ import { UNARMED_WEAPON, Item } from '../../models/item.models';
 import { PlayerProgressionService } from './player-progression.service';
 import { CollisionService } from '../../systems/collision.service';
 import { createEmptyDamagePacket } from '../../models/damage.model';
-import { CommandType } from '../../services/input-buffer.service';
+import { CommandType } from '../../config/combo.config';
 
 @Injectable({ providedIn: 'root' })
 export class PlayerAbilitiesService {
@@ -91,36 +91,55 @@ export class PlayerAbilitiesService {
     }
   }
 
-  // --- COMBO IMPLEMENTATIONS (Basic) ---
+  // --- COMBO IMPLEMENTATIONS ---
   
   private useWhirlwind(player: Entity, stats: any) {
       player.state = 'ATTACK';
+      // Provide extended active frames for animation sync
+      player.animFrameTimer = 0;
+      player.animFrame = 0;
+      
       this.sound.play('SWOOSH');
       this.haptic.impactHeavy();
       
+      // Create a persistent hitbox that pulses
       const hitbox = this.entityPool.acquire('HITBOX', undefined, this.world.currentZone().id);
       hitbox.source = 'PLAYER';
-      hitbox.x = player.x; hitbox.y = player.y; 
-      hitbox.radius = 120;
+      hitbox.x = player.x; 
+      hitbox.y = player.y; 
+      hitbox.radius = 140; // Larger AOE
+      
       hitbox.damagePacket = createEmptyDamagePacket();
       hitbox.damagePacket.physical = stats.damage * 1.5;
       hitbox.damagePacket.chaos = stats.psyche * 2;
+      
       hitbox.color = '#f97316';
-      hitbox.timer = 15;
-      hitbox.knockbackForce = 20;
+      hitbox.timer = 20; // Lasts 20 frames
+      hitbox.knockbackForce = 25;
+      hitbox.critChance = stats.crit + 20; // Bonus crit
       
-      this.collisionService.checkHitboxCollisions(hitbox);
+      // Spin physics
+      player.angle += 3.14; // Instant spin visual
+      
+      // Attach hit IDs so it only hits once per spawn, 
+      // but in a real whirlwind you might want multi-hit. 
+      // Current system limits single hitbox to single hit per entity.
+      hitbox.hitIds = new Set();
+
       this.world.entities.push(hitbox);
+      this.collisionService.checkHitboxCollisions(hitbox); // Immediate check
       
-      this.particleService.addParticles({ x: player.x, y: player.y, z: 20, count: 20, speed: 10, color: '#f97316', size: 3, type: 'circle', life: 0.5 });
-      this.eventBus.dispatch({ type: GameEvents.FLOATING_TEXT_SPAWN, payload: { onPlayer: true, yOffset: -80, text: "WHIRLWIND", color: '#f97316', size: 24 } });
+      this.particleService.addParticles({ x: player.x, y: player.y, z: 20, count: 30, speed: 12, color: '#f97316', size: 3, type: 'circle', life: 0.6 });
+      this.eventBus.dispatch({ type: GameEvents.FLOATING_TEXT_SPAWN, payload: { onPlayer: true, yOffset: -90, text: "WHIRLWIND", color: '#f97316', size: 26 } });
   }
 
   private useDashStrike(player: Entity, stats: any, targetAngle?: number) {
       const angle = targetAngle ?? player.angle;
       player.angle = angle;
-      player.vx += Math.cos(angle) * 35;
-      player.vy += Math.sin(angle) * 35;
+      
+      // Huge velocity boost
+      player.vx += Math.cos(angle) * 45;
+      player.vy += Math.sin(angle) * 45;
       player.state = 'ATTACK';
       
       this.sound.play('DASH');
@@ -128,17 +147,23 @@ export class PlayerAbilitiesService {
       
       const hitbox = this.entityPool.acquire('HITBOX', undefined, this.world.currentZone().id);
       hitbox.source = 'PLAYER';
-      hitbox.x = player.x; hitbox.y = player.y; 
-      hitbox.radius = 60;
-      hitbox.damagePacket = createEmptyDamagePacket();
-      hitbox.damagePacket.physical = stats.damage * 2.0;
-      hitbox.critChance = 50; // High crit
-      hitbox.color = '#ffffff';
-      hitbox.timer = 10;
+      hitbox.x = player.x; 
+      hitbox.y = player.y; 
+      hitbox.radius = 80;
       
-      // Attach to player for duration of dash
+      hitbox.damagePacket = createEmptyDamagePacket();
+      hitbox.damagePacket.physical = stats.damage * 2.5; // High single target dmg
+      
+      hitbox.critChance = 100; // Guaranteed Crit
+      hitbox.color = '#ffffff';
+      hitbox.timer = 15; // Matches dash duration roughly
+      
+      // Attach to player velocity for the duration
       hitbox.vx = player.vx;
       hitbox.vy = player.vy;
+      
+      // Data flag for renderers/logic to know it's a projectile-like melee
+      hitbox.data = { isProjectile: true, trailColor: '#ffffff' }; 
       
       this.world.entities.push(hitbox);
       this.eventBus.dispatch({ type: GameEvents.FLOATING_TEXT_SPAWN, payload: { onPlayer: true, yOffset: -80, text: "STRIKE", color: '#ffffff', size: 24 } });

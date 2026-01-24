@@ -1,7 +1,8 @@
 
-import { Injectable } from '@angular/core';
+import { Injectable, OnDestroy } from '@angular/core';
+import { CommandType, COMBO_DEFINITIONS, ComboDefinition } from '../config/combo.config';
 
-export type CommandType = 'PRIMARY' | 'SECONDARY' | 'UTILITY' | 'DASH' | 'OVERLOAD' | 'SHIELD_BASH' | 'WHIRLWIND' | 'DASH_STRIKE';
+export type { CommandType };
 
 export interface BufferedCommand {
     type: CommandType;
@@ -10,26 +11,32 @@ export interface BufferedCommand {
     priority: number; // Higher executes first
 }
 
-export interface ComboDefinition {
-  sequence: CommandType[];
-  windowMs: number;
-  result: CommandType;
+interface InputHistoryItem {
+    action: CommandType;
+    timestamp: number;
 }
 
 @Injectable({
   providedIn: 'root'
 })
-export class InputBufferService {
+export class InputBufferService implements OnDestroy {
   private buffer: BufferedCommand[] = [];
-  private inputHistory: Array<{ action: CommandType, timestamp: number }> = [];
+  
+  // Ring Buffer for History (Fixed size to avoid reallocation)
+  private readonly HISTORY_SIZE = 10;
+  private inputRing: InputHistoryItem[] = new Array(this.HISTORY_SIZE).fill(null);
+  private ringIndex = 0; // Points to the next empty slot
+  private historyCount = 0; // Tracks logical size up to HISTORY_SIZE
   
   private readonly BUFFER_TTL = 300; // ms to keep command alive
   private readonly MAX_BUFFER_SIZE = 3;
 
-  private combos: ComboDefinition[] = [
-    { sequence: ['PRIMARY', 'SECONDARY', 'DASH'], windowMs: 600, result: 'WHIRLWIND' },
-    { sequence: ['DASH', 'PRIMARY', 'PRIMARY'], windowMs: 800, result: 'DASH_STRIKE' }
-  ];
+  private combos: ComboDefinition[] = COMBO_DEFINITIONS;
+
+  ngOnDestroy() {
+      this.buffer = [];
+      this.inputRing = [];
+  }
 
   /**
    * Adds a command to the buffer.
@@ -39,20 +46,9 @@ export class InputBufferService {
   addCommand(type: CommandType, angle?: number, priority: number = 1) {
       const now = performance.now();
       
-      // 1. Record History for Combos
-      this.inputHistory.push({ action: type, timestamp: now });
-      // Clean up old history (keep last 1s)
-      this.inputHistory = this.inputHistory.filter(i => now - i.timestamp < 1000);
-      
-      // 2. Check for Combos
-      if (this.checkCombos(now)) {
-          return; // If combo triggered, don't buffer the raw input
-      }
-
-      // 3. Regular Buffering
+      // 1. Regular Buffering (Fix: Buffer *before* checking combos to prevent lost input race)
       this.prune(now);
 
-      // Add new
       this.buffer.push({ type, angle, timestamp: now, priority });
       
       // Sort by priority desc, then timestamp asc
@@ -65,23 +61,57 @@ export class InputBufferService {
       if (this.buffer.length > this.MAX_BUFFER_SIZE) {
           this.buffer.pop(); // Remove lowest priority/oldest
       }
+
+      // 2. Record History for Combos (Ring Buffer Push)
+      this.inputRing[this.ringIndex] = { action: type, timestamp: now };
+      this.ringIndex = (this.ringIndex + 1) % this.HISTORY_SIZE;
+      this.historyCount = Math.min(this.historyCount + 1, this.HISTORY_SIZE);
+      
+      // 3. Check for Combos
+      // If a combo triggers, we keep the buffer intact (the trigger input might be needed individually)
+      // but the combo result is added as a HIGH PRIORITY command.
+      if (this.checkCombos(now, type)) {
+          // Clear history after successful combo to prevent overlap triggering
+          this.clearHistory();
+      }
   }
 
-  private checkCombos(now: number): boolean {
+  private checkCombos(now: number, lastAction: CommandType): boolean {
     for (const combo of this.combos) {
-      if (this.inputHistory.length < combo.sequence.length) continue;
+      // Optimization: Fast fail if last input doesn't match combo end
+      if (lastAction !== combo.sequence[combo.sequence.length - 1]) continue;
+        
+      if (this.historyCount < combo.sequence.length) continue;
 
-      const recent = this.inputHistory.slice(-combo.sequence.length);
+      // Extract recent sequence from Ring Buffer
+      // We need to walk backwards from current ringIndex
+      let match = true;
+      let startTime = 0;
+      let endTime = 0;
+
+      const seqLen = combo.sequence.length;
       
-      // Check sequence match
-      const matches = recent.every((input, i) => input.action === combo.sequence[i]);
-      if (!matches) continue;
+      for (let i = 0; i < seqLen; i++) {
+          // Calculate circular index walking back: (ringIndex - 1 - i + Size) % Size
+          const idx = (this.ringIndex - 1 - i + this.HISTORY_SIZE) % this.HISTORY_SIZE;
+          const historyItem = this.inputRing[idx];
+          const sequenceChar = combo.sequence[seqLen - 1 - i]; // Match backwards
+          
+          if (historyItem.action !== sequenceChar) {
+              match = false;
+              break;
+          }
+          
+          if (i === 0) endTime = historyItem.timestamp;
+          if (i === seqLen - 1) startTime = historyItem.timestamp;
+      }
+      
+      if (!match) continue;
       
       // Check timing window
-      const duration = recent[recent.length - 1].timestamp - recent[0].timestamp;
+      const duration = endTime - startTime;
       if (duration <= combo.windowMs) {
         this.triggerCombo(combo.result);
-        this.inputHistory = []; // Clear history after combo
         return true;
       }
     }
@@ -116,7 +146,13 @@ export class InputBufferService {
 
   clear() {
       this.buffer = [];
-      this.inputHistory = [];
+      this.clearHistory();
+  }
+  
+  private clearHistory() {
+      this.historyCount = 0;
+      this.ringIndex = 0;
+      // No need to null out array, just resetting count is sufficient logic reset
   }
 
   private prune(now: number) {
