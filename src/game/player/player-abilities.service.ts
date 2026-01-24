@@ -16,7 +16,7 @@ import { PlayerProgressionService } from './player-progression.service';
 import { CollisionService } from '../../systems/collision.service';
 import { createEmptyDamagePacket } from '../../models/damage.model';
 import { CommandType } from '../../config/combo.config';
-import { MELEE_COMBOS, ComboStep } from '../../config/combat-combos.config';
+import { MELEE_COMBOS, ComboStep, WeaponArchetype } from '../../config/combat-combos.config';
 
 @Injectable({ providedIn: 'root' })
 export class PlayerAbilitiesService {
@@ -36,12 +36,23 @@ export class PlayerAbilitiesService {
 
   // Combo State
   currentComboIndex = signal(0);
+  activeComboStep = signal<ComboStep | null>(null);
   
-  // Cache current combo definition for animation service
-  activeComboStep: ComboStep | null = null;
+  // Combo Timing Window
+  private comboWindowTimer = 0;
+  private readonly COMBO_WINDOW_MS = 500; // Time after attack end to input next combo
 
   updateCooldowns() {
     const c = this.cooldowns();
+    
+    // Decrement combo window logic
+    if (this.comboWindowTimer > 0) {
+        this.comboWindowTimer -= 16.67; // Approx 60fps frame time in ms
+        if (this.comboWindowTimer <= 0) {
+            this.resetCombo();
+        }
+    }
+
     if (c.primary <= 0 && c.secondary <= 0 && c.dash <= 0 && c.utility <= 0) {
         return;
     }
@@ -99,7 +110,7 @@ export class PlayerAbilitiesService {
       player.state = 'ATTACK';
       player.animFrameTimer = 0;
       player.animFrame = 0;
-      this.activeComboStep = null; // Special skill, not standard combo
+      this.activeComboStep.set(null); // Special skill, not standard combo
       
       this.sound.play('SWOOSH');
       this.haptic.impactHeavy();
@@ -133,7 +144,7 @@ export class PlayerAbilitiesService {
   private useDashStrike(player: Entity, stats: any, targetAngle?: number) {
       const angle = targetAngle ?? player.angle;
       player.angle = angle;
-      this.activeComboStep = null;
+      this.activeComboStep.set(null);
       
       player.vx += Math.cos(angle) * 45;
       player.vy += Math.sin(angle) * 45;
@@ -182,7 +193,7 @@ export class PlayerAbilitiesService {
       player.animFrame = 0;
       player.animFrameTimer = 0;
       player.timer = 0; 
-      this.activeComboStep = null; // Ranged doesn't use combo steps yet
+      this.activeComboStep.set(null); // Ranged doesn't use combo steps yet
 
       const recoilForce = 2.0; 
       player.vx -= Math.cos(aimAngle) * recoilForce;
@@ -244,38 +255,48 @@ export class PlayerAbilitiesService {
       }
   }
 
+  private getWeaponArchetype(weapon: Item | null): WeaponArchetype {
+      if (!weapon) return MELEE_COMBOS['STANDARD'];
+      if (weapon.type === 'PSI_BLADE') return MELEE_COMBOS['FAST'];
+      if (weapon.shape === 'hammer' || weapon.shape === 'axe') return MELEE_COMBOS['HEAVY'];
+      return MELEE_COMBOS['STANDARD'];
+  }
+
   private performMeleeAttack(player: Entity, stats: any, weapon: Item | null, targetAngle?: number) {
-        const canCombo = player.state === 'ATTACK' && player.animPhase === 'recovery';
+        // Can combo if in recovery phase OR within the forgiveness window
+        const canCombo = (player.state === 'ATTACK' && player.animPhase === 'recovery') || this.comboWindowTimer > 0;
         const cds = this.cooldowns();
         
+        // If cooldown active AND we are not in a valid combo window, block input
         if (cds.primary > 0 && !canCombo) return;
         
         // 1. Determine Weapon Profile
-        let archetype = MELEE_COMBOS['STANDARD'];
-        if (weapon?.type === 'PSI_BLADE') archetype = MELEE_COMBOS['FAST'];
-        if (weapon?.shape === 'hammer' || weapon?.shape === 'axe') archetype = MELEE_COMBOS['HEAVY'];
+        const archetype = this.getWeaponArchetype(weapon);
 
         // 2. Advance Combo Index
         let nextIndex = 0;
         if (canCombo) {
             nextIndex = (this.currentComboIndex() + 1) % archetype.chain.length;
         }
+        
         this.currentComboIndex.set(nextIndex);
         player.comboIndex = nextIndex;
 
         // 3. Get Step Config
         const step = archetype.chain[nextIndex];
-        this.activeComboStep = step;
+        this.activeComboStep.set(step);
 
         // 4. Calculate Cooldown
         const baseCdr = Math.max(0, Math.min(BALANCE.COOLDOWNS.CDR_CAP, stats.cdr / 100));
-        // Cooldown is slightly longer than animation to prevent spamming
-        const cdTime = step.durationTotal * (60/60); // frame to ms approx
-        const cooldown = Math.max(5, cdTime * (1 - baseCdr)); 
+        const cdTime = step.durationTotal * (16.67); // Frames to ms approx
+        const cooldownFrames = Math.max(5, step.durationTotal * (1 - baseCdr)); 
         
-        this.maxCooldowns.update(c => ({...c, primary: cooldown})); 
-        this.cooldowns.update(c => ({...c, primary: cooldown}));
+        this.maxCooldowns.update(c => ({...c, primary: cooldownFrames})); 
+        this.cooldowns.update(c => ({...c, primary: cooldownFrames}));
         
+        // Reset Combo Window to allow buffer after this attack finishes
+        this.comboWindowTimer = this.COMBO_WINDOW_MS;
+
         // 5. Physics & State
         const attackDir = targetAngle ?? player.angle;
         player.angle = attackDir; 
@@ -284,8 +305,7 @@ export class PlayerAbilitiesService {
         player.animFrameTimer = 0; 
         player.animPhase = 'startup';
         
-        // Lunge logic applied here or in update loop? 
-        // Applying initial burst here for crispness
+        // Forward Lunge
         if (step.forwardLunge > 0) {
             player.vx += Math.cos(attackDir) * step.forwardLunge;
             player.vy += Math.sin(attackDir) * step.forwardLunge;
@@ -293,14 +313,17 @@ export class PlayerAbilitiesService {
         
         this.eventBus.dispatch({ type: GameEvents.ADD_SCREEN_SHAKE, payload: { intensity: step.shake, decay: 0.9, x: Math.cos(attackDir), y: Math.sin(attackDir) } });
         
-        if (step.sound === 'HEAVY_SWING') this.sound.play('SWOOSH'); // Placeholder mapping
-        else this.sound.play('SWOOSH');
+        this.sound.play(step.sound);
   }
 
   spawnPrimaryAttackHitbox(player: Entity) {
-      if (!this.activeComboStep) return;
+      const step = this.activeComboStep();
+      if (!step) {
+          // Safety check to prevent crash if step is missing
+          console.error('[Abilities] Hitbox spawn blocked: No active combo step');
+          return;
+      }
 
-      const step = this.activeComboStep;
       const stats = this.stats.playerStats();
       const equippedWeapon = this.inventory.equipped().weapon;
       const currentZoneId = this.world.currentZone().id;
@@ -384,9 +407,8 @@ export class PlayerAbilitiesService {
   private useDash(player: Entity, cds: any, targetAngle?: number) {
         if (cds.dash > 0) return;
         this.cooldowns.update(c => ({...c, dash: 40}));
-        this.currentComboIndex.set(0); 
-        player.comboIndex = 0;
-        this.activeComboStep = null;
+        
+        this.resetCombo();
         
         const dashDir = targetAngle ?? player.angle;
         player.angle = dashDir;
@@ -450,5 +472,14 @@ export class PlayerAbilitiesService {
         this.particleService.addParticles({ x: player.x, y: player.y, z: 20, count: 50, speed: 12, color: '#f0abfc', size: 6, type: 'circle', life: 1.0, emitsLight: true });
   }
 
-  reset() { this.cooldowns.set({ primary: 0, secondary: 0, dash: 0, utility: 0 }); this.currentComboIndex.set(0); this.activeComboStep = null; }
+  resetCombo() {
+      this.currentComboIndex.set(0);
+      this.activeComboStep.set(null);
+      this.comboWindowTimer = 0;
+  }
+
+  reset() { 
+      this.cooldowns.set({ primary: 0, secondary: 0, dash: 0, utility: 0 }); 
+      this.resetCombo();
+  }
 }

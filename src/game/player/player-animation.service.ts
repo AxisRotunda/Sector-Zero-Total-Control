@@ -41,8 +41,8 @@ export class PlayerAnimationService {
   }
 
   private handleAttackAnimation(player: Entity) {
-      // 1. Get Combo Data
-      const comboStep = this.abilities.activeComboStep;
+      // 1. Get Combo Data via Signal
+      const comboStep = this.abilities.activeComboStep();
       
       // Fallback if no combo step (e.g. ranged or error)
       if (!comboStep) {
@@ -56,7 +56,7 @@ export class PlayerAnimationService {
       const start = comboStep.hitboxStart;
       const end = comboStep.hitboxEnd;
 
-      // Determine Phase
+      // Determine Phase based on frame data
       if (frame < start) {
           this.combat.currentAttackState = 'STARTUP';
           player.animPhase = 'startup';
@@ -84,7 +84,7 @@ export class PlayerAnimationService {
           player.animFrameTimer = 0;
           this.combat.currentAttackState = 'IDLE';
           
-          // Note: Combo Index reset is handled by Cooldown/Timer in PlayerControl or Abilities service if input window missed
+          // Note: Combo Index reset is handled by Cooldown/Timer in PlayerAbilities service
       }
   }
 

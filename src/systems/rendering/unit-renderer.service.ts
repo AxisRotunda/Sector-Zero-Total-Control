@@ -84,28 +84,51 @@ export class UnitRendererService {
               bodyTwist = isTwoHanded ? 0.8 : 0.4; 
               bodyZ = -1 * recoil; 
           } else {
-              // MELEE LOGIC
-              if (isPlayer && this.abilities.activeComboStep) {
-                  const step = this.abilities.activeComboStep;
-                  const phase = e.animPhase;
-                  // Use standardized 0-1 progress derived from logic frame
-                  // Approximate progress based on arbitrary constants in animation service
-                  // Ideally pass progress explicitly in Entity, but using animFrame heuristics for now
-                  const p = e.animFrame / 8; // Normalized approx
+              // MELEE LOGIC: Visual Swing Types
+              // Read combo step via Signal for Player, or fallback logic
+              const comboStep = isPlayer ? this.abilities.activeComboStep() : null;
+              
+              if (isPlayer && comboStep) {
+                  // Normalize progress: 0 to 1 based on animation timer logic
+                  const start = comboStep.hitboxStart;
+                  const total = comboStep.durationTotal;
+                  // Clamp progress to 0-1
+                  const progress = Math.min(1, Math.max(0, e.animFrameTimer / total));
 
-                  if (step.swingType === 'THRUST') {
-                      rArmAngle = -Math.PI/2 + (Math.sin(p * Math.PI) * 1.5);
-                      bodyTwist = 0.5;
-                      rHandReach = Math.sin(p * Math.PI) * 30;
-                  } else if (step.swingType === 'OVERHEAD') {
-                      rArmAngle = -Math.PI + (p * Math.PI * 1.5); // Top to bottom
-                      bodyTwist = 0.2;
-                  } else if (step.swingType === 'SLASH_LEFT') {
-                      rArmAngle = (Math.PI/2) - (p * Math.PI); // Right to Left
-                      bodyTwist = 0.5 - p;
-                  } else { // SLASH_RIGHT (Default)
-                      rArmAngle = (-Math.PI/2) + (p * Math.PI); // Left to Right
-                      bodyTwist = -0.5 + p;
+                  // Swing Type Mapping
+                  switch (comboStep.swingType) {
+                      case 'SLASH_RIGHT': // Left to Right Horizontal
+                          rArmAngle = -Math.PI/2 + (progress * Math.PI);
+                          lArmAngle = -Math.PI/6;
+                          bodyTwist = -0.5 + progress;
+                          break;
+                          
+                      case 'SLASH_LEFT': // Right to Left Horizontal
+                          rArmAngle = Math.PI/2 - (progress * Math.PI);
+                          lArmAngle = Math.PI/6;
+                          bodyTwist = 0.5 - progress;
+                          break;
+                          
+                      case 'OVERHEAD': // Vertical Chop
+                          rArmAngle = -Math.PI + (progress * Math.PI * 1.5);
+                          lArmAngle = -Math.PI + (progress * Math.PI * 1.5) - 0.2;
+                          bodyTwist = 0.1;
+                          break;
+                          
+                      case 'THRUST': // Stab
+                          // Sine wave for stab out and back
+                          const stab = Math.sin(progress * Math.PI);
+                          rArmAngle = -Math.PI/2 + (stab * 0.2);
+                          rHandReach = stab * 35; // Extended reach
+                          bodyTwist = 0.5;
+                          break;
+                          
+                      case 'SPIN': // 360 Spin
+                          const spin = progress * Math.PI * 2;
+                          rArmAngle = spin;
+                          lArmAngle = spin + Math.PI;
+                          bodyTwist = spin;
+                          break;
                   }
               } else {
                   // Fallback / Enemy Logic
