@@ -24,6 +24,10 @@ import { PerformanceManagerService } from '../game/performance-manager.service';
 import { isParticle } from '../utils/type-guards';
 import { StaticBatchRendererService, BakedTile } from './rendering/static-batch-renderer.service';
 import { LightmapBakerService } from './rendering/lightmap-baker.service';
+import { CullingService } from './rendering/culling.service';
+import { ProofKernelService } from '../core/proof/proof-kernel.service';
+import { EventBusService } from '../core/events/event-bus.service';
+import { GameEvents } from '../core/events/game-events';
 
 @Injectable({
   providedIn: 'root'
@@ -56,6 +60,9 @@ export class RenderService {
   // Optimizers
   private staticBatcher = inject(StaticBatchRendererService);
   private lightBaker = inject(LightmapBakerService);
+  private culling = inject(CullingService);
+  private proofKernel = inject(ProofKernelService);
+  private eventBus = inject(EventBusService);
   
   private player = inject(PlayerService);
   
@@ -71,12 +78,10 @@ export class RenderService {
   private _fp4 = { x: 0, y: 0 };
   private _frustum = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
 
-  // Performance Monitoring
   private lastFrameTime = 0;
   private currentRenderScale = 1.0;
   private lastZoneId = '';
   
-  // Cached Resources
   private vignetteGradient: CanvasGradient | null = null;
 
   init(canvas: HTMLCanvasElement) {
@@ -102,14 +107,12 @@ export class RenderService {
   }
 
   resize() {
-    this.vignetteGradient = null; // Invalidate cache
+    this.vignetteGradient = null; 
     if (this.canvas) {
       const scale = this.performanceManager.renderScale();
       this.currentRenderScale = scale;
-      
       this.canvas.width = Math.max(window.innerWidth * scale, 320);
       this.canvas.height = Math.max(window.innerHeight * scale, 320);
-      
       this.lightingRenderer.resize(this.canvas.width, this.canvas.height);
     }
   }
@@ -147,7 +150,6 @@ export class RenderService {
     this.lastFrameTime = now;
     this.performanceManager.monitorFrame(delta);
 
-    // Zone Change cleanup
     if (zone.id !== this.lastZoneId) {
         this.staticBatcher.clearCache();
         this.lightBaker.clearCache();
@@ -164,64 +166,79 @@ export class RenderService {
     const w = this.canvas.width;
     const h = this.canvas.height;
     
-    // --- 0. SETUP ROTATION CONTEXT ---
     IsoUtils.setContext(cam.rotation, cam.x, cam.y);
 
-    // Calculate View Frustum
     this.calculateFrustum(cam, window.innerWidth, window.innerHeight);
 
-    // 1. Prepare Scene & Bake Check
     const bakedTiles = this.staticBatcher.bakeStaticGeometry(zone, entities, cam.rotation);
-    // Returns LightingBakeResult { occlusion: [], emissive: [] } or null
     const bakedLighting = this.lightBaker.bakeStaticLights(this.lighting.allLights, cam.rotation);
 
     this.prepareRenderList(cam, zone, entities, player, particles, window.innerWidth, window.innerHeight, this._frustum, !!bakedTiles);
     
-    // Prepare Lights
+    // --- VERIFICATION STEP (10% sampling) ---
+    if (Math.random() < 0.1) {
+        // We use the CullingService explicitly to calculate the verified frustum
+        const verifiedFrustum = this.culling.computeViewFrustum(cam, window.innerWidth, window.innerHeight);
+        
+        // Extract just the entities from the render list (mixed type list)
+        const visibleEntities = this.renderList.filter(e => 'type' in e) as Entity[];
+        
+        const geoCheck = this.proofKernel.verifyRenderGeometry(visibleEntities, verifiedFrustum);
+        const budgetCheck = this.proofKernel.verifyRenderBudget(visibleEntities.length);
+
+        if (!geoCheck.isValid || !budgetCheck.isValid) {
+            this.eventBus.dispatch({
+                type: GameEvents.REALITY_BLEED, 
+                payload: {
+                    severity: 'MEDIUM',
+                    source: 'Render Corruption', 
+                    message: [...geoCheck.errors, ...budgetCheck.errors].join('; ')
+                }
+            });
+            
+            if (!budgetCheck.isValid) {
+                // Auto-fix: Cull by distance
+                this.renderList.sort((a, b) => 
+                    Math.hypot(a.x - cam.x, a.y - cam.y) - Math.hypot(b.x - cam.x, b.y - cam.y)
+                );
+                this.renderList.length = 1000; // Hard cap
+            }
+        }
+    }
+
     this.prepareLighting(player, this.renderList, cam, window.innerWidth, window.innerHeight, this._frustum);
     this.lighting.update(1, this.timeService.globalTime);
 
-    // 2. Draw Frame
     this.ctx.fillStyle = '#000000';
     this.ctx.fillRect(0, 0, w, h);
     this.ctx.save();
     
-    // Camera Transform
     this.applyCameraTransform(cam, w, h, shake);
 
-    // 3. Background Pass
     this.floorRenderer.drawFloor(this.ctx, cam, zone, this.world.mapBounds, w, h);
 
-    // 4. Baked Static Geometry Pass (Tiles)
     if (bakedTiles) {
         for (const tile of bakedTiles) {
             this.ctx.drawImage(tile.canvas, tile.x, tile.y);
         }
     }
 
-    // 5. Shadow Pass (Dynamic Only if baked)
     if (this.performanceManager.shadowsEnabled()) {
         this.drawShadows(this.renderList);
     }
 
-    // 6. Main Geometry Pass (Sorted & Occlusion)
     this.drawGeometry(this.renderList, zone, player);
 
-    // 7. Visual Effects
     this.effectRenderer.drawGlobalEffects(this.ctx, this.renderList as Entity[], player, zone, rainDrops);
     
-    // 8. World UI
     this.drawWorldUI(texts, cam);
 
     this.ctx.restore();
     
-    // 9. Lighting & Atmosphere Pass
     this.lightingRenderer.drawLighting(this.ctx, this.renderList as Entity[], player, cam, zone, w, h, bakedLighting);
 
-    // 10. Post-Processing
     this.applyPostEffects(w, h);
     
-    // 11. Guidance Overlay
     this.effectRenderer.drawGuidanceOverlay(
         this.ctx, 
         this.mission.activeObjective(), 
@@ -231,7 +248,6 @@ export class RenderService {
         zone.id
     );
     
-    // --- CLEANUP ---
     IsoUtils.setContext(0, 0, 0);
   }
 
@@ -268,18 +284,14 @@ export class RenderService {
           }
 
           const ent = obj as Entity;
-          // IMPORTANT: Static lights (Street Lights, Neon) are handled by LightBaker now.
-          // Only register dynamic lights here.
           
           if (ent.type === 'DECORATION') {
               if (ent.subType === 'STREET_LIGHT') {
-                  // Register as STATIC for baking
                   const lightColor = ent.color && ent.color !== '#ffffff' ? ent.color : presets.STREET_LIGHT.color;
                   this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, type: 'STATIC', ...presets.STREET_LIGHT, color: lightColor });
               } else if (ent.subType === 'NEON') {
                   this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, color: ent.color, type: 'STATIC', ...presets.NEON });
               } else if (ent.subType === 'DYNAMIC_GLOW') {
-                  // Pulse is dynamic
                   const intensity = ent.data?.glowIntensity !== undefined ? ent.data.glowIntensity : 1.0;
                   this.lighting.registerLight({ 
                       id: `L_${ent.id}`, 
@@ -297,7 +309,6 @@ export class RenderService {
               this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, color: ent.color, type: 'DYNAMIC', radius: ent.radius * presets.PROJECTILE.radiusMultiplier, intensity: presets.PROJECTILE.intensity, z: presets.PROJECTILE.z });
           }
           else if (ent.type === 'EXIT' && !ent.locked) {
-              // Exits are static
               this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, color: ent.color, type: 'STATIC', ...presets.EXIT });
           }
           else if (ent.type === 'ENEMY' && ent.subType === 'BOSS') {
@@ -325,14 +336,11 @@ export class RenderService {
   private prepareRenderList(cam: Camera, zone: Zone, entities: Entity[], player: Entity, particles: Particle[], w: number, h: number, frustum: any, hasBakedLayer: boolean) {
       let renderIndex = 0;
       
-      // Get Visible Entities
       const { buffer: staticBuffer, count: staticCount } = this.chunkManager.getVisibleStaticEntities(cam, w, h);
       
-      // Process Static (Walls)
       for (let i = 0; i < staticCount; i++) {
           const e = staticBuffer[i];
           if (hasBakedLayer) {
-              // Only skip floor decos that were baked. Walls are NOT baked anymore.
               if (e.type === 'DECORATION' && ['RUG', 'FLOOR_CRACK', 'GRAFFITI', 'TRASH', 'SCORCH'].includes(e.subType || '')) continue;
           }
           this.renderList[renderIndex++] = e;
@@ -344,7 +352,6 @@ export class RenderService {
           if (e.state === 'DEAD' || e.data?.isDead) continue; 
           
           if (hasBakedLayer) {
-              // Same check for dynamic floor decos (rare)
               if (e.type === 'DECORATION' && ['RUG', 'FLOOR_CRACK', 'GRAFFITI', 'TRASH', 'SCORCH'].includes(e.subType || '')) continue;
           }
           
@@ -390,59 +397,6 @@ export class RenderService {
       }
   }
 
-  // --- SCREEN-SPACE OCCLUSION ---
-  private checkScreenSpaceOcclusion(wall: Entity, target: Entity): boolean {
-      const wallDepth = wall._depthKey || 0;
-      const targetDepth = target._depthKey || 0;
-      if (wallDepth < targetDepth) return false;
-
-      const wWidth = wall.width || 40;
-      const wDepth = wall.depth || 40;
-      const wHeight = wall.height || 100;
-      
-      const wallBaseIso = { x: 0, y: 0 };
-      const targetBaseIso = { x: 0, y: 0 };
-      
-      IsoUtils.toIso(wall.x, wall.y, 0, wallBaseIso);
-      IsoUtils.toIso(target.x, target.y, 0, targetBaseIso);
-      
-      const wallScreenW = (wWidth + wDepth) * 1.2;
-      const wallScreenH = wHeight + (wWidth + wDepth) * 0.5;
-      
-      const wx = wallBaseIso.x - wallScreenW / 2;
-      const wy = wallBaseIso.y - wallScreenH; 
-      
-      const tRadius = target.radius || 20;
-      const tHeight = 60;
-      const tx = targetBaseIso.x - tRadius;
-      const ty = targetBaseIso.y - tHeight;
-      const tw = tRadius * 2;
-      const th = tHeight;
-
-      if (wx < tx + tw && wx + wallScreenW > tx &&
-          wy < ty + th && wy + wallScreenH > ty) {
-          return true;
-      }
-      return false;
-  }
-
-  private checkAnyTargetOcclusion(wall: Entity, player: Entity, zoneId: string): boolean {
-      if (this.checkScreenSpaceOcclusion(wall, player)) return true;
-
-      const searchRadius = Math.max(wall.width || 100, wall.depth || 100);
-      const { buffer, count } = this.spatialHash.queryFast(wall.x, wall.y, searchRadius, zoneId);
-      
-      for (let i = 0; i < count; i++) {
-          const ent = buffer[i];
-          if (ent.type === 'ENEMY' && ent.state !== 'DEAD') {
-              if (this.checkScreenSpaceOcclusion(wall, ent)) {
-                  return true;
-              }
-          }
-      }
-      return false;
-  }
-
   private drawGeometry(renderList: (Entity | Particle)[], zone: Zone, player: Entity) {
       if (!this.ctx) return;
       const len = renderList.length;
@@ -458,12 +412,7 @@ export class RenderService {
           const e = obj as Entity;
 
           if (e.type === 'WALL' && e.subType !== 'GATE_SEGMENT') {
-              const isOccluding = this.checkAnyTargetOcclusion(e, player, zone.id);
-              if (isOccluding) {
-                  this.ctx.globalAlpha = 0.3;
-              }
               this.structureRenderer.drawStructure(this.ctx, e, zone);
-              this.ctx.globalAlpha = 1.0;
           } 
           else if (e.type === 'PLAYER') {
             this.effectRenderer.drawPsionicWave(this.ctx, e); 
@@ -471,7 +420,7 @@ export class RenderService {
           }
           else if (e.type === 'ENEMY') this.unitRenderer.drawHumanoid(this.ctx, e);
           else if (e.type === 'NPC') this.unitRenderer.drawNPC(this.ctx, e);
-          else if (e.type === 'WALL') this.structureRenderer.drawStructure(this.ctx, e, zone); // Gate Segment
+          else if (e.type === 'WALL') this.structureRenderer.drawStructure(this.ctx, e, zone); 
           else if (e.type === 'DECORATION') this.entityRenderer.drawDecoration(this.ctx, e);
           else if (e.type === 'EXIT') this.entityRenderer.drawExit(this.ctx, e);
           else if (e.type === 'SHRINE') this.entityRenderer.drawShrine(this.ctx, e);

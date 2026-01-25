@@ -16,6 +16,7 @@ import { MapService } from '../services/map.service';
 import { ZoneManagerService } from './world/zone-manager.service';
 import { LightingService } from '../systems/rendering/lighting.service';
 import { GameStateService } from './game-state.service';
+import { SpatialGridService } from '../systems/spatial-grid.service';
 
 @Injectable({
   providedIn: 'root'
@@ -39,9 +40,10 @@ export class GameEngineService {
   private zoneManager = inject(ZoneManagerService);
   private lighting = inject(LightingService);
   private gameState = inject(GameStateService);
+  private spatialGrid = inject(SpatialGridService);
 
-  // Expose the signal reference directly so components binding to `game.isInMenu` still work
   isInMenu = this.gameState.isInMenu;
+  private frameCount = 0;
 
   init(canvas: HTMLCanvasElement) {
     this.renderer.init(canvas);
@@ -116,44 +118,55 @@ export class GameEngineService {
   private update() {
     if (this.world.player.hp <= 0) return;
 
+    this.frameCount++;
+
+    // 1. Grid Lifecycle Management
+    // Rebuild every 30 frames to clean up ghost entries/drift
+    if (this.frameCount % 30 === 0) {
+        this.spatialGrid.rebuildGrid(this.world.entities);
+        // Also ensure player is in grid
+        this.spatialGrid.updateEntity(this.world.player, this.world.player.x, this.world.player.y);
+    } else {
+        // Incremental updates for active movers
+        // Optimization: Only update entities that actually moved significantly
+        // For minimal implementation, we update moving entities
+        this.world.entities.forEach(e => {
+            if ((e.type === 'ENEMY' || e.type === 'PLAYER') && (e.vx !== 0 || e.vy !== 0)) {
+                this.spatialGrid.updateEntity(e, e.x, e.y);
+            }
+        });
+        // Always update player
+        this.spatialGrid.updateEntity(this.world.player, this.world.player.x, this.world.player.y);
+    }
+
     this.player.updatePerFrame();
     this.playerControl.update(this.timeService.globalTime);
     this.entityUpdater.update(this.timeService.globalTime);
     this.worldEffects.update();
     
-    // Lighting Update
     this.lighting.update(1, this.timeService.globalTime);
-    this.lighting.updateGlobalIllumination(this.world.currentZone()); // Check if zone changed
+    this.lighting.updateGlobalIllumination(this.world.currentZone());
     
-    // Check floor changes
     const request = this.playerControl.requestedFloorChange();
     if (request) {
-        // SAFETY: Handle both string (legacy) and object (new) formats
         const isLegacyString = typeof request === 'string';
-        
-        // FIX: Ensure targetId is a safe string, fallback to empty to catch in null check
         const targetId = isLegacyString 
           ? (request as unknown as string) 
           : (request.id || ''); 
-        
         const spawn = isLegacyString ? undefined : request.spawn;
         
-        // NULL CHECK: Prevent crash if target is undefined
         if (!targetId || targetId.length === 0) {
-            console.warn('[GameEngine] Empty targetId in floor change request:', request);
             this.playerControl.requestedFloorChange.set(null);
             return;
         }
 
         let finalTargetId = targetId;
         
-        // Fallback for legacy 'UP'/'DOWN' commands
         if (targetId === 'UP' || targetId === 'DOWN') {
              const currentZone = this.player.currentSectorId();
              if (currentZone === 'HUB' && targetId === 'DOWN') finalTargetId = 'SECTOR_9_N';
              else if (currentZone === 'SECTOR_9_N' && targetId === 'UP') finalTargetId = 'HUB';
              else {
-                 console.warn(`[GameEngine] Invalid legacy transition: ${targetId} from ${currentZone}`);
                  this.playerControl.requestedFloorChange.set(null);
                  return;
              }
@@ -162,7 +175,6 @@ export class GameEngineService {
         if (finalTargetId && finalTargetId !== 'UP' && finalTargetId !== 'DOWN') {
              this.changeFloor(finalTargetId, spawn);
         }
-        
         this.playerControl.requestedFloorChange.set(null);
     }
 
