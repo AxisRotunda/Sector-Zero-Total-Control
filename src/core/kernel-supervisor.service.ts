@@ -22,7 +22,7 @@ export const KERNEL_CONFIG = {
         LOW: 1,
         MEDIUM: 5,
         HIGH: 10,
-        CRITICAL: 20
+        CRITICAL: 15 // Relaxed from 20 to prevent single-spike critical states
     },
     RECOVERY_RATE: 1, // Points per second
     THRESHOLDS: {

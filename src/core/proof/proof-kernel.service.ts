@@ -340,11 +340,15 @@ export class ProofKernelService implements OnDestroy {
 
       let severity: AxiomSeverity = 'LOW';
       
-      if (data.type === 'SPATIAL_TOPOLOGY' && data.error.includes('Density')) {
+      // Mapped Logic for Severity Constraints
+      if (data.type === 'SPATIAL_TOPOLOGY') {
+          // Density errors are notable but recoverable
           severity = 'MEDIUM'; 
       } else if (data.type === 'GEOMETRY_SEGMENTS') {
-          severity = 'LOW'; 
+          // Structural overlaps are warnings, not crashes
+          severity = 'MEDIUM'; 
       } else if (data.error.includes('KernelPanic')) {
+          // Reserved for actual logic crashes
           severity = 'CRITICAL';
       }
 
