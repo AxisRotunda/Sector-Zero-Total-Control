@@ -106,15 +106,17 @@ self.onmessage = function(e) {
                 // O(N^2) check - optimized by semantic filtering
                 outer: for (let i = 0; i < entities.length; i++) {
                     const a = entities[i];
-                    // Semantic Filter: Only enforce strict Euclidean separation for STRUCTURAL hulls
-                    // If A is not structural, no need to check it against anything else for physics lock
-                    if (a.kind && a.kind !== 'STRUCTURAL') continue;
+                    
+                    // Semantic Filter: Skip non-structural entities (decorative items can overlap)
+                    // Default to STRUCTURAL if kind is undefined for safety
+                    const kindA = a.kind || 'STRUCTURAL';
+                    if (kindA !== 'STRUCTURAL') continue;
 
                     for (let j = i + 1; j < entities.length; j++) {
                         const b = entities[j];
                         
-                        // If B is not structural, skip pair
-                        if (b.kind && b.kind !== 'STRUCTURAL') continue;
+                        const kindB = b.kind || 'STRUCTURAL';
+                        if (kindB !== 'STRUCTURAL') continue;
                         
                         const x_overlap = overlap(a.x - a.w/2, a.x + a.w/2, b.x - b.w/2, b.x + b.w/2);
                         const y_overlap = overlap(a.y - a.h/2, a.y + a.h/2, b.y - b.h/2, b.y + b.h/2);

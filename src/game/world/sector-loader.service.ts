@@ -10,6 +10,7 @@ import { DECORATIONS } from '../../config/decoration.config';
 import { ProofKernelService } from '../../core/proof/proof-kernel.service';
 import { EventBusService } from '../../core/events/event-bus.service';
 import { GameEvents } from '../../core/events/game-events';
+import { AdaptiveQualityService } from '../../systems/adaptive-quality.service';
 
 @Injectable({ providedIn: 'root' })
 export class SectorLoaderService {
@@ -18,6 +19,7 @@ export class SectorLoaderService {
   private spatialHash = inject(SpatialHashService);
   private proofKernel = inject(ProofKernelService);
   private eventBus = inject(EventBusService);
+  private adaptiveQuality = inject(AdaptiveQualityService);
 
   loadFromTemplate(world: WorldService, template: ZoneTemplate): void {
       try {
@@ -63,10 +65,14 @@ export class SectorLoaderService {
               
               this.proofKernel.verifyGeometryOverlap(geometrySnapshots);
           } catch (verifyErr) {
-              console.warn('[SectorLoader] Verification Handled Exception:', verifyErr);
+              console.warn('[SectorLoader] Verification Exception:', verifyErr);
+              
+              // Graceful degradation: Lock quality to HIGH to prevent GPU overload during instability
+              this.adaptiveQuality.setSafetyCap('HIGH');
+
               this.eventBus.dispatch({
                   type: GameEvents.REALITY_BLEED,
-                  payload: { severity: 'MEDIUM', source: 'SECTOR_LOAD', message: 'Geometry verification bypasased due to instability' }
+                  payload: { severity: 'MEDIUM', source: 'SECTOR_LOAD_VERIFY', message: 'Geometry verification bypassed due to instability' }
               });
           }
 
@@ -170,38 +176,17 @@ export class SectorLoaderService {
               e.targetY = def.data.targetY;
               e.z = def.data.z || 0;
           }
-          if (e.type === 'SPAWNER') {
-              e.spawnType = def.data.spawnType;
-              e.spawnMax = def.data.spawnMax;
-              e.spawnCooldown = def.data.spawnCooldown;
-              e.spawnedIds = [];
-              e.timer = 0;
-              e.color = '#333'; 
-              e.radius = 20;
-          }
-          if (def.data.patrolPoints) e.patrolPoints = def.data.patrolPoints;
-          if (def.data.homeX !== undefined) e.homeX = def.data.homeX;
-          if (def.data.homeY !== undefined) e.homeY = def.data.homeY;
-          if (def.data.wanderRadius !== undefined) e.aggroRadius = def.data.wanderRadius;
-      }
-      
-      if (def.id) {
-          if (!e.data) e.data = {};
-          e.data.id = def.id;
-      }
-      
-      if (e.type === 'NPC' && (!def.data || !def.data.color)) {
-          if (!e.radius) e.radius = 25;
-          e.interactionRadius = 100;
-          if (e.subType === 'MEDIC') e.color = '#ef4444';
-          else if (e.subType === 'TRADER') e.color = '#eab308';
-          else if (e.subType === 'HANDLER') e.color = '#3b82f6';
-          else if (e.subType === 'GUARD') e.color = '#1d4ed8';
-          else e.color = '#94a3b8';
+          if (e.data.spawnType) e.spawnType = e.data.spawnType;
       }
 
-      if (e.type === 'DECORATION' && e.subType && DECORATIONS[e.subType]?.isStaticFloor) {
-          world.staticDecorations.push(e);
+      // Static vs Dynamic separation
+      if (e.type === 'DECORATION') {
+          // If decoration is static floor type, render specially or add to static list
+          if (['RUG', 'FLOOR_CRACK', 'GRAFFITI', 'TRASH'].includes(e.subType || '')) {
+              world.staticDecorations.push(e);
+          } else {
+              world.entities.push(e);
+          }
       } else {
           world.entities.push(e);
       }
@@ -210,30 +195,18 @@ export class SectorLoaderService {
   private spawnExit(world: WorldService, def: any, zoneId: string) {
       const exit = this.entityPool.acquire('EXIT');
       exit.x = def.x; exit.y = def.y;
-      exit.exitType = def.direction || 'DOWN'; 
-      exit.targetX = 0;
-      
-      if (def.targetZoneId === 'HUB') {
-          exit.color = '#06b6d4'; 
-      } else {
-          exit.color = def.transitionType === 'GATE' ? '#ef4444' : '#f97316';
-      }
-
-      exit.radius = 40; 
+      exit.exitType = def.direction; // Legacy mapping
       exit.zoneId = zoneId;
-      (exit as any).targetSector = def.targetZoneId;
       
-      if (def.spawnOverride) {
-          exit.spawnOverride = { x: def.spawnOverride.x, y: def.spawnOverride.y };
-      }
+      // Modern properties
+      if (def.targetZoneId) (exit as any).targetZoneId = def.targetZoneId;
+      if (def.transitionType) (exit as any).transitionType = def.transitionType;
+      if (def.spawnOverride) exit.spawnOverride = def.spawnOverride;
       
-      if (def.locked) {
-          const isOpen = this.narrative.getFlag('GATE_OPEN'); 
-          if (!isOpen) { 
-              exit.locked = true;
-              exit.color = '#991b1b';
-          }
-      }
+      exit.locked = def.locked;
+      if (exit.locked) exit.color = '#ef4444';
+      else exit.color = def.direction === 'DOWN' ? '#22c55e' : '#f97316';
+      
       world.entities.push(exit);
   }
 }

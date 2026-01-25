@@ -117,6 +117,20 @@ export class AdaptiveQualityService {
     }
   }
 
+  public setSafetyCap(tier: 'HIGH' | 'MEDIUM') {
+      console.warn(`[AdaptiveQuality] Manual Safety Cap Engaged: ${tier}`);
+      this.maxAllowedTier.set(tier);
+      
+      const order = ['ULTRA', 'HIGH', 'MEDIUM', 'LOW', 'EMERGENCY'];
+      const currentIdx = order.indexOf(this.currentPreset().name.toUpperCase());
+      const capIdx = order.indexOf(tier);
+      
+      // If current is higher quality (lower index) than cap, force downgrade
+      if (currentIdx < capIdx) {
+          this.setQuality(tier);
+      }
+  }
+
   private handleStabilityIssue() {
       if (this.maxAllowedTier() === 'ULTRA') {
           console.warn('[AdaptiveQuality] Reality Instability Detected. Capping Quality to HIGH.');

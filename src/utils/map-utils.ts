@@ -36,7 +36,9 @@ export class MapUtils {
       // Grouping
       walls.forEach(w => {
           // Base key: Visual/Functional properties
-          let key = `${w.color}_${w.height}_${w.subType || 'GENERIC'}_${w.locked}_${w.type}`;
+          // Update: Include 'kind' (structural vs decorative) in grouping to prevent cross-merging
+          const kind = w.data?.kind || 'STRUCTURAL';
+          let key = `${w.color}_${w.height}_${w.subType || 'GENERIC'}_${w.locked}_${w.type}_${kind}`;
           
           // Dimensional Key: 
           // For Horizontal merge, Depth (Y-thickness) must match.
@@ -72,9 +74,11 @@ export class MapUtils {
           for (let i = 0; i < group.length; i++) {
               if (processed.has(group[i].id)) continue;
 
-              let current = { ...group[i] }; // Clone to start a new merged entity
-              // Ensure we have a fresh ID for the merged result logic, usually ID is handled by pool later or ignored here
-              // We maintain the ID of the 'seed' entity for stability
+              // Use structuredClone or manual deep copy for data to preserve metadata
+              let current = { ...group[i] }; 
+              if (group[i].data) {
+                  current.data = { ...group[i].data };
+              }
               
               processed.add(group[i].id);
 
