@@ -8,7 +8,7 @@ import { GameEvents } from '../events/game-events';
 
 // --- TYPES ---
 
-export type AxiomDomain = 'COMBAT' | 'INVENTORY' | 'WORLD' | 'STATUS' | 'RENDER' | 'INTEGRITY' | 'GEOMETRY' | 'GEOMETRY_SEGMENTS' | 'TOPOLOGY';
+export type AxiomDomain = 'COMBAT' | 'INVENTORY' | 'WORLD' | 'STATUS' | 'RENDER' | 'INTEGRITY' | 'GEOMETRY' | 'GEOMETRY_SEGMENTS' | 'SPATIAL_TOPOLOGY' | 'PATH_CONTINUITY' | 'RENDER_DEPTH';
 export type AxiomSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
 export interface Axiom<T = any> {
@@ -89,19 +89,23 @@ self.onmessage = function(e) {
 
             case 'GEOMETRY_SEGMENTS': {
                 // Theorem: No Significant Collinear Overlap
-                // Allows T-junctions, Corners, and small reinforcements.
-                // Forbids full duplicate walls (z-fighting/physics glitching).
+                // Exception: Segments with matching 'role' (e.g. 'REINFORCED') are allowed to overlap.
                 
                 const segments = req.payload.segments;
                 valid = true;
                 const SEG_EPS = 2.0; // Tolerance for alignment
-                const OVERLAP_THRESHOLD = 0.3; // Max 30% overlap fraction allowed
+                const OVERLAP_THRESHOLD = 0.3; // Max 30% overlap fraction allowed for mixed roles
 
                 // O(N^2) but strictly for static load time
                 outerSeg: for (let i = 0; i < segments.length; i++) {
                     const a = segments[i];
                     for (let j = i + 1; j < segments.length; j++) {
                         const b = segments[j];
+
+                        // Exception: Intentional Reinforcement
+                        if (a.role && b.role && a.role === b.role && a.role !== 'DEFAULT') {
+                            continue;
+                        }
 
                         // 1. Detect orientation (Vertical if x1 approx x2)
                         const verticalA = Math.abs(a.x1 - a.x2) < SEG_EPS;
@@ -295,7 +299,9 @@ export class ProofKernelService implements OnDestroy {
     INTEGRITY: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
     GEOMETRY: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
     GEOMETRY_SEGMENTS: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
-    TOPOLOGY: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
+    SPATIAL_TOPOLOGY: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
+    PATH_CONTINUITY: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
+    RENDER_DEPTH: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
   };
 
   // --- WORKER INTEGRATION ---
@@ -357,7 +363,7 @@ export class ProofKernelService implements OnDestroy {
 
   // Async Verification Dispatcher
   verifyFormal(
-      domain: AxiomDomain | 'PATH_CONTINUITY' | 'GEOMETRY_SEGMENTS' | 'RENDER_DEPTH' | 'SPATIAL_TOPOLOGY', 
+      domain: AxiomDomain, 
       context: any, 
       contextId: string
   ) {
@@ -371,7 +377,7 @@ export class ProofKernelService implements OnDestroy {
       this.verifyFormal('PATH_CONTINUITY', { path, gridSize }, `PATH_${Date.now()}`);
   }
 
-  verifyStructuralSegments(segments: { x1: number; y1: number; x2: number; y2: number; entityId?: number | string }[]): void {
+  verifyStructuralSegments(segments: { x1: number; y1: number; x2: number; y2: number; entityId?: number | string; role?: string }[]): void {
       this.verifyFormal('GEOMETRY_SEGMENTS', { segments }, `SEG_${Date.now()}`);
   }
 
@@ -451,18 +457,16 @@ export class ProofKernelService implements OnDestroy {
 
   private handleProofResult(data: any) {
       if (data.valid) {
-          // Log success if needed for telemetry, or update metrics
           this.updateMetrics(data.type, data.computeTime, 0);
           return;
       }
 
       // If invalid, standardized emission
-      // Identify Severity based on error string or explicit meta if we added it
       let severity: 'LOW' | 'MEDIUM' | 'CRITICAL' = 'MEDIUM';
       
       if (data.error.includes('Critical') || data.error.includes('KernelPanic')) {
           severity = 'CRITICAL';
-      } else if (data.error.includes('Overlap')) {
+      } else if (data.error.includes('Overlap') || data.error.includes('Density')) {
           severity = 'MEDIUM'; 
       } else {
           severity = 'LOW';
@@ -470,8 +474,6 @@ export class ProofKernelService implements OnDestroy {
 
       this.updateMetrics(data.type, data.computeTime, 1);
 
-      // Standardized Reality Bleed payload
-      // The Supervisor will pick this up
       this.eventBus.dispatch({
           type: GameEvents.REALITY_BLEED,
           payload: {

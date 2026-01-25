@@ -36,22 +36,12 @@ export class SpatialGridService {
       failures: m.failures
     }));
 
-    // --- AUTOMATED KERNEL CHECK ---
+    // --- AUTOMATED KERNEL CHECK (Topology) ---
+    // O(1) Check dispatched to worker. The Supervisor will handle any failures (e.g., density spikes).
     this.proofKernel.verifySpatialGridTopology(this.grid.size, activeEntities.length, this.cellSize);
     
-    // Legacy sync check kept for immediate panic handling if needed, but mostly superseded by Kernel
-    const verification = this.proofKernel.verifySpatialGrid(this.grid, activeEntities, this.cellSize);
-    if (!verification.isValid) {
-      this.metrics.update(m => ({ ...m, failures: m.failures + 1 }));
-      this.eventBus.dispatch({
-        type: GameEvents.REALITY_BLEED, 
-        payload: {
-            severity: 'MEDIUM',
-            source: 'SPATIAL:SYNC_CHECK', 
-            message: verification.errors[0].message
-        }
-      });
-    }
+    // Note: Removed heavy synchronous 'verifySpatialGrid' check. 
+    // We trust the Supervisor/Worker flow now to avoid main thread jank.
   }
 
   queryRadius(x: number, y: number, radius: number): Entity[] {

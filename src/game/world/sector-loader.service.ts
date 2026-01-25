@@ -60,6 +60,10 @@ export class SectorLoaderService {
                     const wVal = w.width || 40;
                     const dVal = w.depth || 40;
                     
+                    // Extract Role for Intentional Overlap Logic
+                    // Default to 'DEFAULT' if not specified
+                    const role = w.data?.role ?? 'DEFAULT';
+                    
                     // Determine primary axis for simple bounding box segments
                     // If height (depth in top-down) > width, vertical
                     const vertical = dVal > wVal;
@@ -70,7 +74,8 @@ export class SectorLoaderService {
                             x1: w.x,
                             y1: w.y - dVal / 2,
                             x2: w.x,
-                            y2: w.y + dVal / 2
+                            y2: w.y + dVal / 2,
+                            role: role
                         };
                     } else {
                         return {
@@ -78,11 +83,12 @@ export class SectorLoaderService {
                             x1: w.x - wVal / 2,
                             y1: w.y,
                             x2: w.x + wVal / 2,
-                            y2: w.y
+                            y2: w.y,
+                            role: role
                         };
                     }
                 })
-                .filter(s => s !== null) as { x1: number; y1: number; x2: number; y2: number; entityId: string | number }[];
+                .filter(s => s !== null) as { x1: number; y1: number; x2: number; y2: number; entityId: string | number; role: string }[];
 
               // Dispatch to Kernel Worker
               if (segments.length > 0) {
@@ -150,7 +156,7 @@ export class SectorLoaderService {
           if (!wall.locked) wall.color = '#22c55e';
       }
       
-      // Preserve template data (ID, kind, etc)
+      // Preserve template data (ID, kind, role, etc)
       if (def.data) {
           wall.data = { ...def.data };
       }

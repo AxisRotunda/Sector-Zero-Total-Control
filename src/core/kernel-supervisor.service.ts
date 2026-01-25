@@ -46,31 +46,42 @@ export class KernelSupervisorService {
 
       // 2. Policy Matrix: Map Domain -> Action
       const source = payload.source;
+      const msg = payload.message;
       
+      // DOMAIN: Geometry & Structural Integrity
       if (source.includes('GEOMETRY_SEGMENTS')) {
-          // Geometry overlap is visual/physics annoyance, not fatal.
-          // Action: Log and maybe cap render quality if frequent.
+          // Action: Log warning, cap quality if persistent
+          console.warn(`[Supervisor] Structural Flaw: ${msg}`);
           if (this.systemStatus() !== 'STABLE') {
               this.adaptiveQuality.setSafetyCap('HIGH');
           }
       } 
+      // DOMAIN: Spatial Topology (Grid Density)
       else if (source.includes('SPATIAL_TOPOLOGY')) {
-          // Grid density is dangerous (perf cliff).
-          // Action: Immediate Correction.
+          // Action: Immediate Correction (Cull entities or rebuild grid)
+          console.error(`[Supervisor] Topology Breach: ${msg}`);
           this.corrector.triggerCorrection('SPATIAL');
           
           if (payload.severity === 'CRITICAL') {
               this.adaptiveQuality.setSafetyCap('MEDIUM');
           }
       }
+      // DOMAIN: Render Depth (Z-Sorting)
       else if (source.includes('RENDER_DEPTH')) {
-          // Visual glitch.
+          // Action: Soft correction (Re-cull next frame)
           this.corrector.triggerCorrection('RENDER');
       }
+      // DOMAIN: Path Continuity
+      else if (source.includes('PATH_CONTINUITY')) {
+          // Action: Log, implies navmesh desync
+          console.warn(`[Supervisor] Nav Discontinuity: ${msg}`);
+      }
+      // DOMAIN: Inventory State
       else if (source.includes('INVENTORY')) {
-          // State corruption risk.
+          // Action: State Rollback / Lock
           this.corrector.triggerCorrection('INVENTORY');
       }
+      // DOMAIN: World Generation
       else if (source.includes('WorldGen')) {
           this.corrector.triggerCorrection('WORLD_GEN');
       }
