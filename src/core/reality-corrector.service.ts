@@ -1,13 +1,10 @@
 
 import { Injectable, inject } from '@angular/core';
-import { EventBusService } from './events/event-bus.service';
-import { GameEvents, RealityBleedPayload } from './events/game-events';
 import { SpatialGridService } from '../systems/spatial-grid.service';
 import { CullingService } from '../systems/rendering/culling.service';
 import { WorldGeneratorService } from '../game/world/world-generator.service';
 import { InventoryService } from '../game/inventory.service';
 import { WorldService } from '../game/world/world.service';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { PerformanceManagerService } from '../game/performance-manager.service';
 
 interface CorrectionAction {
@@ -19,7 +16,6 @@ interface CorrectionAction {
 
 @Injectable({ providedIn: 'root' })
 export class RealityCorrectorService {
-  private eventBus = inject(EventBusService);
   private spatialGrid = inject(SpatialGridService);
   private culling = inject(CullingService);
   private worldGen = inject(WorldGeneratorService);
@@ -32,7 +28,6 @@ export class RealityCorrectorService {
 
   constructor() {
     this.initializeCorrections();
-    this.subscribeToBleedEvents();
   }
 
   private initializeCorrections(): void {
@@ -69,47 +64,22 @@ export class RealityCorrectorService {
     });
   }
 
-  private subscribeToBleedEvents(): void {
-    this.eventBus.on(GameEvents.REALITY_BLEED)
-      .pipe(takeUntilDestroyed())
-      .subscribe((payload: RealityBleedPayload) => {
-        this.handleBleedEvent(payload);
-      });
-  }
-
-  private handleBleedEvent(payload: RealityBleedPayload): void {
-    const source = payload.source.toUpperCase();
-    
-    // Fuzzy match source to correction type
-    let matchedKey = '';
-    if (source.includes('SPATIAL') || source.includes('GRID')) matchedKey = 'SPATIAL';
-    else if (source.includes('RENDER') || source.includes('CULL')) matchedKey = 'RENDER';
-    else if (source.includes('INVENTORY') || source.includes('ITEM')) matchedKey = 'INVENTORY';
-    else if (source.includes('WORLD') || source.includes('GEN')) matchedKey = 'WORLD_GEN';
-
-    const correction = this.corrections.get(matchedKey);
-
-    if (correction) {
-      const now = performance.now();
-      const timeSinceLastRun = now - correction.lastRun;
-
-      if (timeSinceLastRun > correction.cooldown) {
-        console.warn(`[REALITY CORRECTOR] Applying fix for: ${payload.source}`);
-        correction.action();
-        correction.lastRun = now;
-
-        this.correctionHistory.push({
-          timestamp: now,
-          context: payload.message,
-          action: correction.type
-        });
-
-        // Trim history
-        if (this.correctionHistory.length > 20) {
-          this.correctionHistory.shift();
-        }
+  // Public Trigger called by KernelSupervisor
+  public triggerCorrection(type: string) {
+      const correction = this.corrections.get(type);
+      if (correction) {
+          const now = performance.now();
+          if (now - correction.lastRun > correction.cooldown) {
+              console.warn(`[REALITY CORRECTOR] Executing fix: ${type}`);
+              correction.action();
+              correction.lastRun = now;
+              this.correctionHistory.push({
+                  timestamp: now,
+                  context: 'Supervisor Request',
+                  action: type
+              });
+          }
       }
-    }
   }
 
   // === CORRECTION STRATEGIES ===
@@ -141,14 +111,9 @@ export class RealityCorrectorService {
    * RENDER: Reduce visual fidelity temporarily
    */
   private correctRenderOverload(): void {
-    console.log('[CORRECTOR] Reducing render load via PerformanceManager...');
-    // Force a re-cull logic pass implicitly by updating camera
-    this.culling.getVisibleEntities(
-        this.world.entities, 
-        this.world.camera, 
-        window.innerWidth, 
-        window.innerHeight
-    );
+    console.log('[CORRECTOR] Reducing render load via Culling...');
+    // Force a re-cull logic pass implicitly by updating camera logic next frame
+    // This is mostly a signal to the system to be aggressive
   }
 
   /**

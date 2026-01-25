@@ -22,6 +22,7 @@ import { RealityCorrectorService } from '../core/reality-corrector.service';
 import { PerformanceTelemetryService } from '../systems/performance-telemetry.service';
 import { AdaptiveQualityService } from '../systems/adaptive-quality.service';
 import { ProofKernelService, KernelDiagnostics } from '../core/proof/proof-kernel.service';
+import { KernelSupervisorService } from '../core/kernel-supervisor.service';
 
 @Component({
   selector: 'app-hud',
@@ -64,37 +65,29 @@ import { ProofKernelService, KernelDiagnostics } from '../core/proof/proof-kerne
                </div>
             </div>
             
-            <!-- REALITY INTEGRITY INDICATOR -->
+            <!-- KERNEL SUPERVISOR STATUS -->
             <div class="mt-2 pt-2 border-t border-zinc-800">
               <div class="flex justify-between text-[11px] uppercase tracking-widest font-bold mb-1">
-                <span class="text-cyan-600 drop-shadow-[0_0_4px_rgba(6,182,212,0.8)]">REALITY STABILITY</span>
+                <span class="text-cyan-600 drop-shadow-[0_0_4px_rgba(6,182,212,0.8)]">KERNEL INTEGRITY</span>
                 <span 
-                  [class.text-red-500]="realityIntegrity() < 50" 
-                  [class.text-yellow-500]="realityIntegrity() >= 50 && realityIntegrity() < 80"
-                  [class.text-cyan-500]="realityIntegrity() >= 80"
+                  [class.text-red-500]="supervisor.systemStatus() === 'CRITICAL'" 
+                  [class.text-yellow-500]="supervisor.systemStatus() === 'UNSTABLE'"
+                  [class.text-cyan-500]="supervisor.systemStatus() === 'STABLE'"
                   class="drop-shadow-[0_0_4px_currentColor]">
-                  {{ realityIntegrity() }}%
+                  {{ supervisor.stabilityScore() }}%
                 </span>
               </div>
-              <div class="w-full h-3 bg-zinc-950 border border-zinc-700 relative overflow-hidden">
-                <div class="h-full transition-all duration-300"
-                  [style.width.%]="realityIntegrity()"
-                  [class.bg-gradient-to-r]="true"
-                  [class.from-cyan-600]="realityIntegrity() >= 80"
-                  [class.to-cyan-400]="realityIntegrity() >= 80"
-                  [class.from-yellow-600]="realityIntegrity() >= 50 && realityIntegrity() < 80"
-                  [class.to-yellow-400]="realityIntegrity() >= 50 && realityIntegrity() < 80"
-                  [class.from-red-600]="realityIntegrity() < 50"
-                  [class.to-red-400]="realityIntegrity() < 50"
-                  [class.shadow-[0_0_8px_currentColor]]="true"
-                  [class.animate-pulse]="realityIntegrity() < 30"></div>
-              </div>
               
-              <!-- KERNEL DEBUG PANEL (Visible if failures exist) -->
+              @if (supervisor.systemStatus() !== 'STABLE') {
+                  <div class="text-[9px] text-orange-500 animate-pulse font-bold tracking-tight">
+                      ⚠ {{ supervisor.systemStatus() }} - CORRECTING...
+                  </div>
+              }
+
+              <!-- Kernel Debug (Failures) -->
               @if (kernelDiagnostics().failingAxioms.length > 0) {
-                <div class="mt-1 border-t border-zinc-800 pt-1 bg-red-900/10 p-1">
-                  <div class="text-[9px] text-red-500 font-bold tracking-tight mb-1">TOP AXIOM FAILURES</div>
-                  @for (ax of kernelDiagnostics().failingAxioms | slice:0:3; track ax.id) {
+                <div class="mt-1 bg-red-900/10 p-1">
+                  @for (ax of kernelDiagnostics().failingAxioms | slice:0:2; track ax.id) {
                     <div class="flex justify-between text-[8px] text-zinc-400 font-mono">
                       <span class="truncate max-w-[120px]">{{ ax.id }}</span>
                       <span class="text-red-400">{{ ax.failures }}</span>
@@ -115,14 +108,9 @@ import { ProofKernelService, KernelDiagnostics } from '../core/proof/proof-kerne
                     </span>
                   </div>
                   <div class="flex justify-between text-[10px]">
-                    <span class="text-zinc-500">Quality</span>
+                    <span class="text-zinc-500">Qual</span>
                     <span class="text-cyan-500">{{ getCurrentQuality() }}</span>
                   </div>
-                  @if (getPerformanceStats().trend === 'DEGRADING' || getPerformanceStats().trend === 'CRITICAL') {
-                    <div class="text-[9px] text-orange-500 animate-pulse mt-1 font-bold">
-                      ⚠ ENTROPY RISING
-                    </div>
-                  }
               </div>
 
               @if (lastBleedMessage()) {
@@ -131,15 +119,6 @@ import { ProofKernelService, KernelDiagnostics } from '../core/proof/proof-kerne
                 </div>
               }
             </div>
-
-            <!-- AUTO-CORRECTION STATS -->
-            @if (getCorrectionStats().totalCorrections > 0) {
-              <div class="mt-2 pt-2 border-t border-zinc-800">
-                <div class="text-[10px] text-orange-500 font-bold tracking-widest">
-                  AUTO-CORRECTIONS: {{ getCorrectionStats().totalCorrections }}
-                </div>
-              </div>
-            }
           </div>
 
           <!-- RIGHT: MAP & MENU -->
@@ -245,7 +224,7 @@ export class HudComponent {
   private realityCorrector = inject(RealityCorrectorService);
   private proofKernel = inject(ProofKernelService);
   
-  // New Injections
+  public supervisor = inject(KernelSupervisorService);
   private telemetry = inject(PerformanceTelemetryService);
   private adaptiveQuality = inject(AdaptiveQualityService);
 
@@ -260,42 +239,29 @@ export class HudComponent {
   readonly icons = ICONS;
   readonly FACTIONS = FACTIONS;
 
-  realityIntegrity = signal(100);
   lastBleedMessage = signal<string | null>(null);
 
-  // Use computed to access service method reactively and safely
   kernelDiagnostics = computed(() => {
-      // Ensure the service is ready before calling logic
       if (this.proofKernel && typeof this.proofKernel.getDiagnostics === 'function') {
           return this.proofKernel.getDiagnostics();
       }
-      // Fallback if kernel not ready (shouldn't happen with proper DI, but safe for hot reload)
       return { domains: [], failingAxioms: [], ledgerSize: 0 };
   });
 
   constructor() {
-      // Listen for Reality Bleed events to lower stability
+      // Listen for Reality Bleed events just for message log, stability score handled by Supervisor
       this.eventBus.on(GameEvents.REALITY_BLEED)
         .pipe(takeUntilDestroyed())
         .subscribe((payload: RealityBleedPayload) => {
-            const drop = payload.severity === 'CRITICAL' ? 15 : (payload.severity === 'MEDIUM' ? 5 : 1);
-            this.realityIntegrity.update(v => Math.max(0, v - drop));
             this.lastBleedMessage.set(`[${payload.source}] ${payload.message}`);
-            
             setTimeout(() => this.lastBleedMessage.set(null), 3000);
         });
-        
-      // Recover Integrity slowly
-      setInterval(() => {
-          this.realityIntegrity.update(v => Math.min(100, v + 1));
-      }, 1000);
   }
 
   getCorrectionStats() {
     return this.realityCorrector.getStats();
   }
 
-  // Performance monitoring integration
   getPerformanceStats() {
     return this.telemetry.getStats();
   }

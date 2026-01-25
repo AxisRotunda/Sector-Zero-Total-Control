@@ -47,8 +47,7 @@ export class SectorLoaderService {
 
           world.entities = MapUtils.mergeWalls(world.entities);
 
-          // --- FORMAL VERIFICATION ---
-          // Use Segment Logic (1D) to allow T-junctions/Corners, banning only significant collinear overlap
+          // --- KERNEL VERIFICATION: SEGMENT ANALYSIS ---
           try {
               const walls = world.entities.filter(e => e.type === 'WALL');
               
@@ -85,19 +84,16 @@ export class SectorLoaderService {
                 })
                 .filter(s => s !== null) as { x1: number; y1: number; x2: number; y2: number; entityId: string | number }[];
 
-              // Dispatch to Kernel Worker for Fractional Overlap Analysis
+              // Dispatch to Kernel Worker
               if (segments.length > 0) {
                   this.proofKernel.verifyStructuralSegments(segments);
               }
               
           } catch (verifyErr) {
               console.warn('[SectorLoader] Verification Exception:', verifyErr);
-              
-              this.adaptiveQuality.setSafetyCap('HIGH');
-
               this.eventBus.dispatch({
                   type: GameEvents.REALITY_BLEED,
-                  payload: { severity: 'MEDIUM', source: 'SECTOR_LOAD_VERIFY', message: 'Geometry verification bypassed due to instability' }
+                  payload: { severity: 'MEDIUM', source: 'SECTOR_LOAD_VERIFY', message: 'Geometry verification exception' }
               });
           }
 

@@ -36,6 +36,7 @@ export interface ValidationResult {
   isValid: boolean;
   errors: ProofError[];
   hash?: string;
+  meta?: any;
 }
 
 export interface DomainMetrics {
@@ -63,6 +64,7 @@ self.onmessage = function(e) {
     const start = performance.now();
     let valid = false;
     let error = undefined;
+    let meta = {};
 
     try {
         switch (req.type) {
@@ -88,50 +90,51 @@ self.onmessage = function(e) {
             case 'GEOMETRY_SEGMENTS': {
                 // Theorem: No Significant Collinear Overlap
                 // Allows T-junctions, Corners, and small reinforcements.
-                // Forbids full duplicate walls (z-fighting).
+                // Forbids full duplicate walls (z-fighting/physics glitching).
                 
                 const segments = req.payload.segments;
                 valid = true;
                 const SEG_EPS = 2.0; // Tolerance for alignment
                 const OVERLAP_THRESHOLD = 0.3; // Max 30% overlap fraction allowed
 
+                // O(N^2) but strictly for static load time
                 outerSeg: for (let i = 0; i < segments.length; i++) {
                     const a = segments[i];
                     for (let j = i + 1; j < segments.length; j++) {
                         const b = segments[j];
 
-                        // Detect orientation (Vertical if x1 approx x2)
+                        // 1. Detect orientation (Vertical if x1 approx x2)
                         const verticalA = Math.abs(a.x1 - a.x2) < SEG_EPS;
                         const verticalB = Math.abs(b.x1 - b.x2) < SEG_EPS;
                         const horizontalA = Math.abs(a.y1 - a.y2) < SEG_EPS;
                         const horizontalB = Math.abs(b.y1 - b.y2) < SEG_EPS;
 
-                        // Must match orientation to collinear overlap
+                        // 2. Must match orientation to be collinear
                         const sameX = verticalA && verticalB && Math.abs(a.x1 - b.x1) < SEG_EPS;
                         const sameY = horizontalA && horizontalB && Math.abs(a.y1 - b.y1) < SEG_EPS;
 
                         if (!sameX && !sameY) continue; 
 
-                        // Calculate overlap on the shared axis
+                        // 3. Calculate overlap on the shared axis
                         let aStart, aEnd, bStart, bEnd;
-                        if (sameX) {
+                        if (sameX) { // Vertical segments, compare Y ranges
                             aStart = Math.min(a.y1, a.y2); aEnd = Math.max(a.y1, a.y2);
                             bStart = Math.min(b.y1, b.y2); bEnd = Math.max(b.y1, b.y2);
-                        } else {
+                        } else { // Horizontal segments, compare X ranges
                             aStart = Math.min(a.x1, a.x2); aEnd = Math.max(a.x1, a.x2);
                             bStart = Math.min(b.x1, b.x2); bEnd = Math.max(b.x1, b.x2);
                         }
 
-                        // Overlap length
+                        // 4. Determine Linear Overlap
                         const overlapLen = Math.max(0, Math.min(aEnd, bEnd) - Math.max(aStart, bStart));
 
                         if (overlapLen > SEG_EPS) {
-                            // Check Fraction
+                            // 5. Check Fraction against smallest segment
                             const lenA = Math.abs(aEnd - aStart);
                             const lenB = Math.abs(bEnd - bStart);
                             const minLen = Math.min(lenA, lenB);
                             
-                            // If segments are tiny, ignore
+                            // Ignore tiny segments (decorators)
                             if (minLen < 10) continue;
 
                             const frac = overlapLen / minLen;
@@ -140,7 +143,13 @@ self.onmessage = function(e) {
                                 valid = false;
                                 const idA = a.entityId !== undefined ? a.entityId : i;
                                 const idB = b.entityId !== undefined ? b.entityId : j;
-                                error = 'AxiomViolation: Segment Overlap ' + (frac*100).toFixed(1) + '% (Threshold ' + (OVERLAP_THRESHOLD*100) + '%) between Entity ' + idA + ' and ' + idB;
+                                error = 'Segment Overlap ' + (frac*100).toFixed(1) + '%';
+                                meta = { 
+                                    entityIdA: idA, 
+                                    entityIdB: idB, 
+                                    overlapFrac: frac,
+                                    axis: sameX ? 'VERTICAL' : 'HORIZONTAL'
+                                };
                                 break outerSeg;
                             }
                         }
@@ -156,12 +165,15 @@ self.onmessage = function(e) {
                 const entityCount = p.entityCount;
                 const cellSize = p.cellSize;
                 
-                // Heuristic: Density check
+                meta = { cellCount, entityCount, density: 0 };
+
                 if (cellCount > 0 && entityCount > 0) {
                     const density = entityCount / cellCount;
+                    meta.density = density;
+                    
                     if (density > 50) {
                         valid = false;
-                        error = 'AxiomViolation: Spatial Grid Density Critical (' + density.toFixed(1) + ' ents/cell). Possible Hash Collision or infinite spawn loop.';
+                        error = 'Grid Density Critical (' + density.toFixed(1) + ')';
                     } else {
                         valid = true;
                     }
@@ -180,7 +192,7 @@ self.onmessage = function(e) {
                     const dy = path[i].y - path[i+1].y;
                     if (Math.sqrt(dx*dx + dy*dy) > maxStride) {
                         valid = false;
-                        error = 'AxiomViolation: Path Discontinuity at index ' + i;
+                        error = 'Path Discontinuity at index ' + i;
                         break;
                     }
                 }
@@ -192,7 +204,7 @@ self.onmessage = function(e) {
                 for (let i = 0; i < list.length - 1; i++) {
                     if (list[i] > list[i+1]) {
                         valid = false;
-                        error = 'AxiomViolation: Z-Sort Monotonicity Failure';
+                        error = 'Z-Sort Monotonicity Failure';
                         break;
                     }
                 }
@@ -208,8 +220,10 @@ self.onmessage = function(e) {
 
     self.postMessage({
         id: req.id,
+        type: req.type,
         valid: valid,
         error: error,
+        meta: meta,
         computeTime: performance.now() - start
     });
 };
@@ -351,39 +365,6 @@ export class ProofKernelService implements OnDestroy {
     this.worker.postMessage({ id: contextId, type: domain, payload: context });
   }
 
-  verify<T>(domain: AxiomDomain, context: T): ValidationResult {
-    const start = performance.now();
-    const errors: ProofError[] = [];
-    
-    for (const axiom of this.axioms.values()) {
-      if (axiom.domain !== domain) continue;
-      const stats = this.axiomStats.get(axiom.id);
-      if (stats) stats.checks++;
-
-      try {
-        if (!axiom.check(context)) {
-          if (stats) stats.failures++;
-          errors.push({
-            axiomId: axiom.id,
-            domain: domain,
-            severity: axiom.severity,
-            code: axiom.id.toUpperCase(),
-            message: axiom.errorMessage(context),
-            timestamp: Date.now(),
-            context: this.sanitizeContext(context)
-          });
-        }
-      } catch (e) {
-        console.warn(`[ProofKernel] Axiom ${axiom.id} threw error during check`, e);
-      }
-    }
-
-    const duration = performance.now() - start;
-    this.updateMetrics(domain, duration, errors.length);
-
-    return { isValid: errors.length === 0, errors, hash: this.currentHeadHash };
-  }
-
   // --- FORMAL FACADES ---
 
   verifyPathContinuity(path: {x: number, y: number}[], gridSize: number): void {
@@ -402,6 +383,7 @@ export class ProofKernelService implements OnDestroy {
       this.verifyFormal('SPATIAL_TOPOLOGY', { cellCount, entityCount, cellSize }, `TOPO_${Date.now()}`);
   }
 
+  // Synchronous checks (kept for critical path logic)
   verifyCombatTransaction(damagePacket: DamagePacket, result: DamageResult, multiplierLimit: number = 2.5): ValidationResult {
     return this.verify('COMBAT', { packet: damagePacket, result, limit: multiplierLimit });
   }
@@ -434,24 +416,70 @@ export class ProofKernelService implements OnDestroy {
 
   // --- INTERNAL ---
 
-  private handleProofResult(data: any) {
-      if (!data.valid) {
-          // Identify Severity based on error string
-          let severity: 'MEDIUM' | 'CRITICAL' = 'MEDIUM';
-          if (data.error.includes('Density Critical') || data.error.includes('KernelPanic')) {
-              severity = 'CRITICAL';
-          }
+  private verify<T>(domain: AxiomDomain, context: T): ValidationResult {
+    const start = performance.now();
+    const errors: ProofError[] = [];
+    
+    for (const axiom of this.axioms.values()) {
+      if (axiom.domain !== domain) continue;
+      const stats = this.axiomStats.get(axiom.id);
+      if (stats) stats.checks++;
 
-          console.warn(`[ProofKernel] VERIFICATION FAILURE: ${data.error}`);
-          this.eventBus.dispatch({
-              type: GameEvents.REALITY_BLEED,
-              payload: {
-                  severity: severity,
-                  source: `KERNEL:${data.id.split('_')[0]}`,
-                  message: data.error
-              }
+      try {
+        if (!axiom.check(context)) {
+          if (stats) stats.failures++;
+          errors.push({
+            axiomId: axiom.id,
+            domain: domain,
+            severity: axiom.severity,
+            code: axiom.id.toUpperCase(),
+            message: axiom.errorMessage(context),
+            timestamp: Date.now(),
+            context: this.sanitizeContext(context)
           });
+        }
+      } catch (e) {
+        console.warn(`[ProofKernel] Axiom ${axiom.id} threw error during check`, e);
       }
+    }
+
+    const duration = performance.now() - start;
+    this.updateMetrics(domain, duration, errors.length);
+
+    return { isValid: errors.length === 0, errors, hash: this.currentHeadHash };
+  }
+
+  private handleProofResult(data: any) {
+      if (data.valid) {
+          // Log success if needed for telemetry, or update metrics
+          this.updateMetrics(data.type, data.computeTime, 0);
+          return;
+      }
+
+      // If invalid, standardized emission
+      // Identify Severity based on error string or explicit meta if we added it
+      let severity: 'LOW' | 'MEDIUM' | 'CRITICAL' = 'MEDIUM';
+      
+      if (data.error.includes('Critical') || data.error.includes('KernelPanic')) {
+          severity = 'CRITICAL';
+      } else if (data.error.includes('Overlap')) {
+          severity = 'MEDIUM'; 
+      } else {
+          severity = 'LOW';
+      }
+
+      this.updateMetrics(data.type, data.computeTime, 1);
+
+      // Standardized Reality Bleed payload
+      // The Supervisor will pick this up
+      this.eventBus.dispatch({
+          type: GameEvents.REALITY_BLEED,
+          payload: {
+              severity: severity,
+              source: `KERNEL:${data.type}`,
+              message: data.error
+          }
+      });
   }
 
   private registerCoreAxioms() {
@@ -496,7 +524,7 @@ export class ProofKernelService implements OnDestroy {
     });
   }
 
-  private updateMetrics(domain: AxiomDomain, time: number, failureCount: number) {
+  private updateMetrics(domain: string, time: number, failureCount: number) {
     const signal = this.metrics[domain];
     if (signal) {
       signal.update(m => ({

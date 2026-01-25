@@ -12,9 +12,8 @@ export class SpatialGridService {
 
   private cellSize = 100;
   private grid = new Map<string, Entity[]>();
-  private entityToCell = new Map<number, string>(); // Using number (ID) as key for faster lookup
+  private entityToCell = new Map<number, string>(); 
   
-  // Metrics for monitoring
   private metrics = signal({ totalCells: 0, totalEntities: 0, rebuilds: 0, failures: 0 });
 
   rebuildGrid(entities: Entity[]): void {
@@ -37,10 +36,10 @@ export class SpatialGridService {
       failures: m.failures
     }));
 
-    // Verify consistency immediately after rebuild
+    // --- AUTOMATED KERNEL CHECK ---
     this.proofKernel.verifySpatialGridTopology(this.grid.size, activeEntities.length, this.cellSize);
     
-    // Also run legacy synchronous check
+    // Legacy sync check kept for immediate panic handling if needed, but mostly superseded by Kernel
     const verification = this.proofKernel.verifySpatialGrid(this.grid, activeEntities, this.cellSize);
     if (!verification.isValid) {
       this.metrics.update(m => ({ ...m, failures: m.failures + 1 }));
@@ -48,12 +47,10 @@ export class SpatialGridService {
         type: GameEvents.REALITY_BLEED, 
         payload: {
             severity: 'MEDIUM',
-            source: 'Spatial Grid Corruption', 
+            source: 'SPATIAL:SYNC_CHECK', 
             message: verification.errors[0].message
         }
       });
-      // Auto-heal by brute force clearing to prevent crash cascades, next frame will rebuild
-      this.grid.clear(); 
     }
   }
 
@@ -65,7 +62,6 @@ export class SpatialGridService {
     const startCX = Math.floor(x / this.cellSize);
     const startCY = Math.floor(y / this.cellSize);
 
-    // Scan relevant cells
     for (let dy = -cellRadius; dy <= cellRadius; dy++) {
       for (let dx = -cellRadius; dx <= cellRadius; dx++) {
         const key = `${startCX + dx},${startCY + dy}`;
@@ -73,7 +69,6 @@ export class SpatialGridService {
         if (cell) {
             for(let i=0; i<cell.length; i++) {
                 const e = cell[i];
-                // Precise distance check
                 if (Math.abs(e.x - x) <= radius && Math.abs(e.y - y) <= radius) {
                     if (Math.hypot(e.x - x, e.y - y) <= radius) {
                         results.push(e);
@@ -91,18 +86,15 @@ export class SpatialGridService {
     const newKey = this.getCellKey(newX, newY);
 
     if (oldKey !== newKey) {
-      // Remove from old cell
       if (oldKey) {
           const oldCell = this.grid.get(oldKey);
           if (oldCell) {
               const idx = oldCell.findIndex(x => x.id === e.id);
               if (idx !== -1) oldCell.splice(idx, 1);
-              // Clean up empty cells to save memory
               if (oldCell.length === 0) this.grid.delete(oldKey);
           }
       }
 
-      // Add to new cell
       if (!this.grid.has(newKey)) this.grid.set(newKey, []);
       this.grid.get(newKey)!.push(e);
       this.entityToCell.set(e.id, newKey);
