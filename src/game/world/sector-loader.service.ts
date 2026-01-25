@@ -48,11 +48,11 @@ export class SectorLoaderService {
           world.entities = MapUtils.mergeWalls(world.entities);
 
           // --- FORMAL VERIFICATION ---
-          // Check for illegal overlaps in static geometry that might trap players or cause z-fighting
+          // Check for illegal overlaps in static geometry using new Segment-based Logic
+          // This allows corners/T-junctions but still bans collinear stacking (double walls)
           try {
               const walls = world.entities.filter(e => e.type === 'WALL');
               
-              // Enhanced Snapshot with Identity Metadata and Semantic Kind
               const geometrySnapshots = walls.map((w, idx) => ({
                   kernelId: idx,
                   entityId: w.data?.id ?? w.id, // Prefer authored ID if available, else runtime ID
@@ -62,8 +62,37 @@ export class SectorLoaderService {
                   w: w.width || 40, 
                   h: w.depth || 40
               }));
+
+              const segments = geometrySnapshots
+                .filter(s => s.kind === 'STRUCTURAL')
+                .map(s => {
+                    // Determine primary axis
+                    const vertical = (s.h || 0) > (s.w || 0);
+                    if (vertical) {
+                        return {
+                            entityId: s.entityId,
+                            x1: s.x,
+                            y1: s.y - s.h / 2,
+                            x2: s.x,
+                            y2: s.y + s.h / 2,
+                        };
+                    } else {
+                        return {
+                            entityId: s.entityId,
+                            x1: s.x - s.w / 2,
+                            y1: s.y,
+                            x2: s.x + s.w / 2,
+                            y2: s.y,
+                        };
+                    }
+                });
               
-              this.proofKernel.verifyGeometryOverlap(geometrySnapshots);
+              // New Segment Check
+              this.proofKernel.verifyStructuralSegments(segments);
+              
+              // Optional: Run full AABB check only on decorative/non-structural elements if needed
+              // or keep as a "soft" warning in development builds. For now, segments replace AABB for walls.
+              
           } catch (verifyErr) {
               console.warn('[SectorLoader] Verification Exception:', verifyErr);
               

@@ -8,7 +8,7 @@ import { GameEvents } from '../events/game-events';
 
 // --- TYPES ---
 
-export type AxiomDomain = 'COMBAT' | 'INVENTORY' | 'WORLD' | 'STATUS' | 'RENDER' | 'INTEGRITY' | 'GEOMETRY' | 'TOPOLOGY';
+export type AxiomDomain = 'COMBAT' | 'INVENTORY' | 'WORLD' | 'STATUS' | 'RENDER' | 'INTEGRITY' | 'GEOMETRY' | 'GEOMETRY_SEGMENTS' | 'TOPOLOGY';
 export type AxiomSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
 export interface Axiom<T = any> {
@@ -132,6 +132,53 @@ self.onmessage = function(e) {
                 }
                 break;
 
+            case 'GEOMETRY_SEGMENTS': {
+                const segments = req.payload.segments;
+                valid = true;
+                const SEG_EPS = 1.0;
+
+                outerSeg: for (let i = 0; i < segments.length; i++) {
+                    const a = segments[i];
+                    for (let j = i + 1; j < segments.length; j++) {
+                    const b = segments[j];
+
+                    const verticalA = Math.abs(a.x1 - a.x2) < SEG_EPS;
+                    const verticalB = Math.abs(b.x1 - b.x2) < SEG_EPS;
+                    const horizontalA = Math.abs(a.y1 - a.y2) < SEG_EPS;
+                    const horizontalB = Math.abs(b.y1 - b.y2) < SEG_EPS;
+
+                    const sameX = verticalA && verticalB && Math.abs(a.x1 - b.x1) < SEG_EPS;
+                    const sameY = horizontalA && horizontalB && Math.abs(a.y1 - b.y1) < SEG_EPS;
+
+                    if (!sameX && !sameY) continue; // orthogonal / skew: allowed
+
+                    let aStart, aEnd, bStart, bEnd;
+                    if (sameX) {
+                        aStart = Math.min(a.y1, a.y2);
+                        aEnd   = Math.max(a.y1, a.y2);
+                        bStart = Math.min(b.y1, b.y2);
+                        bEnd   = Math.max(b.y1, b.y2);
+                    } else {
+                        aStart = Math.min(a.x1, a.x2);
+                        aEnd   = Math.max(a.x1, a.x2);
+                        bStart = Math.min(b.x1, b.x2);
+                        bEnd   = Math.max(b.x1, b.x2);
+                    }
+
+                    const overlapLen = Math.max(0, Math.min(aEnd, bEnd) - Math.max(aStart, bStart));
+
+                    if (overlapLen > SEG_EPS) {
+                        valid = false;
+                        const idA = a.entityId !== undefined ? a.entityId : i;
+                        const idB = b.entityId !== undefined ? b.entityId : j;
+                        error = 'AxiomViolation: Segment Overlap detected between Entity ' + idA + ' and Entity ' + idB;
+                        break outerSeg;
+                    }
+                    }
+                }
+                break;
+            }
+
             case 'PATH_CONTINUITY':
                 // Theorem: Topological Connectivity
                 // Forall steps i: Distance(step[i], step[i+1]) <= MaxStride
@@ -251,6 +298,7 @@ export class ProofKernelService implements OnDestroy {
     RENDER: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
     INTEGRITY: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
     GEOMETRY: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
+    GEOMETRY_SEGMENTS: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
     TOPOLOGY: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
   };
 
@@ -311,7 +359,7 @@ export class ProofKernelService implements OnDestroy {
     if (this.ledger.length > 500) this.ledger.shift();
   }
 
-  verifyFormal(domain: AxiomDomain | 'PATH_CONTINUITY' | 'GEOMETRY_OVERLAP' | 'RENDER_DEPTH', context: any, contextId: string) {
+  verifyFormal(domain: AxiomDomain | 'PATH_CONTINUITY' | 'GEOMETRY_OVERLAP' | 'GEOMETRY_SEGMENTS' | 'RENDER_DEPTH', context: any, contextId: string) {
     if (!this.worker) return;
     this.worker.postMessage({ id: contextId, type: domain, payload: context });
   }
@@ -357,6 +405,10 @@ export class ProofKernelService implements OnDestroy {
 
   verifyGeometryOverlap(entities: {x: number, y: number, w: number, h: number, entityId?: string | number, kind?: string}[]): void {
       this.verifyFormal('GEOMETRY_OVERLAP', { entities }, `GEO_${Date.now()}`);
+  }
+
+  verifyStructuralSegments(segments: { x1: number; y1: number; x2: number; y2: number; entityId?: number | string }[]): void {
+      this.verifyFormal('GEOMETRY_SEGMENTS', { segments }, `SEG_${Date.now()}`);
   }
 
   verifyRenderDepth(depthValues: number[]): void {
