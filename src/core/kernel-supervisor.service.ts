@@ -15,28 +15,37 @@ interface SupervisionPolicy {
     condition?: (severity: string) => boolean;
 }
 
+const WEIGHTS = {
+    LOW: 1,
+    MEDIUM: 5,
+    HIGH: 10,
+    CRITICAL: 20
+};
+
 const POLICIES: Record<string, SupervisionPolicy> = {
     'GEOMETRY_SEGMENTS': { 
         logLevel: 'WARN', 
         capQuality: 'HIGH', 
-        // Cap to HIGH if we see significant overlap (MEDIUM) or worse
+        // Condition: severity in {MEDIUM, HIGH, CRITICAL}
         condition: (s) => s === 'MEDIUM' || s === 'HIGH' || s === 'CRITICAL'
     },
     'SPATIAL_TOPOLOGY': { 
         logLevel: 'ERROR', 
         action: 'SPATIAL', 
         capQuality: 'MEDIUM', 
-        // Allow MEDIUM errors to enter the evaluation loop, but logic will only cap if Status is CRITICAL
+        // Condition: severity in {MEDIUM, CRITICAL}
+        // Action logic: trigger SPATIAL; only apply MEDIUM cap if systemStatus is CRITICAL (handled in handleViolation)
         condition: (s) => s === 'MEDIUM' || s === 'CRITICAL' 
     },
     'RENDER_DEPTH': { 
         logLevel: 'WARN', 
-        action: 'RENDER' 
-        // No quality cap for render depth issues, just correction
+        action: 'RENDER',
+        // Condition: any severity
+        condition: () => true
     },
     'PATH_CONTINUITY': { 
-        logLevel: 'WARN' 
-        // Log only
+        logLevel: 'WARN'
+        // Condition: any severity, log-only
     },
     'INVENTORY': { 
         logLevel: 'ERROR', 
@@ -59,6 +68,9 @@ export class KernelSupervisorService {
   stabilityScore = signal(100);
   private emergencyCapApplied = false;
   
+  // Recovery rate r (per second)
+  private readonly RECOVERY_RATE = 1;
+
   systemStatus = computed<SystemStatus>(() => {
       const score = this.stabilityScore();
       if (score < 40) return 'CRITICAL';
@@ -80,9 +92,10 @@ export class KernelSupervisorService {
   }
 
   private handleViolation(payload: RealityBleedPayload) {
-      // 1. Penalize Stability
-      const penalty = payload.severity === 'CRITICAL' ? 20 : (payload.severity === 'MEDIUM' ? 5 : 1);
-      this.stabilityScore.update(s => Math.max(0, s - penalty));
+      // 1. Penalize Stability using explicit weights
+      // S(t+1) = max(0, S(t) - w(severity))
+      const weight = WEIGHTS[payload.severity as keyof typeof WEIGHTS] || 1;
+      this.stabilityScore.update(s => Math.max(0, s - weight));
 
       // 2. Extract Domain (Format: "KERNEL:{DOMAIN}" or just "{DOMAIN}")
       const rawSource = payload.source;
@@ -91,7 +104,7 @@ export class KernelSupervisorService {
       const policy = domainKey ? POLICIES[domainKey] : null;
 
       // 3. Log
-      const msg = `[Supervisor] ${payload.source}: ${payload.message}`;
+      const msg = `[Supervisor] ${payload.source}: ${payload.message} (Sev: ${payload.severity}, Pen: -${weight})`;
       if (policy?.logLevel === 'ERROR' || payload.severity === 'CRITICAL') {
           console.error(msg);
       } else {
@@ -100,17 +113,21 @@ export class KernelSupervisorService {
 
       // 4. Execute Policy
       if (policy) {
+          // Check condition predicate
+          if (policy.condition && !policy.condition(payload.severity)) {
+              return;
+          }
+
           // Trigger Corrector Action if defined
           if (policy.action && payload.message) {
               this.corrector.triggerCorrection(policy.action);
           }
           
-          // Apply Quality Cap if conditions met
-          if (policy.capQuality && policy.condition && policy.condition(payload.severity)) {
+          // Apply Quality Cap logic
+          if (policy.capQuality) {
               const status = this.systemStatus();
 
-              // Emergency MEDIUM cap only if system is globally critical and not already capped
-              // This turns "Entropy Critical" into a rare, meaningful event instead of something triggered by isolated violations.
+              // Emergency MEDIUM cap: Only applied if system is globally CRITICAL
               if (policy.capQuality === 'MEDIUM') {
                   if (status === 'CRITICAL' && !this.emergencyCapApplied) {
                       console.warn('[Supervisor] Stability Critical. Engaging Emergency Caps.');
@@ -120,7 +137,7 @@ export class KernelSupervisorService {
                   return;
               }
 
-              // High cap for geometry/visuals, one-shot (If geometry is overlapping, we assume high load)
+              // One-shot HIGH cap: Applied immediately on violation (e.g. Geometry overlap)
               if (policy.capQuality === 'HIGH') {
                   this.adaptiveQuality.setSafetyCap('HIGH');
               }
@@ -129,12 +146,12 @@ export class KernelSupervisorService {
   }
 
   private startRecoveryLoop() {
+      // S(t+1) = min(100, S(t) + r)
       setInterval(() => {
-          // Slowly recover stability over time
-          this.stabilityScore.update(s => Math.min(100, s + 1));
+          this.stabilityScore.update(s => Math.min(100, s + this.RECOVERY_RATE));
           
           // Reset emergency latch if stability recovers significantly
-          // We wait until > 80 (STABLE) to ensure we don't oscillate
+          // Hysteresis: Wait until > 80 (STABLE) to ensure we don't oscillate
           if (this.stabilityScore() > 80 && this.emergencyCapApplied) {
               console.log('[Supervisor] Stability recovered. Disengaging Emergency Locks.');
               this.emergencyCapApplied = false;

@@ -18,7 +18,30 @@ Sector Zero uses a **Reality Integrity** system to manage simulation errors. Unl
 - **Kernel Supervisor**: The brain. It decides if a violation matters based on overall system health.
 - **Reality Corrector**: The antibodies. It executes fixes (culling entities, resetting grids) to restore order.
 
-## 2. The Verification Pipeline
+## 2. Stability Math & Discrete-Time Model
+
+The Supervisor models system stability ($S$) as a discrete-time recurrence relation. This transforms abstract "bugs" into quantifiable "entropy pressure."
+
+### The Recurrence
+On each tick ($t$):
+\[ S_{t+1} = \min(100,\ \max(0,\ S_t - \sum_i w(severity_i) + r)) \]
+
+Where:
+*   $S$: Stability Score (0-100).
+*   $w(severity)$: Penalty weight for a violation.
+    *   **LOW**: 1
+    *   **MEDIUM**: 5
+    *   **HIGH**: 10
+    *   **CRITICAL**: 20
+*   $r$: Recovery rate (Fixed at **1 per second**).
+
+### Status Thresholds
+The scalar $S$ maps to discrete system states:
+*   **STABLE**: $S \ge 80$. Normal operation.
+*   **UNSTABLE**: $40 \le S < 80$. Warning state.
+*   **CRITICAL**: $S < 40$. Emergency measures active.
+
+## 3. The Verification Pipeline
 
 ### A. Fire-and-Forget Instrumentation
 Systems do not wait for verification. They execute optimistically, then send data to the Kernel Worker.
@@ -31,28 +54,19 @@ Rules that must be true for the simulation to be "Real".
 3.  **Topology**: `EntityCount / CellCount < Threshold`.
 4.  **Geometry**: `Intersection(Wall A, Wall B) == False`.
 
-## 3. The Supervisor's Logic
+## 4. Per-Domain Policies & Predicates
 
-The Supervisor monitors `REALITY_BLEED` events. It maintains a **Stability Score** (0-100).
+Policies are pure predicates mapping `(domain, severity, status)` to actions.
 
-### The Emergency Latch
-To prevent performance death-spirals, the Supervisor uses a "Breaker Switch" logic for quality degradation.
-
-*   **Isolated Error**: If a single system fails (e.g., Spatial Grid density spike), the Supervisor triggers a `CORRECTION` (Rebuild Grid) but does *not* degrade graphics.
-*   **Systemic Failure**: If the Stability Score drops below 40 (**CRITICAL**), *then* a Medium Severity error will trigger the **Emergency Cap**.
-    *   **Action**: Sets `AdaptiveQuality` to `MEDIUM` (or `LOW`).
-    *   **Recovery**: The cap remains locked until Stability recovers to >80.
-
-## 4. Per-Domain Policies
-
-| Domain | Violation | Severity | Policy |
+| Domain | Condition (Severity) | Action | Cap Logic |
 | :--- | :--- | :--- | :--- |
-| **GEOMETRY** | Walls overlapping | LOW/MEDIUM | Log Warning. Cap Quality to `HIGH` if frequent. |
-| **SPATIAL** | Too many entities in cell | CRITICAL | Trigger `SPATIAL` correction (Cull/Rebuild). Cap `MEDIUM` if unstable. |
-| **RENDER** | Z-Sort failure | LOW | Trigger `RENDER` correction (Cache Flush). No Cap. |
-| **COMBAT** | Negative Damage | HIGH | Log Error. (Logic usually clamps automatically). |
+| **GEOMETRY** | {MEDIUM, HIGH, CRITICAL} | Log WARN | One-shot `HIGH` (Immediate). |
+| **SPATIAL** | {MEDIUM, CRITICAL} | Trigger `SPATIAL` | `MEDIUM` **if and only if** `Status == CRITICAL`. |
+| **RENDER** | Any | Trigger `RENDER` | No Cap. |
+| **PATH** | Any | Log WARN | No Cap. |
 
 ## 5. Implementation Details
 
 - **Worker Thread**: All heavy geometric proofs (Segment Intersection) run in `proof.worker.ts` to keep the UI thread hitting 60fps.
 - **Decay**: The HUD indicators use a visual decay (2000ms) so users can see "pulses" of instability, giving the system a living feel.
+- **Emergency Latch**: If stability drops to **CRITICAL**, the system latches to `MEDIUM` quality. It will not return to `HIGH/ULTRA` until stability recovers to **STABLE** (>80), creating a hysteresis loop that prevents oscillation.
