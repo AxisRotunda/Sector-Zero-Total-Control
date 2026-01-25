@@ -38,6 +38,7 @@ export type RealityBleedPayload = {
     severity: 'LOW' | 'MEDIUM' | 'CRITICAL';
     source: string;
     message: string;
+    meta?: any;
 };
 
 export type GameEvent =

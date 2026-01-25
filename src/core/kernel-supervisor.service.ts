@@ -40,19 +40,20 @@ export class KernelSupervisorService {
   }
 
   private handleViolation(payload: RealityBleedPayload) {
-      // 1. Penalize Stability
+      // 1. Penalize Stability based on Severity
       const penalty = payload.severity === 'CRITICAL' ? 20 : (payload.severity === 'MEDIUM' ? 5 : 1);
       this.stabilityScore.update(s => Math.max(0, s - penalty));
 
       // 2. Policy Matrix: Map Domain -> Action
+      // Payload source usually comes as "KERNEL:{DOMAIN}"
       const source = payload.source;
       const msg = payload.message;
       
       // DOMAIN: Geometry & Structural Integrity
       if (source.includes('GEOMETRY_SEGMENTS')) {
-          // Action: Log warning, cap quality if persistent
+          // Action: Log warning, cap quality if persistent instability
           console.warn(`[Supervisor] Structural Flaw: ${msg}`);
-          if (this.systemStatus() !== 'STABLE') {
+          if (this.systemStatus() !== 'STABLE' || payload.severity === 'CRITICAL') {
               this.adaptiveQuality.setSafetyCap('HIGH');
           }
       } 
@@ -68,13 +69,14 @@ export class KernelSupervisorService {
       }
       // DOMAIN: Render Depth (Z-Sorting)
       else if (source.includes('RENDER_DEPTH')) {
-          // Action: Soft correction (Re-cull next frame)
+          // Action: Soft correction (Re-cull next frame / Flush sort cache)
           this.corrector.triggerCorrection('RENDER');
       }
       // DOMAIN: Path Continuity
       else if (source.includes('PATH_CONTINUITY')) {
-          // Action: Log, implies navmesh desync
+          // Action: Log only, implies navmesh desync
           console.warn(`[Supervisor] Nav Discontinuity: ${msg}`);
+          // Potential future action: this.corrector.triggerCorrection('NAV_REBUILD');
       }
       // DOMAIN: Inventory State
       else if (source.includes('INVENTORY')) {

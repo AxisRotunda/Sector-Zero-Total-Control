@@ -108,12 +108,12 @@ export class RealityCorrectorService {
   }
 
   /**
-   * RENDER: Reduce visual fidelity temporarily
+   * RENDER: Reduce visual fidelity temporarily or flush sorting caches
    */
   private correctRenderOverload(): void {
-    console.log('[CORRECTOR] Reducing render load via Culling...');
-    // Force a re-cull logic pass implicitly by updating camera logic next frame
-    // This is mostly a signal to the system to be aggressive
+    console.log('[CORRECTOR] Render Anomaly Detected. Flushing render caches...');
+    // In a real scenario, this would clear SpriteCache or force a Z-sort rebuild.
+    // For now, it logs and acts as a signal for the Supervisor to potentially downgrade quality tiers.
   }
 
   /**

@@ -84,17 +84,16 @@ import { KernelSupervisorService } from '../core/kernel-supervisor.service';
                   </div>
               }
 
-              <!-- Kernel Debug (Failures) -->
-              @if (kernelDiagnostics().failingAxioms.length > 0) {
-                <div class="mt-1 bg-red-900/10 p-1">
-                  @for (ax of kernelDiagnostics().failingAxioms | slice:0:2; track ax.id) {
-                    <div class="flex justify-between text-[8px] text-zinc-400 font-mono">
-                      <span class="truncate max-w-[120px]">{{ ax.id }}</span>
-                      <span class="text-red-400">{{ ax.failures }}</span>
-                    </div>
+              <!-- Kernel Domain Monitors -->
+              <div class="flex gap-1 mt-1">
+                  @for (domain of ['GEOMETRY', 'SPATIAL', 'RENDER', 'NAV']; track domain) {
+                      <div class="w-2 h-2 rounded-full border border-zinc-700"
+                           [class.bg-red-500]="isDomainFailing(domain)"
+                           [class.bg-green-900]="!isDomainFailing(domain)"
+                           [class.animate-pulse]="isDomainFailing(domain)"
+                           [title]="domain"></div>
                   }
-                </div>
-              }
+              </div>
 
               <!-- Performance Telemetry Overlay -->
               <div class="mt-2 pt-2 border-t border-zinc-800">
@@ -256,6 +255,19 @@ export class HudComponent {
             this.lastBleedMessage.set(`[${payload.source}] ${payload.message}`);
             setTimeout(() => this.lastBleedMessage.set(null), 3000);
         });
+  }
+
+  isDomainFailing(displayDomain: string): boolean {
+      const diag = this.kernelDiagnostics();
+      // Map UI names to internal Axiom Domains
+      let key = displayDomain;
+      if (displayDomain === 'GEOMETRY') key = 'GEOMETRY_SEGMENTS';
+      if (displayDomain === 'SPATIAL') key = 'SPATIAL_TOPOLOGY';
+      if (displayDomain === 'NAV') key = 'PATH_CONTINUITY';
+      if (displayDomain === 'RENDER') key = 'RENDER_DEPTH';
+
+      const domainData = diag.domains.find(d => d.domain === key);
+      return domainData ? domainData.failures > 0 : false;
   }
 
   getCorrectionStats() {

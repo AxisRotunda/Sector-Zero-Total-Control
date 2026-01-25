@@ -102,7 +102,7 @@ self.onmessage = function(e) {
                     for (let j = i + 1; j < segments.length; j++) {
                         const b = segments[j];
 
-                        // Exception: Intentional Reinforcement
+                        // Exception: Intentional Reinforcement via matching Roles
                         if (a.role && b.role && a.role === b.role && a.role !== 'DEFAULT') {
                             continue;
                         }
@@ -479,7 +479,8 @@ export class ProofKernelService implements OnDestroy {
           payload: {
               severity: severity,
               source: `KERNEL:${data.type}`,
-              message: data.error
+              message: data.error,
+              meta: data.meta
           }
       });
   }
