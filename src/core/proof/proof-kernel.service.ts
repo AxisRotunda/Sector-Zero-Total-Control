@@ -98,7 +98,7 @@ self.onmessage = function(e) {
             case 'GEOMETRY_OVERLAP':
                 // Theorem: Disjoint Rectangles (Separating Axis)
                 // Forall A, B in Entities: Intersect(A, B) -> Area(Intersection) < Epsilon
-                // Input: list of {x, y, w, h}
+                // Input: list of {x, y, w, h, entityId?}
                 const entities = req.payload.entities;
                 valid = true;
                 
@@ -111,9 +111,12 @@ self.onmessage = function(e) {
                         const x_overlap = overlap(a.x - a.w/2, a.x + a.w/2, b.x - b.w/2, b.x + b.w/2);
                         const y_overlap = overlap(a.y - a.h/2, a.y + a.h/2, b.y - b.h/2, b.y + b.h/2);
                         
-                        if (x_overlap > 1.0 && y_overlap > 1.0) { // Tolerance of 1 unit
+                        // Tolerance of 1 unit to allow flush contacts
+                        if (x_overlap > 1.0 && y_overlap > 1.0) { 
                             valid = false;
-                            error = 'AxiomViolation: Euclidean Intersection detected between ID ' + i + ' and ' + j;
+                            const idA = a.entityId !== undefined ? a.entityId : i;
+                            const idB = b.entityId !== undefined ? b.entityId : j;
+                            error = 'AxiomViolation: Euclidean Intersection detected between Entity ' + idA + ' and Entity ' + idB;
                             break outer;
                         }
                     }
@@ -343,7 +346,7 @@ export class ProofKernelService implements OnDestroy {
       this.verifyFormal('PATH_CONTINUITY', { path, gridSize }, `PATH_${Date.now()}`);
   }
 
-  verifyGeometryOverlap(entities: {x: number, y: number, w: number, h: number}[]): void {
+  verifyGeometryOverlap(entities: {x: number, y: number, w: number, h: number, entityId?: string | number}[]): void {
       this.verifyFormal('GEOMETRY_OVERLAP', { entities }, `GEO_${Date.now()}`);
   }
 

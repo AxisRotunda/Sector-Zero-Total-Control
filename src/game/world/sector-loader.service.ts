@@ -45,9 +45,17 @@ export class SectorLoaderService {
           // --- FORMAL VERIFICATION ---
           // Check for illegal overlaps in static geometry that might trap players or cause z-fighting
           const walls = world.entities.filter(e => e.type === 'WALL');
-          const geometrySnapshots = walls.map(w => ({
-              x: w.x, y: w.y, w: w.width || 40, h: w.depth || 40
+          
+          // Enhanced Snapshot with Identity Metadata
+          const geometrySnapshots = walls.map((w, idx) => ({
+              kernelId: idx,
+              entityId: w.data?.id ?? w.id, // Prefer authored ID if available, else runtime ID
+              x: w.x, 
+              y: w.y, 
+              w: w.width || 40, 
+              h: w.depth || 40
           }));
+          
           this.proofKernel.verifyGeometryOverlap(geometrySnapshots);
 
           world.entities.forEach(e => {
@@ -96,6 +104,16 @@ export class SectorLoaderService {
           const isOpen = this.narrative.getFlag('GATE_OPEN');
           wall.locked = def.locked && !isOpen;
           if (!wall.locked) wall.color = '#22c55e';
+      }
+      
+      // Preserve template data (ID, etc)
+      if (def.data) {
+          wall.data = { ...def.data };
+      }
+      // If template has explicit ID but not nested in data, attach it
+      if (def.id && (!wall.data || !wall.data.id)) {
+          if (!wall.data) wall.data = {};
+          wall.data.id = def.id;
       }
       
       world.entities.push(wall);
