@@ -19,8 +19,15 @@ export class PhysicsService {
   private readonly COLLISION_QUERY_RATIO = 1.5; 
   private readonly MIN_SEPARATION_FORCE = 0.01;
   private readonly MAX_SEPARATION_NEIGHBORS = 6; 
+  
+  // Optimization: Pre-calculated square threshold
+  private readonly MIN_SEP_FORCE_SQ = 0.0001; 
+
+  // Global frame counter for staggering updates
+  private frameCount = 0;
 
   public updateEntityPhysics(e: Entity, stats?: { speed: number }, inputVec?: { x: number, y: number }): boolean {
+    this.frameCount++;
     const isPlayer = e.type === 'PLAYER';
     
     const ACCELERATION = isPlayer ? 3.0 : 2.0; 
@@ -34,19 +41,27 @@ export class PhysicsService {
         e.vx += inputVec!.x * ACCELERATION; 
         e.vy += inputVec!.y * ACCELERATION;
         
-        const currentSpeed = Math.hypot(e.vx, e.vy);
-        if (currentSpeed > MAX_SPEED) { 
-            const scale = MAX_SPEED / currentSpeed; 
+        // Squared speed check to avoid sqrt every frame
+        const currentSpeedSq = e.vx*e.vx + e.vy*e.vy;
+        const maxSpeedSq = MAX_SPEED * MAX_SPEED;
+        
+        if (currentSpeedSq > maxSpeedSq) { 
+            const scale = Math.sqrt(maxSpeedSq / currentSpeedSq); 
             e.vx *= scale; 
             e.vy *= scale; 
         }
     }
 
-    if ((e.type === 'ENEMY' || e.type === 'PLAYER') && e.state !== 'DEAD') {
+    // SEPARATION LOGIC
+    // Optimization: Stagger updates for enemies. Process 50% per frame.
+    // Player always updates.
+    const shouldProcessSeparation = isPlayer || (e.id % 2 === this.frameCount % 2);
+
+    if (shouldProcessSeparation && (e.type === 'ENEMY' || e.type === 'PLAYER') && e.state !== 'DEAD') {
         const zoneId = this.world.currentZone().id;
         const queryRadius = e.radius * this.SPATIAL_BUFFER_RATIO;
         
-        // Use default buffer (0) for outer separation loop
+        // Use default buffer (0)
         const { buffer, count } = this.spatialHash.queryFast(e.x, e.y, queryRadius, zoneId, 0);
         
         let processedNeighbors = 0;
@@ -57,17 +72,26 @@ export class PhysicsService {
             if (n.id === e.id || n.state === 'DEAD' || n.type === 'WALL' || n.type === 'DECORATION' || n.type === 'PICKUP') continue;
             
             const minDist = e.radius + n.radius;
-            const distSq = (e.x - n.x)**2 + (e.y - n.y)**2;
+            const minDistSq = minDist * minDist;
             
-            if (distSq < minDist * minDist && distSq > 0.01) {
+            const dx = e.x - n.x;
+            const dy = e.y - n.y;
+            const distSq = dx*dx + dy*dy;
+            
+            if (distSq < minDistSq && distSq > 0.01) {
+                // We only sqrt if we are actually colliding/too close
                 const dist = Math.sqrt(distSq);
                 const pushStrength = (minDist - dist) / dist; 
                 const force = 0.2; 
                 
-                const px = (e.x - n.x) * pushStrength * force;
-                const py = (e.y - n.y) * pushStrength * force;
+                // If staggering, double the force to compensate for missing a frame? 
+                // No, separation is smooth, 30Hz is fine.
                 
-                if (Math.abs(px) < this.MIN_SEPARATION_FORCE && Math.abs(py) < this.MIN_SEPARATION_FORCE) continue;
+                const px = dx * pushStrength * force;
+                const py = dy * pushStrength * force;
+                
+                // Optimization: Squared check for min force
+                if ((px*px + py*py) < this.MIN_SEP_FORCE_SQ) continue;
 
                 e.vx += px;
                 e.vy += py;
@@ -81,14 +105,16 @@ export class PhysicsService {
     e.vx *= friction; 
     e.vy *= friction;
     
+    // Snap to zero if very slow
     if (Math.abs(e.vx) < 0.1) e.vx = 0; 
     if (Math.abs(e.vy) < 0.1) e.vy = 0;
     
-    const isMoving = Math.abs(e.vx) > 0.1 || Math.abs(e.vy) > 0.1;
+    const isMoving = e.vx !== 0 || e.vy !== 0;
     if (!isMoving) return false;
 
     // Sub-stepping for collision
     const r = e.radius || 20;
+    // Use approximation for speed to avoid Sqrt if possible, but step calc needs scalar speed
     const speed = Math.hypot(e.vx, e.vy);
     const steps = Math.ceil(speed / (r * 0.5));
     
@@ -109,38 +135,33 @@ export class PhysicsService {
             // Impact effects
             if (isPlayer && speed > 5) this.spawnWallImpact(e);
 
-            // 1. Revert to position before collision to un-stick
+            // 1. Revert
             e.x = prevX;
             e.y = prevY;
 
-            // 2. Calculate Slide Normal
+            // 2. Slide
             const normal = this.getCollisionNormal(e, obstacle);
             
-            // 3. Project velocity along wall surface (remove normal component)
             // v_new = v - (v . n) * n
             const dot = e.vx * normal.x + e.vy * normal.y;
             
-            // Apply friction coefficient to sliding to prevent infinite slide
             e.vx -= dot * normal.x;
             e.vy -= dot * normal.y;
             
-            // Slight damping on impact
             e.vx *= 0.9;
             e.vy *= 0.9;
             
-            // 4. Re-apply step with NEW projected velocity so we don't freeze for a frame
+            // 4. Re-apply step with NEW velocity
             const projectedStepX = (e.vx / steps);
             const projectedStepY = (e.vy / steps);
             e.x += projectedStepX;
             e.y += projectedStepY;
 
-            // Push out of overlap (Slop recovery)
-            // For walls (AABB), strict pushout is handled by revert + slide
-            // For Circles, we might want to push explicitly if we are still stuck
+            // Push out (Overlap Recovery)
             if (obstacle.type !== 'WALL') {
                 const dx = e.x - obstacle.x;
                 const dy = e.y - obstacle.y;
-                const dist = Math.hypot(dx, dy);
+                const dist = Math.hypot(dx, dy); // Required for precise push
                 const overlap = (e.radius + (obstacle.radius || 20)) - dist;
                 if (overlap > 0 && dist > 0) {
                     e.x += normal.x * overlap * 0.5;
@@ -206,14 +227,21 @@ export class PhysicsService {
       }
 
       // 2. Dynamic Check
+      // Optimization: Squared distance
+      const radiusSq = radius * radius;
+
       for (let i = 0; i < count; i++) {
           const obs = buffer[i];
           if (obs.id === e.id) continue;
           
           if (isDestructible(obs) && obs.state !== 'DEAD') {
               const obsR = obs.radius || 20;
-              const dist = Math.hypot(e.x - obs.x, e.y - obs.y);
-              if (dist < radius + obsR) return obs;
+              const dx = e.x - obs.x;
+              const dy = e.y - obs.y;
+              // (r1 + r2)^2
+              const combinedRad = radius + obsR;
+              
+              if ((dx*dx + dy*dy) < combinedRad * combinedRad) return obs;
           }
           
           // Also check dynamic walls (gates)
@@ -250,11 +278,9 @@ export class PhysicsService {
           const dx = e.x - obstacle.x;
           const dy = e.y - obstacle.y;
           
-          // Calculate penetration depth on each axis relative to bounds
           const px = halfW + e.radius - Math.abs(dx);
           const py = halfD + e.radius - Math.abs(dy);
           
-          // If penetration on X is shallower, collision is horizontal (normal is X)
           if (px < py) {
               return { x: Math.sign(dx), y: 0 };
           } else {
@@ -266,7 +292,7 @@ export class PhysicsService {
           const dy = e.y - obstacle.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
           
-          if (dist === 0) return { x: 0, y: 1 }; // Fallback
+          if (dist === 0) return { x: 0, y: 1 }; 
           return { x: dx / dist, y: dy / dist };
       }
   }

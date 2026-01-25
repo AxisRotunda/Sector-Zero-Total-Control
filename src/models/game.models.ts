@@ -64,6 +64,7 @@ export interface Entity extends Volumetric {
   renderLayer?: RenderLayer;
   // Transient sorting metadata (calculated per frame, not saved)
   _sortMeta?: SortMetadata;
+  _depthKey?: number; // Pre-calculated depth for O(1) comparator
 
   vx: number;
   vy: number;
@@ -221,4 +222,5 @@ export interface Particle {
   isoDepth?: number;
   renderLayer?: RenderLayer; // Layer override for particles
   _sortMeta?: SortMetadata;
+  _depthKey?: number;
 }
