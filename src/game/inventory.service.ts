@@ -3,6 +3,10 @@ import { Injectable, signal, computed, inject } from '@angular/core';
 import { Item, ItemType } from '../models/item.models';
 import * as CONFIG from '../config/game.config';
 import { IdGeneratorService } from '../utils/id-generator.service';
+import { ProofKernelService } from '../core/proof/proof-kernel.service';
+import { EventBusService } from '../core/events/event-bus.service';
+import { GameEvents } from '../core/events/game-events';
+import { PlayerProgressionService } from './player/player-progression.service';
 
 export interface DragState {
   isDragging: boolean;
@@ -28,6 +32,13 @@ export interface DropTarget {
 })
 export class InventoryService {
   private idGenerator = inject(IdGeneratorService);
+  private proofKernel = inject(ProofKernelService);
+  private eventBus = inject(EventBusService);
+  // Need to inject PlayerProgressionService lazily or use a different way to access credits/scrap 
+  // to avoid potential circular dep if progression injects inventory.
+  // For now, we'll assume verifying the BAG items is the priority, or inject if safe.
+  // Since PlayerProgressionService injects SkillTree, Sound, EventBus - it seems safe.
+  private progression = inject(PlayerProgressionService);
 
   bag = signal<Item[]>([]);
   equipped = signal<{
@@ -74,6 +85,26 @@ export class InventoryService {
   public getItemSlot(type: ItemType): 'weapon' | 'armor' | 'implant' | 'stim' | 'amulet' | 'ring' {
     if (type === 'PSI_BLADE') return 'weapon';
     return type.toLowerCase() as any;
+  }
+
+  // --- VERIFICATION ---
+  private verifyIntegrity(context: string) {
+      const result = this.proofKernel.verifyInventoryState(
+          this.bag(), 
+          this.progression.credits(), 
+          this.progression.scrap()
+      );
+
+      if (!result.isValid) {
+          this.eventBus.dispatch({
+              type: GameEvents.REALITY_BLEED,
+              payload: {
+                  severity: 'MEDIUM',
+                  source: `INVENTORY:${context}`,
+                  message: result.errors[0]
+              }
+          });
+      }
   }
 
   startDrag(item: Item, sourceType: 'bag' | 'equipment', sourceIndex?: number, sourceSlot?: any, clientX: number = 0, clientY: number = 0) {
@@ -132,7 +163,9 @@ export class InventoryService {
       const validation = this.validateDropTarget(target.type, target.index, target.slot);
       if (validation.isValid) {
           this.executeDrop(this.dragState(), target.type, target.index, target.slot, validation.isSwap, validation.isMerge);
-          this.cancelDrag(); return true;
+          this.cancelDrag(); 
+          this.verifyIntegrity('MOVE_ITEM');
+          return true;
       }
       this.cancelDrag(); return false;
   }
@@ -143,6 +176,7 @@ export class InventoryService {
       } else if (source.type === 'equipment' && source.slot) {
           this.unequip(source.slot as any);
       }
+      this.verifyIntegrity('QUICK_ACTION');
   }
 
   private executeDrop(drag: DragState, targetType: 'bag' | 'equipment', targetIndex?: number, targetSlot?: any, isSwap: boolean = false, isMerge: boolean = false) {
@@ -176,23 +210,32 @@ export class InventoryService {
   }
 
   addItem(item: Item): boolean {
+    let success = false;
     if (item.maxStack > 1) {
-        let addedToStack = false;
         this.bag.update(b => {
             const newBag = [...b];
             const existing = newBag.find(i => i.name === item.name && i.stack < i.maxStack);
             if (existing) {
                 const space = existing.maxStack - existing.stack;
                 const add = Math.min(space, item.stack);
-                existing.stack += add; item.stack -= add; addedToStack = true;
+                existing.stack += add; item.stack -= add;
+                // If consumed fully, stop
             }
             return newBag;
         });
-        if (item.stack <= 0) return true;
+        if (item.stack <= 0) success = true;
     }
-    if (this.bag().length >= this.bagSize) return false;
-    this.bag.update(b => [...b, item]);
-    return true;
+    
+    if (!success) {
+        if (this.bag().length >= this.bagSize) success = false;
+        else {
+            this.bag.update(b => [...b, item]);
+            success = true;
+        }
+    }
+    
+    if (success) this.verifyIntegrity('ADD_ITEM');
+    return success;
   }
 
   swapBagWithEquipment(bagIndex: number, equipSlot: any) {

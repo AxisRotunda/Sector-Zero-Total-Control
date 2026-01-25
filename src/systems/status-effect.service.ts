@@ -1,16 +1,39 @@
+
 import { Injectable, inject } from '@angular/core';
 import { Entity } from '../models/game.models';
 import { WorldService } from '../game/world/world.service';
 import { ParticleService } from './particle.service';
 import * as BALANCE from '../config/balance.config';
+import { ProofKernelService } from '../core/proof/proof-kernel.service';
+import { EventBusService } from '../core/events/event-bus.service';
+import { GameEvents } from '../core/events/game-events';
 
 @Injectable({ providedIn: 'root' })
 export class StatusEffectService {
   private world = inject(WorldService);
   private particleService = inject(ParticleService);
+  private proofKernel = inject(ProofKernelService);
+  private eventBus = inject(EventBusService);
 
   public processStatusEffects(e: Entity, globalTime: number): void {
     if (e.hp <= 0) return;
+
+    // --- AXIOM CHECK ---
+    const proof = this.proofKernel.verifyStatusEffects(e);
+    if (!proof.isValid) {
+        this.eventBus.dispatch({
+            type: GameEvents.REALITY_BLEED,
+            payload: {
+                severity: 'LOW',
+                source: `STATUS_CHECK:${e.id}`,
+                message: proof.errors[0]
+            }
+        });
+        
+        // Auto-Correction: Reset status if corrupted
+        e.status = { stun: 0, slow: 0, poison: null, burn: null, weakness: null, bleed: null };
+        return;
+    }
 
     if (e.status.poison && e.status.poison.timer > 0) {
         e.status.poison.timer--;

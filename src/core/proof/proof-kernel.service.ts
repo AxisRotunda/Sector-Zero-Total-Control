@@ -3,6 +3,7 @@ import { Injectable } from '@angular/core';
 import { Entity, Zone } from '../../models/game.models';
 import { DamageResult, DamagePacket } from '../../models/damage.model';
 import { DialogueNode, Requirement } from '../../models/narrative.models';
+import { Item } from '../../models/item.models';
 
 /**
  * THE AXIOMATIC SENTINEL
@@ -21,6 +22,29 @@ export interface ValidationResult {
 })
 export class ProofKernelService {
 
+    // --- METRICS & PERFORMANCE ---
+    private metrics = {
+        totalChecks: 0,
+        failedChecks: 0,
+        lastCheckTime: 0,
+        avgCheckTime: 0
+    };
+
+    getMetrics() { return this.metrics; }
+
+    private measure<T>(fn: () => T): T {
+        const start = performance.now();
+        const result = fn();
+        const duration = performance.now() - start;
+        
+        this.metrics.totalChecks++;
+        this.metrics.lastCheckTime = duration;
+        // Exponential moving average for smoothing
+        this.metrics.avgCheckTime = (this.metrics.avgCheckTime * 0.95) + (duration * 0.05);
+        
+        return result;
+    }
+
     // --- DOMAIN: WORLD TOPOLOGY ---
 
     /**
@@ -28,81 +52,79 @@ export class ProofKernelService {
      * Theorem: Forall(exit) -> Exists(Path(PlayerStart, exit))
      */
     verifyConnectivity(entities: Entity[], bounds: { minX: number, maxX: number, minY: number, maxY: number }, playerStart: { x: number, y: number }): ValidationResult {
-        const errors: string[] = [];
-        
-        // 1. Build a temporary navigation grid for the proof
-        const gridSize = 60;
-        const gridWidth = Math.ceil((bounds.maxX - bounds.minX) / gridSize);
-        const gridHeight = Math.ceil((bounds.maxY - bounds.minY) / gridSize);
-        
-        const grid: boolean[][] = Array(gridHeight).fill(null).map(() => Array(gridWidth).fill(true));
-        
-        // Rasterize Walls
-        entities.filter(e => e.type === 'WALL').forEach(w => {
-            this.markUnwalkable(grid, w, bounds, gridSize, gridWidth, gridHeight);
-        });
-
-        // 2. Locate Exits
-        const exits = entities.filter(e => e.type === 'EXIT');
-        if (exits.length === 0) {
-            // Not necessarily an error for closed rooms, but usually we want exits
-            // Only flag if it's not a safe zone
-            // errors.push("Axiom Failure: Zone contains no exits."); 
-        }
-
-        // 3. Prove reachability for ALL exits
-        const startNode = this.toGrid(playerStart, bounds, gridSize);
-        
-        // Flood Fill (BFS) to find all reachable cells from start
-        const reachable = new Set<string>();
-        const queue: {x: number, y: number}[] = [startNode];
-        reachable.add(`${startNode.x},${startNode.y}`);
-
-        // Safety break for loop
-        let iterations = 0;
-        const MAX_ITER = 10000;
-
-        while (queue.length > 0 && iterations < MAX_ITER) {
-            iterations++;
-            const current = queue.shift()!;
+        return this.measure(() => {
+            const errors: string[] = [];
             
-            const neighbors = [
-                {x: current.x + 1, y: current.y},
-                {x: current.x - 1, y: current.y},
-                {x: current.x, y: current.y + 1},
-                {x: current.x, y: current.y - 1}
-            ];
+            // 1. Build a temporary navigation grid for the proof
+            const gridSize = 60;
+            const gridWidth = Math.ceil((bounds.maxX - bounds.minX) / gridSize);
+            const gridHeight = Math.ceil((bounds.maxY - bounds.minY) / gridSize);
+            
+            const grid: boolean[][] = Array(gridHeight).fill(null).map(() => Array(gridWidth).fill(true));
+            
+            // Rasterize Walls
+            entities.filter(e => e.type === 'WALL').forEach(w => {
+                this.markUnwalkable(grid, w, bounds, gridSize, gridWidth, gridHeight);
+            });
 
-            for (const n of neighbors) {
-                if (n.x >= 0 && n.x < gridWidth && n.y >= 0 && n.y < gridHeight) {
-                    const key = `${n.x},${n.y}`;
-                    if (!reachable.has(key) && grid[n.y][n.x]) {
-                        reachable.add(key);
-                        queue.push(n);
+            // 2. Locate Exits
+            const exits = entities.filter(e => e.type === 'EXIT');
+
+            // 3. Prove reachability for ALL exits
+            const startNode = this.toGrid(playerStart, bounds, gridSize);
+            
+            // Flood Fill (BFS) to find all reachable cells from start
+            const reachable = new Set<string>();
+            const queue: {x: number, y: number}[] = [startNode];
+            reachable.add(`${startNode.x},${startNode.y}`);
+
+            // Safety break for loop
+            let iterations = 0;
+            const MAX_ITER = 10000;
+
+            while (queue.length > 0 && iterations < MAX_ITER) {
+                iterations++;
+                const current = queue.shift()!;
+                
+                const neighbors = [
+                    {x: current.x + 1, y: current.y},
+                    {x: current.x - 1, y: current.y},
+                    {x: current.x, y: current.y + 1},
+                    {x: current.x, y: current.y - 1}
+                ];
+
+                for (const n of neighbors) {
+                    if (n.x >= 0 && n.x < gridWidth && n.y >= 0 && n.y < gridHeight) {
+                        const key = `${n.x},${n.y}`;
+                        if (!reachable.has(key) && grid[n.y][n.x]) {
+                            reachable.add(key);
+                            queue.push(n);
+                        }
                     }
                 }
             }
-        }
 
-        // 4. Verify Exits are in reachable set
-        exits.forEach((exit, index) => {
-            const exitNode = this.toGrid({x: exit.x, y: exit.y}, bounds, gridSize);
-            // Allow some fuzziness (check 3x3 area around exit)
-            let exitReachable = false;
-            for(let dx = -1; dx <= 1; dx++) {
-                for(let dy = -1; dy <= 1; dy++) {
-                    if (reachable.has(`${exitNode.x + dx},${exitNode.y + dy}`)) {
-                        exitReachable = true;
+            // 4. Verify Exits are in reachable set
+            exits.forEach((exit, index) => {
+                const exitNode = this.toGrid({x: exit.x, y: exit.y}, bounds, gridSize);
+                // Allow some fuzziness (check 3x3 area around exit)
+                let exitReachable = false;
+                for(let dx = -1; dx <= 1; dx++) {
+                    for(let dy = -1; dy <= 1; dy++) {
+                        if (reachable.has(`${exitNode.x + dx},${exitNode.y + dy}`)) {
+                            exitReachable = true;
+                        }
                     }
                 }
-            }
-            
-            if (!exitReachable) {
-                errors.push(`Topological Bleed: Exit ${index} unreachable.`);
-            }
-        });
+                
+                if (!exitReachable) {
+                    errors.push(`Topological Bleed: Exit ${index} unreachable.`);
+                }
+            });
 
-        return { isValid: errors.length === 0, errors };
+            if (errors.length > 0) this.metrics.failedChecks++;
+            return { isValid: errors.length === 0, errors };
+        });
     }
 
     /**
@@ -110,27 +132,30 @@ export class ProofKernelService {
      * Theorem: Forall(e1, e2) -> Intersection(e1, e2) == Empty
      */
     verifyNonOverlap(entities: Entity[]): ValidationResult {
-        const errors: string[] = [];
-        const solids = entities.filter(e => e.type === 'WALL' || e.type === 'DESTRUCTIBLE');
-        
-        for (let i = 0; i < solids.length; i++) {
-            for (let j = i + 1; j < solids.length; j++) {
-                const a = solids[i];
-                const b = solids[j];
-                
-                // Simple AABB check
-                const aw = a.width || 40; const ad = a.depth || 40;
-                const bw = b.width || 40; const bd = b.depth || 40;
-                
-                if (Math.abs(a.x - b.x) * 2 < (aw + bw) && Math.abs(a.y - b.y) * 2 < (ad + bd)) {
-                    // Overlap detected
-                    errors.push(`Material Bleed: Co-location detected ID ${a.id} / ${b.id}`);
-                    return { isValid: false, errors };
+        return this.measure(() => {
+            const errors: string[] = [];
+            const solids = entities.filter(e => e.type === 'WALL' || e.type === 'DESTRUCTIBLE');
+            
+            for (let i = 0; i < solids.length; i++) {
+                for (let j = i + 1; j < solids.length; j++) {
+                    const a = solids[i];
+                    const b = solids[j];
+                    
+                    // Simple AABB check
+                    const aw = a.width || 40; const ad = a.depth || 40;
+                    const bw = b.width || 40; const bd = b.depth || 40;
+                    
+                    if (Math.abs(a.x - b.x) * 2 < (aw + bw) && Math.abs(a.y - b.y) * 2 < (ad + bd)) {
+                        // Overlap detected
+                        errors.push(`Material Bleed: Co-location detected ID ${a.id} / ${b.id}`);
+                        this.metrics.failedChecks++;
+                        return { isValid: false, errors };
+                    }
                 }
             }
-        }
-        
-        return { isValid: true, errors };
+            
+            return { isValid: true, errors };
+        });
     }
 
     // --- DOMAIN: COMBAT CALCULATIONS ---
@@ -138,52 +163,100 @@ export class ProofKernelService {
     /**
      * Axiom: Damage Conservation.
      * The output total damage cannot exceed the input raw damage multiplied by the max critical multiplier + weakness.
-     * Prevents runaway damage numbers due to stacking bugs.
      */
     verifyCombatTransaction(input: DamagePacket, output: DamageResult, sourceMultiplier: number = 1.0): ValidationResult {
-        const errors: string[] = [];
-        
-        const rawTotal = input.physical + input.fire + input.cold + input.lightning + input.chaos;
-        const resultTotal = output.total;
+        return this.measure(() => {
+            const errors: string[] = [];
+            
+            const rawTotal = input.physical + input.fire + input.cold + input.lightning + input.chaos;
+            const resultTotal = output.total;
 
-        // Theoretical Max Multiplier (Crit 1.5 * Weakness 1.3 * Variance 1.1) approx 2.2
-        // We add a safety margin epsilon
-        const THEORETICAL_CAP = rawTotal * 3.0 * sourceMultiplier + 10; // +10 for flat bonuses
+            const THEORETICAL_CAP = rawTotal * 3.0 * sourceMultiplier + 10; 
 
-        if (resultTotal > THEORETICAL_CAP && rawTotal > 0) {
-            errors.push(`Entropy Violation: Output ${resultTotal} exceeds causal limit of ${THEORETICAL_CAP} (Input: ${rawTotal})`);
-        }
+            if (resultTotal > THEORETICAL_CAP && rawTotal > 0) {
+                errors.push(`Entropy Violation: Output ${resultTotal} exceeds causal limit of ${THEORETICAL_CAP} (Input: ${rawTotal})`);
+            }
 
-        if (resultTotal < 0) {
-            errors.push(`Void Error: Negative damage output ${resultTotal}`);
-        }
+            if (resultTotal < 0) {
+                errors.push(`Void Error: Negative damage output ${resultTotal}`);
+            }
 
-        if (isNaN(resultTotal)) {
-            errors.push(`Null Reference: Damage result is NaN`);
-        }
+            if (isNaN(resultTotal)) {
+                errors.push(`Null Reference: Damage result is NaN`);
+            }
 
-        return { isValid: errors.length === 0, errors };
+            if (errors.length > 0) this.metrics.failedChecks++;
+            return { isValid: errors.length === 0, errors };
+        });
     }
 
     // --- DOMAIN: NARRATIVE CONSISTENCY ---
 
-    /**
-     * Axiom: Narrative Causality.
-     * A dialogue node cannot offer options that have unmet strict requirements.
-     */
     verifyDialogueState(node: DialogueNode, checkReqFn: (reqs?: Requirement[]) => boolean): ValidationResult {
-        const errors: string[] = [];
-        
-        if (!node.text || node.text.length === 0) {
-            errors.push(`Data Corruption: Empty dialogue text for Node ${node.id}`);
-        }
+        return this.measure(() => {
+            const errors: string[] = [];
+            
+            if (!node.text || node.text.length === 0) {
+                errors.push(`Data Corruption: Empty dialogue text for Node ${node.id}`);
+            }
+            
+            if (errors.length > 0) this.metrics.failedChecks++;
+            return { isValid: errors.length === 0, errors };
+        });
+    }
 
-        // We can't easily verify graph connectivity here without the full graph, 
-        // but we can verify local option integrity.
-        
-        // This is a runtime check usually, but putting it here centralizes the "Audit" logic
-        
-        return { isValid: errors.length === 0, errors };
+    // --- DOMAIN: INVENTORY INTEGRITY ---
+
+    /**
+     * Axiom: Conservation of Assets.
+     * Verify that inventory state contains no negative quantities or invalid item references.
+     */
+    verifyInventoryState(bag: Item[], credits: number, scrap: number): ValidationResult {
+        return this.measure(() => {
+            const errors: string[] = [];
+
+            // 1. Economic Consistency
+            if (credits < 0) errors.push(`Economic Anomaly: Negative Credits (${credits}) detected.`);
+            if (scrap < 0) errors.push(`Economic Anomaly: Negative Scrap (${scrap}) detected.`);
+
+            // 2. Matter Consistency (Items)
+            bag.forEach((item, index) => {
+                if (!item.id) errors.push(`Identity Loss: Item at index ${index} lacks ID.`);
+                if (item.stack <= 0) errors.push(`Matter Collapse: Item '${item.name}' has zero or negative stack.`);
+                if (item.stack > item.maxStack) errors.push(`Volume Violation: Item '${item.name}' exceeds max stack limit.`);
+            });
+
+            if (errors.length > 0) this.metrics.failedChecks++;
+            return { isValid: errors.length === 0, errors };
+        });
+    }
+
+    // --- DOMAIN: STATUS EFFECTS ---
+
+    /**
+     * Axiom: Temporal Causality.
+     * Verify that status effects have positive durations and valid stack counts.
+     */
+    verifyStatusEffects(entity: Entity): ValidationResult {
+        return this.measure(() => {
+            const errors: string[] = [];
+            const s = entity.status;
+
+            // 1. Duration Positivity
+            if (s.poison && s.poison.duration < 0) errors.push(`Temporal Paradox: Entity ${entity.id} has negative Poison duration.`);
+            if (s.burn && s.burn.duration < 0) errors.push(`Temporal Paradox: Entity ${entity.id} has negative Burn duration.`);
+            if (s.weakness && s.weakness.duration < 0) errors.push(`Temporal Paradox: Entity ${entity.id} has negative Weakness duration.`);
+
+            // 2. Logic Consistency
+            if (s.stun < 0) errors.push(`Causality Break: Entity ${entity.id} has negative Stun frames.`);
+            if (s.slow < 0) errors.push(`Causality Break: Entity ${entity.id} has negative Slow value.`);
+
+            // 3. Stack Bounds
+            if (s.bleed && s.bleed.stacks <= 0) errors.push(`Matter Underflow: Entity ${entity.id} has non-positive Bleed stacks.`);
+
+            if (errors.length > 0) this.metrics.failedChecks++;
+            return { isValid: errors.length === 0, errors };
+        });
     }
 
     // --- HELPERS ---
