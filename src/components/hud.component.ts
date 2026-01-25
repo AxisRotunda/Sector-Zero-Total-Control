@@ -60,23 +60,36 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
                </div>
             </div>
             
-            <!-- REALITY INTEGRITY INDICATOR (Observable Verification) -->
+            <!-- REALITY INTEGRITY INDICATOR (Enlarged & Readable) -->
             <div class="mt-2 pt-2 border-t border-zinc-800">
-                <div class="flex justify-between text-[8px] uppercase tracking-widest font-bold mb-1">
-                    <span class="text-cyan-600">REALITY STABILITY</span>
-                    <span [class.text-red-500]="realityIntegrity() < 80" [class.text-cyan-500]="realityIntegrity() >= 80">
-                        {{ realityIntegrity() }}%
-                    </span>
+              <div class="flex justify-between text-[11px] uppercase tracking-widest font-bold mb-1">
+                <span class="text-cyan-600 drop-shadow-[0_0_4px_rgba(6,182,212,0.8)]">REALITY STABILITY</span>
+                <span 
+                  [class.text-red-500]="realityIntegrity() < 50" 
+                  [class.text-yellow-500]="realityIntegrity() >= 50 && realityIntegrity() < 80"
+                  [class.text-cyan-500]="realityIntegrity() >= 80"
+                  class="drop-shadow-[0_0_4px_currentColor]">
+                  {{ realityIntegrity() }}%
+                </span>
+              </div>
+              <div class="w-full h-3 bg-zinc-950 border border-zinc-700 relative overflow-hidden">
+                <div class="h-full transition-all duration-300"
+                  [style.width.%]="realityIntegrity()"
+                  [class.bg-gradient-to-r]="true"
+                  [class.from-cyan-600]="realityIntegrity() >= 80"
+                  [class.to-cyan-400]="realityIntegrity() >= 80"
+                  [class.from-yellow-600]="realityIntegrity() >= 50 && realityIntegrity() < 80"
+                  [class.to-yellow-400]="realityIntegrity() >= 50 && realityIntegrity() < 80"
+                  [class.from-red-600]="realityIntegrity() < 50"
+                  [class.to-red-400]="realityIntegrity() < 50"
+                  [class.shadow-[0_0_8px_currentColor]]="true"
+                  [class.animate-pulse]="realityIntegrity() < 30"></div>
+              </div>
+              @if (lastBleedMessage()) {
+                <div class="text-[10px] text-red-500 mt-1 animate-pulse truncate drop-shadow-[0_0_6px_rgba(239,68,68,1)]">
+                  {{ lastBleedMessage() }}
                 </div>
-                <div class="w-full h-1 bg-zinc-900">
-                    <div class="h-full transition-all duration-500"
-                         [style.width.%]="realityIntegrity()"
-                         [class.bg-cyan-600]="realityIntegrity() >= 80"
-                         [class.bg-red-600]="realityIntegrity() < 80"></div>
-                </div>
-                @if (lastBleedMessage()) {
-                    <div class="text-[8px] text-red-500 mt-1 animate-pulse truncate">{{ lastBleedMessage() }}</div>
-                }
+              }
             </div>
           </div>
 
