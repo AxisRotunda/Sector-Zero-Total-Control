@@ -87,7 +87,7 @@ import { KernelSupervisorService } from '../core/kernel-supervisor.service';
               <!-- Kernel Domain Monitors -->
               <div class="flex gap-1 mt-1">
                   @for (domain of ['GEOMETRY', 'SPATIAL', 'RENDER', 'NAV']; track domain) {
-                      <div class="w-2 h-2 rounded-full border border-zinc-700"
+                      <div class="w-2 h-2 rounded-full border border-zinc-700 transition-colors duration-300"
                            [class.bg-red-500]="isDomainFailing(domain)"
                            [class.bg-green-900]="!isDomainFailing(domain)"
                            [class.animate-pulse]="isDomainFailing(domain)"
@@ -268,10 +268,10 @@ export class HudComponent {
       const domainData = diag.domains.find(d => d.domain === key);
       
       // Use lastFailure timestamp to "cool off" the warning (show red for 2s after failure)
-      // This prevents the HUD from staying red forever after one error.
       if (domainData && domainData.lastFailure > 0) {
-          const timeSinceFailure = Date.now() - domainData.lastFailure;
-          return timeSinceFailure < 2000;
+          const now = Date.now();
+          const active = now - domainData.lastFailure < 2000; // 2s decay
+          return active;
       }
       return false;
   }

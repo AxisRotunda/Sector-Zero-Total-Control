@@ -19,20 +19,24 @@ const POLICIES: Record<string, SupervisionPolicy> = {
     'GEOMETRY_SEGMENTS': { 
         logLevel: 'WARN', 
         capQuality: 'HIGH', 
-        condition: (s) => s === 'CRITICAL' 
+        // Cap to HIGH if we see significant overlap (MEDIUM) or worse
+        condition: (s) => s === 'MEDIUM' || s === 'HIGH' || s === 'CRITICAL'
     },
     'SPATIAL_TOPOLOGY': { 
         logLevel: 'ERROR', 
         action: 'SPATIAL', 
         capQuality: 'MEDIUM', 
+        // Only consider capping if the violation itself is critical
         condition: (s) => s === 'CRITICAL' 
     },
     'RENDER_DEPTH': { 
         logLevel: 'WARN', 
         action: 'RENDER' 
+        // No quality cap for render depth issues, just correction
     },
     'PATH_CONTINUITY': { 
         logLevel: 'WARN' 
+        // Log only
     },
     'INVENTORY': { 
         logLevel: 'ERROR', 
@@ -53,6 +57,7 @@ export class KernelSupervisorService {
   private adaptiveQuality = inject(AdaptiveQualityService);
 
   stabilityScore = signal(100);
+  private emergencyCapApplied = false;
   
   systemStatus = computed<SystemStatus>(() => {
       const score = this.stabilityScore();
@@ -96,18 +101,26 @@ export class KernelSupervisorService {
       // 4. Execute Policy
       if (policy) {
           // Trigger Corrector Action if defined
-          if (policy.action) {
-              // Ensure we check message existence safely
-              if (payload.message) {
-                  this.corrector.triggerCorrection(policy.action);
-              }
+          if (policy.action && payload.message) {
+              this.corrector.triggerCorrection(policy.action);
           }
           
           // Apply Quality Cap if conditions met
-          if (policy.capQuality) {
-              const shouldCap = policy.condition ? policy.condition(payload.severity) : true;
-              if (shouldCap) {
-                  this.adaptiveQuality.setSafetyCap(policy.capQuality);
+          if (policy.capQuality && policy.condition && policy.condition(payload.severity)) {
+              const status = this.systemStatus();
+
+              // Emergency MEDIUM cap only if system is globally critical and not already capped
+              if (policy.capQuality === 'MEDIUM') {
+                  if (status === 'CRITICAL' && !this.emergencyCapApplied) {
+                      this.adaptiveQuality.setSafetyCap('MEDIUM');
+                      this.emergencyCapApplied = true;
+                  }
+                  return;
+              }
+
+              // High cap for geometry/visuals, one-shot
+              if (policy.capQuality === 'HIGH') {
+                  this.adaptiveQuality.setSafetyCap('HIGH');
               }
           }
       }
@@ -116,6 +129,11 @@ export class KernelSupervisorService {
   private startRecoveryLoop() {
       setInterval(() => {
           this.stabilityScore.update(s => Math.min(100, s + 1));
+          
+          // Reset emergency latch if stability recovers
+          if (this.stabilityScore() > 80 && this.emergencyCapApplied) {
+              this.emergencyCapApplied = false;
+          }
       }, 1000);
   }
 }
