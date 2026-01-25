@@ -8,6 +8,8 @@ import { MapUtils } from '../../utils/map-utils';
 import { SpatialHashService } from '../../systems/spatial-hash.service';
 import { DECORATIONS } from '../../config/decoration.config';
 import { ProofKernelService } from '../../core/proof/proof-kernel.service';
+import { EventBusService } from '../../core/events/event-bus.service';
+import { GameEvents } from '../../core/events/game-events';
 
 @Injectable({ providedIn: 'root' })
 export class SectorLoaderService {
@@ -15,6 +17,7 @@ export class SectorLoaderService {
   private narrative = inject(NarrativeService);
   private spatialHash = inject(SpatialHashService);
   private proofKernel = inject(ProofKernelService);
+  private eventBus = inject(EventBusService);
 
   loadFromTemplate(world: WorldService, template: ZoneTemplate): void {
       try {
@@ -44,20 +47,28 @@ export class SectorLoaderService {
 
           // --- FORMAL VERIFICATION ---
           // Check for illegal overlaps in static geometry that might trap players or cause z-fighting
-          const walls = world.entities.filter(e => e.type === 'WALL');
-          
-          // Enhanced Snapshot with Identity Metadata and Semantic Kind
-          const geometrySnapshots = walls.map((w, idx) => ({
-              kernelId: idx,
-              entityId: w.data?.id ?? w.id, // Prefer authored ID if available, else runtime ID
-              kind: w.data?.kind ?? 'STRUCTURAL', // Default to STRUCTURAL if not tagged
-              x: w.x, 
-              y: w.y, 
-              w: w.width || 40, 
-              h: w.depth || 40
-          }));
-          
-          this.proofKernel.verifyGeometryOverlap(geometrySnapshots);
+          try {
+              const walls = world.entities.filter(e => e.type === 'WALL');
+              
+              // Enhanced Snapshot with Identity Metadata and Semantic Kind
+              const geometrySnapshots = walls.map((w, idx) => ({
+                  kernelId: idx,
+                  entityId: w.data?.id ?? w.id, // Prefer authored ID if available, else runtime ID
+                  kind: w.data?.kind ?? 'STRUCTURAL', // Default to STRUCTURAL if not tagged
+                  x: w.x, 
+                  y: w.y, 
+                  w: w.width || 40, 
+                  h: w.depth || 40
+              }));
+              
+              this.proofKernel.verifyGeometryOverlap(geometrySnapshots);
+          } catch (verifyErr) {
+              console.warn('[SectorLoader] Verification Handled Exception:', verifyErr);
+              this.eventBus.dispatch({
+                  type: GameEvents.REALITY_BLEED,
+                  payload: { severity: 'MEDIUM', source: 'SECTOR_LOAD', message: 'Geometry verification bypasased due to instability' }
+              });
+          }
 
           world.entities.forEach(e => {
               if (e.type === 'WALL') {
@@ -87,6 +98,11 @@ export class SectorLoaderService {
           fallback.zoneId = 'ERROR';
           world.entities.push(fallback);
           this.spatialHash.insert(fallback, true);
+          
+          this.eventBus.dispatch({
+              type: GameEvents.REALITY_BLEED,
+              payload: { severity: 'CRITICAL', source: 'SECTOR_LOAD_CRASH', message: 'Sector initialization failed. Loading fallback geometry.' }
+          });
       }
   }
 

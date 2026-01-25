@@ -103,23 +103,23 @@ self.onmessage = function(e) {
                 valid = true;
                 const EPS = 1.0; // Tolerance for flush contact
                 
-                // O(N^2) check - typically optimized via Quadtree in C++, brute force here for Proof concept
+                // O(N^2) check - optimized by semantic filtering
                 outer: for (let i = 0; i < entities.length; i++) {
                     const a = entities[i];
+                    // Semantic Filter: Only enforce strict Euclidean separation for STRUCTURAL hulls
+                    // If A is not structural, no need to check it against anything else for physics lock
+                    if (a.kind && a.kind !== 'STRUCTURAL') continue;
+
                     for (let j = i + 1; j < entities.length; j++) {
                         const b = entities[j];
+                        
+                        // If B is not structural, skip pair
+                        if (b.kind && b.kind !== 'STRUCTURAL') continue;
                         
                         const x_overlap = overlap(a.x - a.w/2, a.x + a.w/2, b.x - b.w/2, b.x + b.w/2);
                         const y_overlap = overlap(a.y - a.h/2, a.y + a.h/2, b.y - b.h/2, b.y + b.h/2);
                         
                         if (x_overlap > EPS && y_overlap > EPS) { 
-                            // Semantic Filter: Only enforce strict Euclidean separation for STRUCTURAL hulls
-                            const kindA = a.kind || 'STRUCTURAL';
-                            const kindB = b.kind || 'STRUCTURAL';
-                            
-                            // If either is decorative/phantom, allow overlap
-                            if (kindA !== 'STRUCTURAL' || kindB !== 'STRUCTURAL') continue;
-
                             valid = false;
                             const idA = a.entityId !== undefined ? a.entityId : i;
                             const idB = b.entityId !== undefined ? b.entityId : j;

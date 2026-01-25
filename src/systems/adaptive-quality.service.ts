@@ -2,7 +2,8 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { PerformanceTelemetryService } from './performance-telemetry.service';
 import { EventBusService } from '../core/events/event-bus.service';
-import { GameEvents } from '../core/events/game-events';
+import { GameEvents, RealityBleedPayload } from '../core/events/game-events';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 export interface QualityPreset {
   name: string;
@@ -64,6 +65,20 @@ export class AdaptiveQualityService {
   currentPreset = signal<QualityPreset>(QUALITY_PRESETS['HIGH']);
   private lastAdjustment = 0;
   private adjustmentCooldown = 3000; // Min 3s between changes
+  
+  // Safety Lock
+  private maxAllowedTier = signal<string>('ULTRA'); 
+
+  constructor() {
+      this.eventBus.on(GameEvents.REALITY_BLEED)
+        .pipe(takeUntilDestroyed())
+        .subscribe((payload: RealityBleedPayload) => {
+            // Check for kernel/geometry issues
+            if (payload.message.includes('Axiom') || payload.source.includes('KERNEL') || payload.source.includes('GEOMETRY') || payload.source.includes('SECTOR_LOAD')) {
+                this.handleStabilityIssue();
+            }
+        });
+  }
 
   /**
    * Check every frame and auto-adjust quality
@@ -96,17 +111,29 @@ export class AdaptiveQualityService {
       this.downgrade(current.name);
     }
 
-    // Upgrade quality when stable
+    // Upgrade quality when stable, but respect the safety cap
     if (trend === 'STABLE' && fps > 58) {
       this.upgrade(current.name);
     }
   }
 
+  private handleStabilityIssue() {
+      if (this.maxAllowedTier() === 'ULTRA') {
+          console.warn('[AdaptiveQuality] Reality Instability Detected. Capping Quality to HIGH.');
+          this.maxAllowedTier.set('HIGH');
+          if (this.currentPreset().name === 'Ultra') {
+              this.setQuality('HIGH');
+          }
+      } else if (this.maxAllowedTier() === 'HIGH') {
+          console.warn('[AdaptiveQuality] Persistent Instability. Capping Quality to MEDIUM.');
+          this.maxAllowedTier.set('MEDIUM');
+          if (this.currentPreset().name === 'High') {
+              this.setQuality('MEDIUM');
+          }
+      }
+  }
+
   private downgrade(currentName: string) {
-      const keys = Object.keys(QUALITY_PRESETS);
-      // Order is ULTRA -> HIGH -> MEDIUM -> LOW -> EMERGENCY
-      // We rely on the object definition order or explicit check
-      // Let's use a robust lookup array
       const order = ['ULTRA', 'HIGH', 'MEDIUM', 'LOW', 'EMERGENCY'];
       const idx = order.findIndex(k => QUALITY_PRESETS[k].name === currentName);
       
@@ -124,6 +151,14 @@ export class AdaptiveQualityService {
       
       if (idx > 0) {
           const prevKey = order[idx - 1];
+          
+          // Safety Check: Do not exceed max allowed tier
+          const tierIndex = order.indexOf(prevKey);
+          const maxIndex = order.indexOf(this.maxAllowedTier());
+          
+          // Note: Lower index = Higher Quality in this array order
+          if (tierIndex < maxIndex) return;
+
           this.setQuality(prevKey);
           console.log(`[ADAPTIVE] Increasing quality: ${currentName} -> ${QUALITY_PRESETS[prevKey].name}`);
           this.lastAdjustment = performance.now();
