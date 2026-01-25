@@ -116,6 +116,10 @@ import { KernelSupervisorService } from '../core/kernel-supervisor.service';
                       </span>
                   </div>
                   <div class="flex justify-between text-zinc-400">
+                      <span>Sampling Rate:</span>
+                      <span class="text-cyan-400">{{ (supervisor.samplingMod() * 100).toFixed(0) }}%</span>
+                  </div>
+                  <div class="flex justify-between text-zinc-400">
                       <span>Ledger Size:</span>
                       <span class="text-white">{{ kernelDiagnostics().ledgerSize }}</span>
                   </div>
@@ -274,7 +278,6 @@ export class HudComponent {
 
   isDomainFailing(displayDomain: string): boolean {
       const diag = this.kernelDiagnostics();
-      // Map UI names to internal Axiom Domains
       let key = displayDomain;
       if (displayDomain === 'GEOMETRY') key = 'GEOMETRY_SEGMENTS';
       if (displayDomain === 'SPATIAL') key = 'SPATIAL_TOPOLOGY';
@@ -283,10 +286,9 @@ export class HudComponent {
 
       const domainData = diag.domains.find(d => d.domain === key);
       
-      // Use lastFailure timestamp to "cool off" the warning (show red for 2s after failure)
       if (domainData && domainData.lastFailure > 0) {
           const now = Date.now();
-          const active = now - domainData.lastFailure < 2000; // 2s decay
+          const active = now - domainData.lastFailure < 2000; 
           return active;
       }
       return false;

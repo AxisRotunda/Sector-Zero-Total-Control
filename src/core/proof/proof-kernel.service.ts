@@ -6,10 +6,17 @@ import { Item } from '../../models/item.models';
 import { EventBusService } from '../events/event-bus.service';
 import { GameEvents } from '../events/game-events';
 
-// --- TYPES ---
-
 export type AxiomDomain = 'COMBAT' | 'INVENTORY' | 'WORLD' | 'STATUS' | 'RENDER' | 'INTEGRITY' | 'GEOMETRY' | 'GEOMETRY_SEGMENTS' | 'SPATIAL_TOPOLOGY' | 'PATH_CONTINUITY' | 'RENDER_DEPTH';
 export type AxiomSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+
+// Critical domains bypass sampling and always run
+const CRITICAL_DOMAINS = new Set<AxiomDomain>([
+    'INVENTORY', 
+    'COMBAT', 
+    'GEOMETRY_SEGMENTS', 
+    'WORLD', 
+    'STATUS'
+]);
 
 export interface Axiom<T = any> {
   id: string;
@@ -41,7 +48,7 @@ export interface DomainMetrics {
   checks: number;
   failures: number;
   totalTimeMs: number;
-  lastFailure: number; // Timestamp of last failure for UI cooling
+  lastFailure: number;
 }
 
 export interface AxiomStats {
@@ -56,7 +63,6 @@ export interface KernelDiagnostics {
   ledgerSize: number;
 }
 
-// --- WORKER SCRIPT ---
 const WORKER_SCRIPT = `
 self.onmessage = function(e) {
     const req = e.data;
@@ -89,24 +95,17 @@ self.onmessage = function(e) {
                 const SEG_EPS = 2.0; 
                 const OVERLAP_THRESHOLD = 0.3;
 
-                // O(N^2) Verification for static load
                 outerSeg: for (let i = 0; i < segments.length; i++) {
                     const a = segments[i];
                     for (let j = i + 1; j < segments.length; j++) {
                         const b = segments[j];
+                        if (a.role && b.role && a.role === b.role && a.role !== 'DEFAULT') continue;
 
-                        // Skip if both have the same non-default role (Intentional Reinforcement)
-                        if (a.role && b.role && a.role === b.role && a.role !== 'DEFAULT') {
-                            continue;
-                        }
-
-                        // Orientation Check
                         const vertA = Math.abs(a.x1 - a.x2) < SEG_EPS;
                         const vertB = Math.abs(b.x1 - b.x2) < SEG_EPS;
                         const horzA = Math.abs(a.y1 - a.y2) < SEG_EPS;
                         const horzB = Math.abs(b.y1 - b.y2) < SEG_EPS;
 
-                        // Must be collinear
                         const sameX = vertA && vertB && Math.abs(a.x1 - b.x1) < SEG_EPS;
                         const sameY = horzA && horzB && Math.abs(a.y1 - b.y1) < SEG_EPS;
 
@@ -128,17 +127,13 @@ self.onmessage = function(e) {
                             const lenB = Math.abs(bEnd - bStart);
                             const minLen = Math.min(lenA, lenB);
                             
-                            if (minLen < 10) continue; // Ignore micros
+                            if (minLen < 10) continue; 
 
                             const frac = overlapLen / minLen;
                             if (frac > OVERLAP_THRESHOLD) {
                                 valid = false;
                                 error = 'Segment Overlap ' + (frac*100).toFixed(1) + '%';
-                                meta = { 
-                                    entityIdA: a.entityId, 
-                                    entityIdB: b.entityId, 
-                                    overlapFrac: frac 
-                                };
+                                meta = { entityIdA: a.entityId, entityIdB: b.entityId, overlapFrac: frac };
                                 break outerSeg;
                             }
                         }
@@ -167,7 +162,7 @@ self.onmessage = function(e) {
 
             case 'PATH_CONTINUITY': {
                 const path = req.payload.path;
-                const maxStride = req.payload.gridSize * 2.0; // Relaxed stride
+                const maxStride = req.payload.gridSize * 2.0; 
                 valid = true;
                 if (path && path.length > 1) {
                     for (let i = 0; i < path.length - 1; i++) {
@@ -223,9 +218,12 @@ export class ProofKernelService implements OnDestroy {
   private metrics: Record<string, ReturnType<typeof signal<DomainMetrics>>> = {};
   private worker: Worker | null = null;
   private workerUrl: string | null = null;
+  
   private eventBus = inject(EventBusService);
   
-  // Ledger and Stats
+  // Public signal for sampling rate to break dependency cycle with Supervisor
+  public samplingProbability = signal(0.1);
+  
   private ledger: any[] = [];
   private axioms = new Map<string, Axiom>();
   private axiomStats = new Map<string, AxiomStats>();
@@ -234,6 +232,14 @@ export class ProofKernelService implements OnDestroy {
     this.initMetrics();
     this.registerCoreAxioms();
     this.initWorker();
+  }
+
+  // 3. CENTRALIZED PROBABILITY GATE
+  private shouldVerify(domain: AxiomDomain): boolean {
+      if (CRITICAL_DOMAINS.has(domain)) return true;
+      // Use internal signal driven by Supervisor via effect
+      const chance = this.samplingProbability();
+      return Math.random() < (chance || 0.1);
   }
 
   private initMetrics() {
@@ -264,14 +270,18 @@ export class ProofKernelService implements OnDestroy {
     if (this.workerUrl) URL.revokeObjectURL(this.workerUrl);
   }
 
-  // --- ASYNC API ---
+  // --- ASYNC API (Now Gated) ---
 
   verifyFormal(domain: AxiomDomain, context: any, contextId: string) {
+    // Gate Check
+    if (!this.shouldVerify(domain)) return;
+
     if (!this.worker) return;
     this.worker.postMessage({ id: contextId, type: domain, payload: context });
   }
 
   verifyStructuralSegments(segments: { x1: number; y1: number; x2: number; y2: number; entityId?: number | string; role?: string }[]): void {
+      // Critical domain, shouldVerify returns true anyway, but called explicitly here
       this.verifyFormal('GEOMETRY_SEGMENTS', { segments }, `SEG_${Date.now()}`);
   }
 
@@ -287,7 +297,7 @@ export class ProofKernelService implements OnDestroy {
       this.verifyFormal('RENDER_DEPTH', { list: depthValues }, `RENDER_${Date.now()}`);
   }
 
-  // --- SYNC API (Critical Path) ---
+  // --- SYNC API (Critical Path - Usually Manual Gating in Caller or always run) ---
 
   createTransaction<T>(state: T) {
       return { state }; 
@@ -302,6 +312,7 @@ export class ProofKernelService implements OnDestroy {
   }
   
   verifyStatusEffects(entity: Entity): ValidationResult {
+      // Status is critical, check every time
       if (!entity.status) return { isValid: false, errors: [{ axiomId: 'status.missing', domain: 'STATUS', severity: 'MEDIUM', code: 'NO_STATUS', message: 'Entity missing status object', timestamp: Date.now() }] };
       return { isValid: true, errors: [] };
   }
@@ -327,14 +338,12 @@ export class ProofKernelService implements OnDestroy {
           return;
       }
 
-      // Derive severity from response type/content
       let severity: AxiomSeverity = 'LOW';
       
-      // Standardize Severity Mapping
       if (data.type === 'SPATIAL_TOPOLOGY' && data.error.includes('Density')) {
-          severity = 'MEDIUM'; // High density is concerning but recoverable
+          severity = 'MEDIUM'; 
       } else if (data.type === 'GEOMETRY_SEGMENTS') {
-          severity = 'LOW'; // Overlaps are visual mostly
+          severity = 'LOW'; 
       } else if (data.error.includes('KernelPanic')) {
           severity = 'CRITICAL';
       }
@@ -353,6 +362,9 @@ export class ProofKernelService implements OnDestroy {
   }
 
   private verify<T>(domain: AxiomDomain, context: T): ValidationResult {
+    // Synchronous Verify Gate - Note: Inventory and Combat are CRITICAL_DOMAINS
+    if (!this.shouldVerify(domain)) return { isValid: true, errors: [] };
+
     const start = performance.now();
     const errors: ProofError[] = [];
     
