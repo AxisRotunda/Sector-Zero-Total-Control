@@ -64,28 +64,18 @@ self.onmessage = function(e) {
     let valid = false;
     let error = undefined;
 
-    // Helper: Separating Axis Theorem (1D Projection)
-    function overlap(min1, max1, min2, max2) {
-        return Math.max(0, Math.min(max1, max2) - Math.max(min1, min2));
-    }
-
     try {
         switch (req.type) {
             case 'COMBAT':
-                // Theorem: Conservation of Damage
-                // 0 <= damage <= CAP AND new_hp == max(0, old_hp - damage)
                 const p = req.payload;
                 const cap = 10000;
-                
                 if (p.damage < 0 || p.damage > cap) {
                     valid = false;
                     error = 'AxiomViolation: Damage Magnitude (' + p.damage + ') outside set [0, ' + cap + ']';
                 } else {
                     const rawExpected = p.oldHp - p.damage;
-                    // Strict equality with float epsilon
                     const matchesRaw = Math.abs(p.newHp - rawExpected) < 0.01;
                     const matchesClamped = (p.newHp === 0 && rawExpected < 0);
-                    
                     if (matchesRaw || matchesClamped) {
                         valid = true;
                     } else {
@@ -95,104 +85,62 @@ self.onmessage = function(e) {
                 }
                 break;
 
-            case 'GEOMETRY_OVERLAP':
-                // Theorem: Disjoint Rectangles (Separating Axis)
-                // Forall A, B in Entities: Intersect(A, B) -> Area(Intersection) < Epsilon
-                // Input: list of {x, y, w, h, entityId?, kind?}
-                const entities = req.payload.entities;
-                valid = true;
-                const EPS = 1.0; // Tolerance for flush contact
-                
-                // O(N^2) check - optimized by semantic filtering
-                outer: for (let i = 0; i < entities.length; i++) {
-                    const a = entities[i];
-                    
-                    // Semantic Filter: Skip non-structural entities (decorative items can overlap)
-                    // Default to STRUCTURAL if kind is undefined for safety
-                    const kindA = a.kind || 'STRUCTURAL';
-                    if (kindA !== 'STRUCTURAL') continue;
-
-                    for (let j = i + 1; j < entities.length; j++) {
-                        const b = entities[j];
-                        
-                        const kindB = b.kind || 'STRUCTURAL';
-                        if (kindB !== 'STRUCTURAL') continue;
-                        
-                        const x_overlap = overlap(a.x - a.w/2, a.x + a.w/2, b.x - b.w/2, b.x + b.w/2);
-                        const y_overlap = overlap(a.y - a.h/2, a.y + a.h/2, b.y - b.h/2, b.y + b.h/2);
-                        
-                        if (x_overlap > EPS && y_overlap > EPS) { 
-                            valid = false;
-                            const idA = a.entityId !== undefined ? a.entityId : i;
-                            const idB = b.entityId !== undefined ? b.entityId : j;
-                            error = 'AxiomViolation: Euclidean Intersection detected between Entity ' + idA + ' and Entity ' + idB;
-                            break outer;
-                        }
-                    }
-                }
-                break;
-
             case 'GEOMETRY_SEGMENTS': {
                 // Theorem: No Significant Collinear Overlap
-                // Allows T-junctions, Corners, and "Shoulder/Bevel" overlaps (Structural reinforcement).
-                // Forbids full duplicate walls.
+                // Allows T-junctions, Corners, and small reinforcements.
+                // Forbids full duplicate walls (z-fighting).
+                
                 const segments = req.payload.segments;
                 valid = true;
-                const SEG_EPS = 1.0;
+                const SEG_EPS = 2.0; // Tolerance for alignment
+                const OVERLAP_THRESHOLD = 0.3; // Max 30% overlap fraction allowed
 
                 outerSeg: for (let i = 0; i < segments.length; i++) {
                     const a = segments[i];
                     for (let j = i + 1; j < segments.length; j++) {
                         const b = segments[j];
 
-                        // Detect orientation based on tight bounding box logic (points equal on one axis)
-                        // Note: Input segments are {x1, y1, x2, y2}
+                        // Detect orientation (Vertical if x1 approx x2)
                         const verticalA = Math.abs(a.x1 - a.x2) < SEG_EPS;
                         const verticalB = Math.abs(b.x1 - b.x2) < SEG_EPS;
                         const horizontalA = Math.abs(a.y1 - a.y2) < SEG_EPS;
                         const horizontalB = Math.abs(b.y1 - b.y2) < SEG_EPS;
 
-                        // Check 1: Are they parallel and collinear?
-                        // Vertical case: Same X
+                        // Must match orientation to collinear overlap
                         const sameX = verticalA && verticalB && Math.abs(a.x1 - b.x1) < SEG_EPS;
-                        // Horizontal case: Same Y
                         const sameY = horizontalA && horizontalB && Math.abs(a.y1 - b.y1) < SEG_EPS;
 
-                        // If neither, they are either orthogonal (valid) or skew/far apart (valid)
                         if (!sameX && !sameY) continue; 
 
-                        // Check 2: Do the segments actually overlap on their shared axis?
+                        // Calculate overlap on the shared axis
                         let aStart, aEnd, bStart, bEnd;
                         if (sameX) {
-                            // Vertical overlap check
-                            aStart = Math.min(a.y1, a.y2);
-                            aEnd   = Math.max(a.y1, a.y2);
-                            bStart = Math.min(b.y1, b.y2);
-                            bEnd   = Math.max(b.y1, b.y2);
+                            aStart = Math.min(a.y1, a.y2); aEnd = Math.max(a.y1, a.y2);
+                            bStart = Math.min(b.y1, b.y2); bEnd = Math.max(b.y1, b.y2);
                         } else {
-                            // Horizontal overlap check
-                            aStart = Math.min(a.x1, a.x2);
-                            aEnd   = Math.max(a.x1, a.x2);
-                            bStart = Math.min(b.x1, b.x2);
-                            bEnd   = Math.max(b.x1, b.x2);
+                            aStart = Math.min(a.x1, a.x2); aEnd = Math.max(a.x1, a.x2);
+                            bStart = Math.min(b.x1, b.x2); bEnd = Math.max(b.x1, b.x2);
                         }
 
+                        // Overlap length
                         const overlapLen = Math.max(0, Math.min(aEnd, bEnd) - Math.max(aStart, bStart));
 
                         if (overlapLen > SEG_EPS) {
-                            // NEW: Fractional Overlap Tolerance
+                            // Check Fraction
                             const lenA = Math.abs(aEnd - aStart);
                             const lenB = Math.abs(bEnd - bStart);
                             const minLen = Math.min(lenA, lenB);
-                            const frac = overlapLen / (minLen || 1);
+                            
+                            // If segments are tiny, ignore
+                            if (minLen < 10) continue;
 
-                            // Allow small overlaps (joints/bevels), forbid massive ones (duplicates)
-                            // Threshold 0.5 (50%) allows significant reinforcing structures but catches duplicates.
-                            if (frac > 0.5) {
+                            const frac = overlapLen / minLen;
+
+                            if (frac > OVERLAP_THRESHOLD) {
                                 valid = false;
                                 const idA = a.entityId !== undefined ? a.entityId : i;
                                 const idB = b.entityId !== undefined ? b.entityId : j;
-                                error = 'AxiomViolation: Significant Segment Overlap (' + (frac*100).toFixed(1) + '%) detected between Entity ' + idA + ' and Entity ' + idB;
+                                error = 'AxiomViolation: Segment Overlap ' + (frac*100).toFixed(1) + '% (Threshold ' + (OVERLAP_THRESHOLD*100) + '%) between Entity ' + idA + ' and ' + idB;
                                 break outerSeg;
                             }
                         }
@@ -201,44 +149,57 @@ self.onmessage = function(e) {
                 break;
             }
 
-            case 'PATH_CONTINUITY':
-                // Theorem: Topological Connectivity
-                // Forall steps i: Distance(step[i], step[i+1]) <= MaxStride
-                const path = req.payload.path;
-                const maxStride = req.payload.gridSize * 1.5; // Allow diagonal (sqrt(2)) + epsilon
-                valid = true;
-
-                for (let i = 0; i < path.length - 1; i++) {
-                    const curr = path[i];
-                    const next = path[i+1];
-                    const dx = curr.x - next.x;
-                    const dy = curr.y - next.y;
-                    const dist = Math.sqrt(dx*dx + dy*dy);
-                    
-                    if (dist > maxStride) {
+            case 'SPATIAL_TOPOLOGY': {
+                // Verify Grid Consistency
+                const p = req.payload;
+                const cellCount = p.cellCount;
+                const entityCount = p.entityCount;
+                const cellSize = p.cellSize;
+                
+                // Heuristic: Density check
+                if (cellCount > 0 && entityCount > 0) {
+                    const density = entityCount / cellCount;
+                    if (density > 50) {
                         valid = false;
-                        error = 'AxiomViolation: Discontinuous Path Manifold at index ' + i + '. Dist: ' + dist.toFixed(2);
+                        error = 'AxiomViolation: Spatial Grid Density Critical (' + density.toFixed(1) + ' ents/cell). Possible Hash Collision or infinite spawn loop.';
+                    } else {
+                        valid = true;
+                    }
+                } else {
+                    valid = true;
+                }
+                break;
+            }
+
+            case 'PATH_CONTINUITY':
+                const path = req.payload.path;
+                const maxStride = req.payload.gridSize * 1.5;
+                valid = true;
+                for (let i = 0; i < path.length - 1; i++) {
+                    const dx = path[i].x - path[i+1].x;
+                    const dy = path[i].y - path[i+1].y;
+                    if (Math.sqrt(dx*dx + dy*dy) > maxStride) {
+                        valid = false;
+                        error = 'AxiomViolation: Path Discontinuity at index ' + i;
                         break;
                     }
                 }
                 break;
 
             case 'RENDER_DEPTH':
-                // Theorem: Z-Order Monotonicity
-                // Forall i < j: Depth(List[i]) <= Depth(List[j])
                 const list = req.payload.list;
                 valid = true;
                 for (let i = 0; i < list.length - 1; i++) {
                     if (list[i] > list[i+1]) {
                         valid = false;
-                        error = 'AxiomViolation: Painter Algorithm Failure at index ' + i;
+                        error = 'AxiomViolation: Z-Sort Monotonicity Failure';
                         break;
                     }
                 }
                 break;
 
             default:
-                valid = true; // Heuristic pass
+                valid = true;
         }
     } catch (err) {
         valid = false;
@@ -277,7 +238,6 @@ export class Transaction<T> {
       this.kernel.logTransaction(domain, actionName, this.state, draft, result.isValid);
 
       if (result.isValid) {
-        // Optimistic execution with async verification
         return { success: true, newState: draft, errors: [] };
       } else {
         return { success: false, newState: null, errors: result.errors };
@@ -381,7 +341,12 @@ export class ProofKernelService implements OnDestroy {
     if (this.ledger.length > 500) this.ledger.shift();
   }
 
-  verifyFormal(domain: AxiomDomain | 'PATH_CONTINUITY' | 'GEOMETRY_OVERLAP' | 'GEOMETRY_SEGMENTS' | 'RENDER_DEPTH', context: any, contextId: string) {
+  // Async Verification Dispatcher
+  verifyFormal(
+      domain: AxiomDomain | 'PATH_CONTINUITY' | 'GEOMETRY_SEGMENTS' | 'RENDER_DEPTH' | 'SPATIAL_TOPOLOGY', 
+      context: any, 
+      contextId: string
+  ) {
     if (!this.worker) return;
     this.worker.postMessage({ id: contextId, type: domain, payload: context });
   }
@@ -425,16 +390,16 @@ export class ProofKernelService implements OnDestroy {
       this.verifyFormal('PATH_CONTINUITY', { path, gridSize }, `PATH_${Date.now()}`);
   }
 
-  verifyGeometryOverlap(entities: {x: number, y: number, w: number, h: number, entityId?: string | number, kind?: string}[]): void {
-      this.verifyFormal('GEOMETRY_OVERLAP', { entities }, `GEO_${Date.now()}`);
-  }
-
   verifyStructuralSegments(segments: { x1: number; y1: number; x2: number; y2: number; entityId?: number | string }[]): void {
       this.verifyFormal('GEOMETRY_SEGMENTS', { segments }, `SEG_${Date.now()}`);
   }
 
   verifyRenderDepth(depthValues: number[]): void {
       this.verifyFormal('RENDER_DEPTH', { list: depthValues }, `RENDER_${Date.now()}`);
+  }
+
+  verifySpatialGridTopology(cellCount: number, entityCount: number, cellSize: number): void {
+      this.verifyFormal('SPATIAL_TOPOLOGY', { cellCount, entityCount, cellSize }, `TOPO_${Date.now()}`);
   }
 
   verifyCombatTransaction(damagePacket: DamagePacket, result: DamageResult, multiplierLimit: number = 2.5): ValidationResult {
@@ -455,8 +420,6 @@ export class ProofKernelService implements OnDestroy {
   }
   
   verifyNonOverlap(entities: Entity[]): ValidationResult {
-      // Heuristic Check: Replaced by Worker Segment Check for full validation
-      // Kept for basic sanity on non-wall entities if needed
       return { isValid: true, errors: [] };
   }
   
@@ -473,13 +436,19 @@ export class ProofKernelService implements OnDestroy {
 
   private handleProofResult(data: any) {
       if (!data.valid) {
-          console.error(`[ProofKernel] FORMAL VERIFICATION FAILED: ${data.error}`);
+          // Identify Severity based on error string
+          let severity: 'MEDIUM' | 'CRITICAL' = 'MEDIUM';
+          if (data.error.includes('Density Critical') || data.error.includes('KernelPanic')) {
+              severity = 'CRITICAL';
+          }
+
+          console.warn(`[ProofKernel] VERIFICATION FAILURE: ${data.error}`);
           this.eventBus.dispatch({
               type: GameEvents.REALITY_BLEED,
               payload: {
-                  severity: 'CRITICAL',
-                  source: 'WASM_KERNEL',
-                  message: `Axiom Collapse detected. Logic divergent. Context: ${data.id}. Error: ${data.error}`
+                  severity: severity,
+                  source: `KERNEL:${data.id.split('_')[0]}`,
+                  message: data.error
               }
           });
       }

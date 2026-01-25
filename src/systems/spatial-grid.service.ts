@@ -38,6 +38,9 @@ export class SpatialGridService {
     }));
 
     // Verify consistency immediately after rebuild
+    this.proofKernel.verifySpatialGridTopology(this.grid.size, activeEntities.length, this.cellSize);
+    
+    // Also run legacy synchronous check
     const verification = this.proofKernel.verifySpatialGrid(this.grid, activeEntities, this.cellSize);
     if (!verification.isValid) {
       this.metrics.update(m => ({ ...m, failures: m.failures + 1 }));
@@ -46,7 +49,7 @@ export class SpatialGridService {
         payload: {
             severity: 'MEDIUM',
             source: 'Spatial Grid Corruption', 
-            message: verification.errors[0]
+            message: verification.errors[0].message
         }
       });
       // Auto-heal by brute force clearing to prevent crash cascades, next frame will rebuild
@@ -104,10 +107,6 @@ export class SpatialGridService {
       this.grid.get(newKey)!.push(e);
       this.entityToCell.set(e.id, newKey);
     }
-
-    // Position update handled by Physics, but we track grid location here.
-    // Assuming physics engine actually mutates x/y, we just react to it or allow this method to update it.
-    // For safety in this integration, we assume this is called *after* physics or *during* physics update.
   }
 
   private getCellKey = (x: number, y: number) => 

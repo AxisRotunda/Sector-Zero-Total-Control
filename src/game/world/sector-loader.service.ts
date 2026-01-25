@@ -48,62 +48,51 @@ export class SectorLoaderService {
           world.entities = MapUtils.mergeWalls(world.entities);
 
           // --- FORMAL VERIFICATION ---
-          // Use Segment Logic (1D) to allow T-junctions/Corners, banning only collinear overlap
+          // Use Segment Logic (1D) to allow T-junctions/Corners, banning only significant collinear overlap
           try {
               const walls = world.entities.filter(e => e.type === 'WALL');
               
-              const geometrySnapshots = walls.map((w, idx) => ({
-                  kernelId: idx,
-                  entityId: w.data?.id ?? w.id, // Prefer authored ID if available, else runtime ID
-                  kind: w.data?.kind ?? 'STRUCTURAL', // Default to STRUCTURAL if not tagged
-                  x: w.x, 
-                  y: w.y, 
-                  w: w.width || 40, 
-                  h: w.depth || 40
-              }));
+              const segments = walls
+                .map((w, idx) => {
+                    const kind = w.data?.kind ?? 'STRUCTURAL';
+                    if (kind !== 'STRUCTURAL') return null;
 
-              const segments = geometrySnapshots
-                .filter(s => s.kind === 'STRUCTURAL')
-                .map(s => {
-                    // Determine primary axis
-                    const vertical = (s.h || 0) > (s.w || 0);
-                    const base = { entityId: s.entityId, role: 'DEFAULT' }; // Future: pull role from data
+                    const id = w.data?.id ?? w.id ?? idx;
+                    const wVal = w.width || 40;
+                    const dVal = w.depth || 40;
+                    
+                    // Determine primary axis for simple bounding box segments
+                    // If height (depth in top-down) > width, vertical
+                    const vertical = dVal > wVal;
+                    
                     if (vertical) {
                         return {
-                            ...base,
-                            x1: s.x,
-                            y1: s.y - s.h / 2,
-                            x2: s.x,
-                            y2: s.y + s.h / 2,
+                            entityId: id,
+                            x1: w.x,
+                            y1: w.y - dVal / 2,
+                            x2: w.x,
+                            y2: w.y + dVal / 2
                         };
                     } else {
                         return {
-                            ...base,
-                            x1: s.x - s.w / 2,
-                            y1: s.y,
-                            x2: s.x + s.w / 2,
-                            y2: s.y,
+                            entityId: id,
+                            x1: w.x - wVal / 2,
+                            y1: w.y,
+                            x2: w.x + wVal / 2,
+                            y2: w.y
                         };
                     }
-                });
-              
-              // Debug dump for troubleshooting geometry conflicts
-              // console.groupCollapsed('[DEBUG] Structural Segments');
-              // segments.forEach((s, i) => {
-              //   console.log('i=%o entityId=%o x1=%o y1=%o x2=%o y2=%o', i, s.entityId, s.x1, s.y1, s.x2, s.y2);
-              // });
-              // console.groupEnd();
+                })
+                .filter(s => s !== null) as { x1: number; y1: number; x2: number; y2: number; entityId: string | number }[];
 
-              // New Segment Check
-              this.proofKernel.verifyStructuralSegments(segments);
-              
-              // Optional: Run full AABB check only on decorative/non-structural elements if needed
-              // or keep as a "soft" warning in development builds. For now, segments replace AABB for walls.
+              // Dispatch to Kernel Worker for Fractional Overlap Analysis
+              if (segments.length > 0) {
+                  this.proofKernel.verifyStructuralSegments(segments);
+              }
               
           } catch (verifyErr) {
               console.warn('[SectorLoader] Verification Exception:', verifyErr);
               
-              // Graceful degradation: Lock quality to HIGH to prevent GPU overload during instability
               this.adaptiveQuality.setSafetyCap('HIGH');
 
               this.eventBus.dispatch({
