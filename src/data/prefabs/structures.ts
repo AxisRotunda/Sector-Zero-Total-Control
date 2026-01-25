@@ -32,6 +32,27 @@ export interface PrefabResult {
     entities: ZoneEntityDef[];
 }
 
+// --- MEMOIZATION CACHE ---
+const STRUCTURE_CACHE = new Map<string, PrefabResult>();
+
+/**
+ * Caches the result of a structure factory function based on a unique key.
+ * Used to optimize zone initialization by generating geometry only once per session.
+ */
+export function cachedStructure(key: string, factory: () => PrefabResult): PrefabResult {
+    if (STRUCTURE_CACHE.has(key)) {
+        return STRUCTURE_CACHE.get(key)!;
+    }
+    const result = factory();
+    // Freeze results to ensure cache integrity
+    Object.freeze(result.walls);
+    Object.freeze(result.entities);
+    Object.freeze(result);
+    
+    STRUCTURE_CACHE.set(key, result);
+    return result;
+}
+
 // Dimensions for the Transit Station
 const STATION_DIMS = {
   TRAIN: { width: 800, height: 120, depth: 160 },
@@ -146,7 +167,7 @@ export const BUILDING_PREFABS = {
           { type: 'DECORATION', subType: 'CRATE', x: x, y: y - 90, data: { 
             width: 30, height: 25, depth: 20, color: '#3f3f46' 
           }},
-          // Emergency Terminal (Car 1/2 logic handled by caller, but we add to all for now or check ID)
+          // Emergency Terminal
           carId === 'car1' ? {
             type: 'TERMINAL', x: x - 100, y: y, data: {
                 dialogueId: 'emergency_broadcast',
