@@ -10,6 +10,8 @@ import { ProofKernelService } from '../../core/proof/proof-kernel.service';
 import { EventBusService } from '../../core/events/event-bus.service';
 import { GameEvents } from '../../core/events/game-events';
 import { AdaptiveQualityService } from '../../systems/adaptive-quality.service';
+import { LeanRect } from '../../core/lean-bridge.service';
+import { Entity } from '../../models/game.models';
 
 @Injectable({ providedIn: 'root' })
 export class SectorLoaderService {
@@ -46,50 +48,16 @@ export class SectorLoaderService {
 
           world.entities = MapUtils.mergeWalls(world.entities);
 
-          // --- KERNEL VERIFICATION: SEGMENT ANALYSIS ---
+          // --- KERNEL VERIFICATION: CANONICAL GEOMETRY ---
           try {
               const walls = world.entities.filter(e => e.type === 'WALL');
               
-              // 1. Static Geometry Verification
-              // Convert entities to simple geometric segments for the proof kernel
-              const segments = walls
-                .map((w, idx) => {
-                    const kind = w.data?.kind ?? 'STRUCTURAL';
-                    if (kind !== 'STRUCTURAL') return null;
+              // Map to Canonical LeanRect Model
+              const rects: LeanRect[] = walls.map(w => this.entityToLeanRect(w));
 
-                    const id = w.data?.id ?? w.id ?? idx;
-                    const wVal = w.width || 40;
-                    const dVal = w.depth || 40;
-                    
-                    const role = w.data?.role ?? 'DEFAULT';
-                    
-                    const vertical = dVal > wVal;
-                    
-                    if (vertical) {
-                        return {
-                            entityId: id,
-                            x1: w.x,
-                            y1: w.y - dVal / 2,
-                            x2: w.x,
-                            y2: w.y + dVal / 2,
-                            role: role
-                        };
-                    } else {
-                        return {
-                            entityId: id,
-                            x1: w.x - wVal / 2,
-                            y1: w.y,
-                            x2: w.x + wVal / 2,
-                            y2: w.y,
-                            role: role
-                        };
-                    }
-                })
-                .filter(s => s !== null) as { x1: number; y1: number; x2: number; y2: number; entityId: string | number; role: string }[];
-
-              if (segments.length > 0) {
-                  // Fire-and-forget call to the Kernel (which now uses LeanBridge)
-                  this.proofKernel.verifyStructuralSegments(segments);
+              if (rects.length > 0) {
+                  // Fire-and-forget call to the Kernel (Canonical Check)
+                  this.proofKernel.verifyGeometry(rects);
               }
               
           } catch (verifyErr) {
@@ -134,6 +102,23 @@ export class SectorLoaderService {
               payload: { severity: 'CRITICAL', source: 'SECTOR_LOAD_CRASH', message: 'Sector initialization failed. Loading fallback geometry.' }
           });
       }
+  }
+
+  /**
+   * Adapts an Engine Entity/Segment to the Canonical LeanRect model.
+   * Coordinate System: Center-based (Engine) -> Corner-based (Lean)
+   */
+  private entityToLeanRect(e: Entity): LeanRect {
+      const w = e.width || 40;
+      const h = e.depth || 40; // LeanRect 'h' corresponds to depth (Y-span) in top-down logic
+      
+      return {
+          id: e.id,
+          x: e.x - w / 2, // Convert center X to left
+          y: e.y - h / 2, // Convert center Y to bottom/top
+          w: w,
+          h: h
+      };
   }
 
   private spawnWall(world: WorldService, def: any, zoneId: string) {

@@ -25,7 +25,7 @@ export interface LeanRect {
 export interface LeanProofResult {
   valid: boolean;
   reason?: string;
-  pair?: [number, number]; // New: Indices of failing pair
+  details?: { i: number; j: number; aId: number | string; bId: number | string };
 }
 
 // Helper functions (Pure, no allocations)
@@ -45,6 +45,7 @@ const top    = (r: LeanRect) => r.y + r.h;
 export class LeanBridgeService {
 
   constructor() {
+    // 4. Minimal formal linkage: Self-test on init
     this.runGeometrySelfTest();
   }
 
@@ -57,10 +58,12 @@ export class LeanBridgeService {
    * Strict `<` in Lean is implemented via early-return `>=` checks.
    */
   private rectOverlap(a: LeanRect, b: LeanRect): boolean {
+    // "zero-width/height walls (must be ignored)"
     if (a.w <= 0 || a.h <= 0 || b.w <= 0 || b.h <= 0) return false;
     
     // Separation Axis Theorem (simplified for AABB)
     // If they are separated on any axis, they do not overlap.
+    // Touching edges are allowed (strictly separated or touching).
     if (left(a)   >= right(b))  return false;
     if (left(b)   >= right(a))  return false;
     if (bottom(a) >= top(b))    return false;
@@ -92,56 +95,81 @@ export class LeanBridgeService {
    * Simulates: `ValidLevel : List Rect -> Bool`
    * Executable Boolean version: validLevelBool(walls) returns true iff no pair of distinct rectangles overlaps.
    */
-  proveGeometryValidity(walls: readonly LeanRect[]): LeanProofResult {
-    const result = this.validLevel(walls);
+  proveGeometryValidity(rects: readonly LeanRect[]): LeanProofResult {
+    const { ok, pair } = this.validLevel(rects);
     
-    if (!result.ok && result.pair) {
-        const [i, j] = result.pair;
-        const a = walls[i];
-        const b = walls[j];
-        return {
-            valid: false,
-            reason: `Geometric Axiom Violation: Intersection detected between Entity ${a.id} and Entity ${b.id}`,
-            pair: result.pair
-        };
+    if (ok) {
+      return { valid: true };
     }
 
-    return { valid: true };
+    if (!pair) {
+      return { valid: false, reason: "GEOMETRY_OVERLAP_UNKNOWN_PAIR" };
+    }
+
+    const [i, j] = pair;
+    return {
+      valid: false,
+      reason: "GEOMETRY_OVERLAP",
+      details: { i, j, aId: rects[i]?.id, bId: rects[j]?.id }
+    };
   }
 
   // --- 4. Mechanistic verification and automation ---
   private runGeometrySelfTest() {
+     // Deterministic edge cases & random small sets
      const cases: { rects: LeanRect[]; expectOk: boolean; name: string }[] = [
        {
          name: "single rect",
          expectOk: true,
-         rects: [{ id: 0, x: 0, y: 0, w: 10, h: 10 }],
+         rects: [{ id: 'test1', x: 0, y: 0, w: 10, h: 10 }],
        },
        {
-         name: "overlapping",
+         name: "identical overlapping",
          expectOk: false,
          rects: [
-           { id: 0, x: 0, y: 0, w: 10, h: 10 },
-           { id: 1, x: 5, y: 5, w: 10, h: 10 },
+           { id: 'a', x: 0, y: 0, w: 10, h: 10 },
+           { id: 'b', x: 0, y: 0, w: 10, h: 10 },
          ],
        },
        {
          name: "touching edge (allowed)",
          expectOk: true,
          rects: [
-           { id: 0, x: 0, y: 0, w: 10, h: 10 },
-           { id: 1, x: 10, y: 0, w: 10, h: 10 },
+           { id: 'a', x: 0, y: 0, w: 10, h: 10 },
+           { id: 'b', x: 10, y: 0, w: 10, h: 10 },
          ],
        },
+       {
+         name: "nested",
+         expectOk: false,
+         rects: [
+           { id: 'outer', x: 0, y: 0, w: 20, h: 20 },
+           { id: 'inner', x: 5, y: 5, w: 10, h: 10 },
+         ],
+       },
+       {
+         name: "zero-dimension (ignored)",
+         expectOk: true,
+         rects: [
+           { id: 'valid', x: 0, y: 0, w: 10, h: 10 },
+           { id: 'ghost', x: 5, y: 5, w: 0, h: 0 }, // Should be ignored
+         ],
+       }
      ];
 
+     let passed = 0;
      for (const c of cases) {
        const r = this.validLevel(c.rects);
        if (r.ok !== c.expectOk) {
-         console.warn("[LeanBridge] GeometryKernelSelfTest mismatch", c.name, r);
+         console.error(`[LeanBridge] SELF-TEST FAILED: ${c.name}`, r);
+       } else {
+         passed++;
        }
      }
-     // console.log("[LeanBridge] Self-test complete.");
+     
+     if (passed === cases.length) {
+       // console.log(`[LeanBridge] Kernel Integrity Verified (${passed}/${cases.length} axioms held)`);
+     }
   }
 
   // --- 2. COMBAT DOMAIN ---
