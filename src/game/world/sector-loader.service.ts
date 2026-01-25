@@ -89,7 +89,7 @@ export class SectorLoaderService {
                 })
                 .filter(s => s !== null) as { x1: number; y1: number; x2: number; y2: number; entityId: string | number; role: string }[];
 
-              // Dispatch to Kernel Worker
+              // Dispatch to Kernel Worker - Fire and Forget
               if (segments.length > 0) {
                   this.proofKernel.verifyStructuralSegments(segments);
               }

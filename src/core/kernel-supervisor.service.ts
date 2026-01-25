@@ -97,7 +97,10 @@ export class KernelSupervisorService {
       if (policy) {
           // Trigger Corrector Action if defined
           if (policy.action) {
-              this.corrector.triggerCorrection(policy.action);
+              // Ensure we check message existence safely
+              if (payload.message) {
+                  this.corrector.triggerCorrection(policy.action);
+              }
           }
           
           // Apply Quality Cap if conditions met

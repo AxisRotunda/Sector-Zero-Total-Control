@@ -1,5 +1,5 @@
 
-import { Injectable, signal, OnDestroy } from '@angular/core';
+import { Injectable, signal, OnDestroy, inject } from '@angular/core';
 import { Entity } from '../../models/game.models';
 import { DamageResult, DamagePacket } from '../../models/damage.model';
 import { Item } from '../../models/item.models';
@@ -223,13 +223,14 @@ export class ProofKernelService implements OnDestroy {
   private metrics: Record<string, ReturnType<typeof signal<DomainMetrics>>> = {};
   private worker: Worker | null = null;
   private workerUrl: string | null = null;
+  private eventBus = inject(EventBusService);
   
   // Ledger and Stats
   private ledger: any[] = [];
   private axioms = new Map<string, Axiom>();
   private axiomStats = new Map<string, AxiomStats>();
 
-  constructor(private eventBus: EventBusService) {
+  constructor() {
     this.initMetrics();
     this.registerCoreAxioms();
     this.initWorker();
@@ -328,8 +329,15 @@ export class ProofKernelService implements OnDestroy {
 
       // Derive severity from response type/content
       let severity: AxiomSeverity = 'LOW';
-      if (data.error.includes('Critical') || data.error.includes('KernelPanic')) severity = 'CRITICAL';
-      else if (data.error.includes('Overlap') || data.error.includes('Density')) severity = 'MEDIUM';
+      
+      // Standardize Severity Mapping
+      if (data.type === 'SPATIAL_TOPOLOGY' && data.error.includes('Density')) {
+          severity = 'MEDIUM'; // High density is concerning but recoverable
+      } else if (data.type === 'GEOMETRY_SEGMENTS') {
+          severity = 'LOW'; // Overlaps are visual mostly
+      } else if (data.error.includes('KernelPanic')) {
+          severity = 'CRITICAL';
+      }
 
       this.updateMetrics(data.type, data.computeTime, 1);
 
