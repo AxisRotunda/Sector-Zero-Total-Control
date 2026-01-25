@@ -5,6 +5,7 @@ import * as CONFIG from '../../config/game.config';
 import { EntityPoolService } from '../../services/entity-pool.service';
 import { NarrativeService } from '../narrative.service';
 import { MapUtils } from '../../utils/map-utils';
+import { ProofKernelService } from '../../core/proof/proof-kernel.service';
 
 export interface GenerationResult { entities: Entity[]; zone: Zone; playerStart: { x: number, y: number }; bounds: { minX: number, maxX: number, minY: number, maxY: number }; }
 
@@ -12,8 +13,44 @@ export interface GenerationResult { entities: Entity[]; zone: Zone; playerStart:
 export class WorldGeneratorService {
   private entityPool = inject(EntityPoolService);
   private narrative = inject(NarrativeService);
+  private proofKernel = inject(ProofKernelService);
+
+  private readonly MAX_RETRIES = 5;
 
   public generate(theme: ZoneTheme, difficulty: number, sectorId: string): GenerationResult {
+    let attempt = 0;
+    
+    while (attempt < this.MAX_RETRIES) {
+        attempt++;
+        const result = this.attemptGeneration(theme, difficulty, sectorId);
+        
+        // --- PROOF PHASE ---
+        const overlapProof = this.proofKernel.verifyNonOverlap(result.entities);
+        if (!overlapProof.isValid) {
+            console.warn(`[WorldGen] Hallucination Detected (Overlap) on attempt ${attempt}:`, overlapProof.errors[0]);
+            continue; // Retry
+        }
+
+        const connectivityProof = this.proofKernel.verifyConnectivity(result.entities, result.bounds, result.playerStart);
+        if (!connectivityProof.isValid) {
+            console.warn(`[WorldGen] Hallucination Detected (Unreachable) on attempt ${attempt}:`, connectivityProof.errors[0]);
+            continue; // Retry
+        }
+
+        // If proven valid, return
+        console.log(`[WorldGen] Sector ${sectorId} verified in ${attempt} attempts. Logic Integrity: 100%.`);
+        
+        // Merge walls AFTER validation to simplify the proof step above
+        result.entities = MapUtils.mergeWalls(result.entities);
+        return result;
+    }
+
+    // Fallback if all attempts fail (Safe Room)
+    console.error(`[WorldGen] CRITICAL: Could not verify sector ${sectorId} after ${this.MAX_RETRIES} attempts. Deploying Safe Room.`);
+    return this.generateSafeRoom(theme, sectorId);
+  }
+
+  private attemptGeneration(theme: ZoneTheme, difficulty: number, sectorId: string): GenerationResult {
     // Determine colors based on Theme
     const colors = this.getThemeColors(theme);
     
@@ -64,10 +101,35 @@ export class WorldGeneratorService {
         }
     }
     
-    // Merge walls to optimize rendering
-    const mergedEntities = MapUtils.mergeWalls(entities);
-    
-    return { entities: mergedEntities, zone, playerStart: { x: 0, y: 100 }, bounds };
+    return { entities, zone, playerStart: { x: 0, y: 100 }, bounds };
+  }
+
+  private generateSafeRoom(theme: ZoneTheme, sectorId: string): GenerationResult {
+      const colors = this.getThemeColors(theme);
+      const zone: Zone = {
+        id: sectorId,
+        name: `${sectorId} [SAFE MODE]`,
+        theme: theme,
+        groundColor: colors.ground,
+        wallColor: colors.wall,
+        detailColor: colors.detail,
+        minDepth: 0,
+        difficultyMult: 0,
+        weather: 'NONE',
+        floorPattern: 'PLAIN',
+        isSafeZone: true
+      };
+      
+      const entities: Entity[] = [];
+      const bounds = { minX: -1000, maxX: 1000, minY: -1000, maxY: 1000 };
+      
+      const exitUp = this.entityPool.acquire('EXIT');
+      exitUp.exitType = 'UP'; exitUp.x = 0; exitUp.y = -200; exitUp.zoneId = sectorId; entities.push(exitUp);
+      
+      const exitDown = this.entityPool.acquire('EXIT');
+      exitDown.exitType = 'DOWN'; exitDown.x = 0; exitDown.y = 200; exitDown.zoneId = sectorId; entities.push(exitDown);
+      
+      return { entities, zone, playerStart: { x: 0, y: 0 }, bounds };
   }
 
   private getThemeColors(theme: ZoneTheme) {

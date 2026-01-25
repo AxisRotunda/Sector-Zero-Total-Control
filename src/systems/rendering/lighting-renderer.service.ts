@@ -6,7 +6,7 @@ import { RENDER_CONFIG } from './render.config';
 import { LightingService } from './lighting.service';
 import { PerformanceManagerService } from '../../game/performance-manager.service';
 import { LightSource } from '../../models/rendering.models';
-import { BakedTile } from './static-batch-renderer.service';
+import { LightingBakeResult } from './lightmap-baker.service';
 
 @Injectable({ providedIn: 'root' })
 export class LightingRendererService {
@@ -154,7 +154,7 @@ export class LightingRendererService {
     zone: Zone,
     screenWidth: number, 
     screenHeight: number,
-    bakedTiles?: BakedTile[] | null
+    bakedLighting?: LightingBakeResult | null
   ) {
     if (!RENDER_CONFIG.LIGHTING.ENABLED || !this.ctx || !this.canvas) return;
 
@@ -196,14 +196,14 @@ export class LightingRendererService {
         const light = visibleLights[i];
         // Only draw DYNAMIC/PULSE lights in the dynamic pass if we have baked lights
         // If no bake (rare now), draw all visible
-        if (!bakedTiles || light.type !== 'STATIC') {
+        if (!bakedLighting || light.type !== 'STATIC') {
             this.drawLightSprite(ctx, light.x, light.y, light.z || 0, light.radius, light.intensity);
         }
     }
 
     // Apply Baked Tiles (Static Holes)
-    if (bakedTiles) {
-        for (const tile of bakedTiles) {
+    if (bakedLighting?.occlusion) {
+        for (const tile of bakedLighting.occlusion) {
             ctx.drawImage(tile.canvas, tile.x, tile.y);
         }
     }
@@ -211,12 +211,21 @@ export class LightingRendererService {
     // --- PASS 2: EMISSIVE LIGHTS (Color Additive) ---
     ctx.globalCompositeOperation = 'lighter'; 
 
+    // Apply Baked Emissive Tiles (Static Glows)
+    if (bakedLighting?.emissive) {
+        for (const tile of bakedLighting.emissive) {
+            ctx.drawImage(tile.canvas, tile.x, tile.y);
+        }
+    }
+
     for (let i = 0; i < len; i++) {
         const light = visibleLights[i];
         if (light.color === '#ffffff' || light.color === '#000000') continue;
         
-        // Static lights also get drawn here for their color component (Baker only handles mask)
-        // Optimization opportunity: Bake color too, but this retains quality.
+        // OPTIMIZATION: If bakedLighting exists, skip static lights here too.
+        // They are already in the emissive tile.
+        if (bakedLighting && light.type === 'STATIC') continue;
+
         this.drawColoredLight(ctx, light.x, light.y, light.z || 0, light.radius * 0.8, light.intensity * 0.6, light.color);
     }
 

@@ -46,6 +46,20 @@ export class UnitRendererService {
       return this.angleCache.get(normalized) || { sin: Math.sin(rad), cos: Math.cos(rad) };
   }
 
+  // Refactored helper to avoid closure allocation
+  private transformToIso(wx: number, wy: number, wz: number, target: {x:number, y:number}, 
+                         ex: number, ey: number, ez: number, bodyTwist: number, bodyZ: number) {
+     const cosT = Math.cos(bodyTwist); const sinT = Math.sin(bodyTwist);
+     const tx = wx * cosT - wy * sinT; 
+     const ty = wx * sinT + wy * cosT;
+     
+     const rx = tx * this._cos - ty * this._sin; 
+     const ry = tx * this._sin + ty * this._cos;
+     
+     IsoUtils.toIso(ex + rx, ey + ry, ez + wz + bodyZ, target);
+     return target;
+  }
+
   drawHumanoid(ctx: CanvasRenderingContext2D, e: Entity) {
       if (e.state === 'DEAD') return;
 
@@ -122,45 +136,36 @@ export class UnitRendererService {
               bodyZ = -1 * recoil; 
           } else {
               // MELEE LOGIC: Visual Swing Types
-              // Read combo step via Signal for Player, or fallback logic
               const comboStep = isPlayer ? this.abilities.activeComboStep() : null;
               
               if (isPlayer && comboStep) {
-                  // Normalize progress: 0 to 1 based on animation timer logic
                   const start = comboStep.hitboxStart;
                   const total = comboStep.durationTotal;
-                  // Clamp progress to 0-1
                   const progress = Math.min(1, Math.max(0, e.animFrameTimer / total));
 
-                  // Swing Type Mapping
                   switch (comboStep.swingType) {
-                      case 'SLASH_RIGHT': // Left to Right Horizontal
+                      case 'SLASH_RIGHT': 
                           rArmAngle = -Math.PI/2 + (progress * Math.PI);
                           lArmAngle = -Math.PI/6;
                           bodyTwist = -0.5 + progress;
                           break;
-                          
-                      case 'SLASH_LEFT': // Right to Left Horizontal
+                      case 'SLASH_LEFT': 
                           rArmAngle = Math.PI/2 - (progress * Math.PI);
                           lArmAngle = Math.PI/6;
                           bodyTwist = 0.5 - progress;
                           break;
-                          
-                      case 'OVERHEAD': // Vertical Chop
+                      case 'OVERHEAD': 
                           rArmAngle = -Math.PI + (progress * Math.PI * 1.5);
                           lArmAngle = -Math.PI + (progress * Math.PI * 1.5) - 0.2;
                           bodyTwist = 0.1;
                           break;
-                          
-                      case 'THRUST': // Stab
-                          // Sine wave for stab out and back
+                      case 'THRUST': 
                           const stab = Math.sin(progress * Math.PI);
                           rArmAngle = -Math.PI/2 + (stab * 0.2);
-                          rHandReach = stab * 35; // Extended reach
+                          rHandReach = stab * 35;
                           bodyTwist = 0.5;
                           break;
-                          
-                      case 'SPIN': // 360 Spin
+                      case 'SPIN': 
                           const spin = progress * Math.PI * 2;
                           rArmAngle = spin;
                           lArmAngle = spin + Math.PI;
@@ -168,7 +173,6 @@ export class UnitRendererService {
                           break;
                   }
               } else {
-                  // Fallback / Enemy Logic
                   const p = 1 - ((e.timer || 0) / 10);
                   if (p < 0.25) { rArmAngle = -Math.PI / 1.4; bodyTwist = -0.3; bodyZ = -2; } 
                   else if (p < 0.6) { rArmAngle = Math.PI / 3; bodyTwist = 0.4; rHandReach = 15; bodyZ = 0; } 
@@ -216,18 +220,6 @@ export class UnitRendererService {
           }
       }
 
-      const transformToIso = (wx: number, wy: number, wz: number, target: {x:number, y:number}) => {
-         const cosT = Math.cos(bodyTwist); const sinT = Math.sin(bodyTwist);
-         const tx = wx * cosT - wy * sinT; 
-         const ty = wx * sinT + wy * cosT;
-         
-         const rx = tx * this._cos - ty * this._sin; 
-         const ry = tx * this._sin + ty * this._cos;
-         
-         IsoUtils.toIso(e.x + rx, e.y + ry, e.z + wz + bodyZ, target);
-         return target;
-      };
-
       const activeTarget = this.interaction.activeInteractable();
       if (activeTarget && activeTarget.id === e.id) {
           IsoUtils.toIso(e.x, e.y, 0, this._iso);
@@ -255,10 +247,14 @@ export class UnitRendererService {
       const scaleH = vis.scaleHeight || 1;
 
       // 1. Back Accessories (LOD Checked)
-      const pWaist = transformToIso(0, 0, 18, this._isoBody);
+      this.transformToIso(0, 0, 18, this._isoBody, e.x, e.y, e.z || 0, bodyTwist, bodyZ);
+      const pWaist = this._isoBody;
+
       if (!isHit && !useSimpleGeo && vis.accessoryType === 'CAPE') {
-          const pShoulders = transformToIso(0, 0, 38 * scaleH, this._iso);
-          const capeEnd = transformToIso(-20 * Math.sin(legCycle), 0, 5, this._isoLeg); 
+          this.transformToIso(0, 0, 38 * scaleH, this._iso, e.x, e.y, e.z || 0, bodyTwist, bodyZ);
+          const pShoulders = this._iso;
+          this.transformToIso(-20 * Math.sin(legCycle), 0, 5, this._isoLeg, e.x, e.y, e.z || 0, bodyTwist, bodyZ); 
+          const capeEnd = this._isoLeg;
           ctx.fillStyle = vis.colors.primary;
           ctx.beginPath();
           ctx.moveTo(pShoulders.x - 10 * scaleW, pShoulders.y);
@@ -269,26 +265,13 @@ export class UnitRendererService {
       }
 
       // 2. Legs
-      ctx.fillStyle = vis.colors.secondary;
       const legColor = isHit ? '#fff' : vis.colors.secondary;
-      
-      const drawLeg = (angle: number) => {
-          const knee = transformToIso(Math.sin(angle) * 10 * scaleW, Math.cos(angle) * 5, 8, this._isoLeg);
-          const foot = transformToIso(Math.sin(angle) * 20 * scaleW, Math.cos(angle) * 15, 0, this._iso);
-          ctx.strokeStyle = legColor;
-          ctx.lineWidth = 6 * scaleW;
-          ctx.beginPath();
-          ctx.moveTo(pWaist.x, pWaist.y);
-          ctx.lineTo(knee.x, knee.y);
-          ctx.lineTo(foot.x, foot.y);
-          ctx.stroke();
-      };
-      
-      drawLeg(legCycle); // Right
-      drawLeg(-legCycle + Math.PI); // Left
+      this.drawLeg(ctx, e, pWaist, legCycle, scaleW, legColor, bodyTwist, bodyZ); // Right
+      this.drawLeg(ctx, e, pWaist, -legCycle + Math.PI, scaleW, legColor, bodyTwist, bodyZ); // Left
 
       // 3. Torso
-      const pShoulders = transformToIso(0, 0, 38 * scaleH, this._iso);
+      this.transformToIso(0, 0, 38 * scaleH, this._iso, e.x, e.y, e.z || 0, bodyTwist, bodyZ);
+      const pShoulders = this._iso;
       ctx.strokeStyle = isHit ? '#fff' : vis.colors.primary;
       ctx.lineWidth = 14 * scaleW;
       ctx.beginPath();
@@ -306,7 +289,8 @@ export class UnitRendererService {
       }
 
       // 4. Head
-      const pHead = transformToIso(0, 0, 48 * scaleH + headZ, this._iso);
+      this.transformToIso(0, 0, 48 * scaleH + headZ, this._iso, e.x, e.y, e.z || 0, bodyTwist, bodyZ);
+      const pHead = this._iso;
       
       ctx.fillStyle = isHit ? '#fff' : vis.colors.skin;
       ctx.beginPath(); ctx.arc(pHead.x, pHead.y, 8 * scaleW, 0, Math.PI * 2); ctx.fill();
@@ -328,43 +312,74 @@ export class UnitRendererService {
       }
 
       // 5. Arms & Weapons
-      const drawArm = (angle: number, isRight: boolean, isSupportArm: boolean = false) => {
-          const shoulderX = isRight ? 8 * scaleW : -8 * scaleW;
-          const shoulderPos = transformToIso(shoulderX, 0, 36 * scaleH, this._isoShoulder);
-          
-          let handX, handY;
-          if (isTwoHanded && isSupportArm) {
-              handX = shoulderX + 15 * scaleW; 
-              handY = 10; 
-          } else {
-              handX = shoulderX + Math.sin(angle) * 24 * scaleW + (isRight ? rHandReach : 0);
-              handY = Math.cos(angle) * 24;
-          }
-
-          const elbowX = (shoulderX + handX) / 2;
-          const elbowY = handY / 2;
-          
-          const elbowPos = transformToIso(elbowX, elbowY, 24 * scaleH, this._isoElbow);
-          const handPos = transformToIso(handX, handY, 20 * scaleH, this._isoHand);
-
-          ctx.strokeStyle = isHit ? '#fff' : vis.colors.primary;
-          ctx.lineWidth = 5 * scaleW;
-          ctx.beginPath();
-          ctx.moveTo(shoulderPos.x, shoulderPos.y);
-          ctx.lineTo(elbowPos.x, elbowPos.y);
-          ctx.lineTo(handPos.x, handPos.y);
-          ctx.stroke();
-          
-          if (isRight && equippedWeapon && !isHit) {
-              this.drawWeapon(ctx, handPos.x, handPos.y, e.angle, equippedWeapon);
-          }
-      };
-
-      drawArm(lArmAngle, false, isTwoHanded);
-      drawArm(rArmAngle, true);
+      this.drawArm(ctx, e, lArmAngle, false, isTwoHanded, scaleW, scaleH, bodyTwist, bodyZ, rHandReach, isHit, vis, equippedWeapon);
+      this.drawArm(ctx, e, rArmAngle, true, isTwoHanded, scaleW, scaleH, bodyTwist, bodyZ, rHandReach, isHit, vis, equippedWeapon);
 
       if (isStunned) {
           ctx.restore();
+      }
+  }
+
+  private drawLeg(ctx: CanvasRenderingContext2D, e: Entity, pWaist: {x:number, y:number}, angle: number, scaleW: number, color: string, bodyTwist: number, bodyZ: number) {
+      this.transformToIso(Math.sin(angle) * 10 * scaleW, Math.cos(angle) * 5, 8, this._isoLeg, e.x, e.y, e.z || 0, bodyTwist, bodyZ);
+      const knee = this._isoLeg;
+      
+      this.transformToIso(Math.sin(angle) * 20 * scaleW, Math.cos(angle) * 15, 0, this._iso, e.x, e.y, e.z || 0, bodyTwist, bodyZ);
+      const foot = this._iso;
+      
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 6 * scaleW;
+      ctx.beginPath();
+      ctx.moveTo(pWaist.x, pWaist.y);
+      ctx.lineTo(knee.x, knee.y);
+      ctx.lineTo(foot.x, foot.y);
+      ctx.stroke();
+  }
+
+  private drawArm(ctx: CanvasRenderingContext2D, e: Entity, angle: number, isRight: boolean, isTwoHanded: boolean | null, 
+                  scaleW: number, scaleH: number, bodyTwist: number, bodyZ: number, 
+                  rHandReach: number, isHit: boolean, vis: VisualProfile, equippedWeapon: Item | null) {
+      
+      const shoulderX = isRight ? 8 * scaleW : -8 * scaleW;
+      // Using temp object _isoShoulder for first point, need to clone/copy if we use it later in path
+      this.transformToIso(shoulderX, 0, 36 * scaleH, this._isoShoulder, e.x, e.y, e.z || 0, bodyTwist, bodyZ);
+      // We must copy values because transformToIso reuses the object if we call it again for elbow/hand
+      const sX = this._isoShoulder.x;
+      const sY = this._isoShoulder.y;
+      
+      let handX, handY;
+      // isSupportArm logic: left arm is support if two handed
+      const isSupportArm = !isRight && isTwoHanded;
+
+      if (isSupportArm) {
+          handX = shoulderX + 15 * scaleW; 
+          handY = 10; 
+      } else {
+          handX = shoulderX + Math.sin(angle) * 24 * scaleW + (isRight ? rHandReach : 0);
+          handY = Math.cos(angle) * 24;
+      }
+
+      const elbowX = (shoulderX + handX) / 2;
+      const elbowY = handY / 2;
+      
+      this.transformToIso(elbowX, elbowY, 24 * scaleH, this._isoElbow, e.x, e.y, e.z || 0, bodyTwist, bodyZ);
+      const eX = this._isoElbow.x;
+      const eY = this._isoElbow.y;
+
+      this.transformToIso(handX, handY, 20 * scaleH, this._isoHand, e.x, e.y, e.z || 0, bodyTwist, bodyZ);
+      const hX = this._isoHand.x;
+      const hY = this._isoHand.y;
+
+      ctx.strokeStyle = isHit ? '#fff' : vis.colors.primary;
+      ctx.lineWidth = 5 * scaleW;
+      ctx.beginPath();
+      ctx.moveTo(sX, sY);
+      ctx.lineTo(eX, eY);
+      ctx.lineTo(hX, hY);
+      ctx.stroke();
+      
+      if (isRight && equippedWeapon && !isHit) {
+          this.drawWeapon(ctx, hX, hY, e.angle, equippedWeapon);
       }
   }
 

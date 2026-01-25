@@ -172,8 +172,8 @@ export class RenderService {
 
     // 1. Prepare Scene & Bake Check
     const bakedTiles = this.staticBatcher.bakeStaticGeometry(zone, entities, cam.rotation);
-    // Returns BakedTile[] or null
-    const bakedLightTiles = this.lightBaker.bakeStaticLights(this.lighting.allLights, cam.rotation);
+    // Returns LightingBakeResult { occlusion: [], emissive: [] } or null
+    const bakedLighting = this.lightBaker.bakeStaticLights(this.lighting.allLights, cam.rotation);
 
     this.prepareRenderList(cam, zone, entities, player, particles, window.innerWidth, window.innerHeight, this._frustum, !!bakedTiles);
     
@@ -216,7 +216,7 @@ export class RenderService {
     this.ctx.restore();
     
     // 9. Lighting & Atmosphere Pass
-    this.lightingRenderer.drawLighting(this.ctx, this.renderList as Entity[], player, cam, zone, w, h, bakedLightTiles);
+    this.lightingRenderer.drawLighting(this.ctx, this.renderList as Entity[], player, cam, zone, w, h, bakedLighting);
 
     // 10. Post-Processing
     this.applyPostEffects(w, h);

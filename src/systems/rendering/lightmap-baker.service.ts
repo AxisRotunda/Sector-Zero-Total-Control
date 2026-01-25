@@ -1,19 +1,24 @@
 
-import { Injectable, inject } from '@angular/core';
+import { Injectable } from '@angular/core';
 import { LightSource } from '../../models/rendering.models';
 import { IsoUtils } from '../../utils/iso-utils';
 import { BakedTile } from './static-batch-renderer.service';
 
+export interface LightingBakeResult {
+    occlusion: BakedTile[];
+    emissive: BakedTile[];
+}
+
 @Injectable({ providedIn: 'root' })
 export class LightmapBakerService {
   
-  private bakeCache = new Map<string, BakedTile[]>();
+  private bakeCache = new Map<string, LightingBakeResult>();
   private readonly TILE_SIZE = 2048; // Safe chunk size
 
   bakeStaticLights(
     lights: LightSource[], 
     cameraRotation: number
-  ): BakedTile[] | null {
+  ): LightingBakeResult | null {
     
     if (!lights) return null;
 
@@ -49,7 +54,8 @@ export class LightmapBakerService {
     minIsoX -= 100; maxIsoX += 100;
     minIsoY -= 100; maxIsoY += 100;
 
-    const tiles: BakedTile[] = [];
+    const occlusionTiles: BakedTile[] = [];
+    const emissiveTiles: BakedTile[] = [];
 
     // 2. Generate Tiles
     for (let y = minIsoY; y < maxIsoY; y += this.TILE_SIZE) {
@@ -68,18 +74,24 @@ export class LightmapBakerService {
 
             if (tileLights.length === 0) continue;
 
-            const tile = this.renderTile(tileLights, x, y, this.TILE_SIZE, this.TILE_SIZE);
-            if (tile) tiles.push(tile);
+            // Render Occlusion Tile (White Mask)
+            const occTile = this.renderTile(tileLights, x, y, this.TILE_SIZE, this.TILE_SIZE, 'OCCLUSION');
+            if (occTile) occlusionTiles.push(occTile);
+
+            // Render Emissive Tile (Colored Glow)
+            const emiTile = this.renderTile(tileLights, x, y, this.TILE_SIZE, this.TILE_SIZE, 'EMISSIVE');
+            if (emiTile) emissiveTiles.push(emiTile);
         }
     }
 
     IsoUtils.setContext(originalRotation, originalCx, originalCy);
 
-    this.bakeCache.set(cacheKey, tiles);
-    return tiles;
+    const result = { occlusion: occlusionTiles, emissive: emissiveTiles };
+    this.bakeCache.set(cacheKey, result);
+    return result;
   }
 
-  private renderTile(lights: LightSource[], x: number, y: number, w: number, h: number): BakedTile {
+  private renderTile(lights: LightSource[], x: number, y: number, w: number, h: number, mode: 'OCCLUSION' | 'EMISSIVE'): BakedTile {
       let canvas: HTMLCanvasElement | OffscreenCanvas;
       if (typeof OffscreenCanvas !== 'undefined') {
           canvas = new OffscreenCanvas(w, h);
@@ -95,15 +107,32 @@ export class LightmapBakerService {
       ctx.translate(-x, -y);
       ctx.clearRect(0, 0, w, h);
 
+      // For Emissive pass, we want additive blending within the tile to handle overlapping static lights correctly
+      if (mode === 'EMISSIVE') {
+          ctx.globalCompositeOperation = 'lighter';
+      }
+
       const pt = {x:0, y:0};
 
       for (const l of lights) {
           IsoUtils.toIso(l.x, l.y, l.z || 0, pt);
           
           const grad = ctx.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, l.radius);
-          // White mask with alpha = intensity
-          grad.addColorStop(0, `rgba(255, 255, 255, ${l.intensity})`);
-          grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+          
+          if (mode === 'OCCLUSION') {
+              // White mask with alpha = intensity
+              grad.addColorStop(0, `rgba(255, 255, 255, ${l.intensity})`);
+              grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+          } else {
+              // Colored glow
+              // We need to parse the color to apply intensity to alpha, or just use intensity logic
+              // For simplicity, assuming l.color is hex/rgba, we use it directly but fade out
+              // To respect intensity, we can use globalAlpha or modify color string. 
+              // Simplest is generic fade.
+              grad.addColorStop(0, l.color); // Center color
+              grad.addColorStop(1, 'rgba(0,0,0,0)'); // Transparent edge
+              ctx.globalAlpha = l.intensity * 0.6; // Scale down slightly to avoid over-saturation
+          }
           
           ctx.fillStyle = grad;
           ctx.beginPath();

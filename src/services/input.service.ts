@@ -1,6 +1,7 @@
 
-import { Injectable, signal, OnDestroy } from '@angular/core';
+import { Injectable, signal, OnDestroy, inject } from '@angular/core';
 import { Subject, fromEvent, Subscription } from 'rxjs';
+import { InputValidatorService } from './input-validator.service';
 
 export type Action = 
   | 'MOVE_UP' | 'MOVE_DOWN' | 'MOVE_LEFT' | 'MOVE_RIGHT'
@@ -39,6 +40,8 @@ export interface InputState {
   providedIn: 'root'
 })
 export class InputService implements OnDestroy {
+  private validator = inject(InputValidatorService);
+
   inputVector = { x: 0, y: 0 };
   aimAngle: number | null = null;
   
@@ -210,7 +213,10 @@ export class InputService implements OnDestroy {
   }
 
   setJoystick(x: number, y: number) {
-      this.inputVector = { x, y };
+      // Validate inputs from UI layer
+      const safeVec = this.validator.validateVector({ x, y }, 'TouchJoystick');
+      
+      this.inputVector = safeVec;
       this.usingKeyboard.set(false);
       this.usingGamepad.set(false);
       
@@ -347,7 +353,8 @@ export class InputService implements OnDestroy {
       const ry = gamepad.axes[3];
 
       if (Math.abs(lx) > this.DEADZONE || Math.abs(ly) > this.DEADZONE) {
-          this.inputVector = { x: lx, y: ly };
+          // Validate vectors
+          this.inputVector = this.validator.validateVector({ x: lx, y: ly }, 'GamepadMove');
           this.usingGamepad.set(true);
           this.usingKeyboard.set(false);
           this.lastInputSource = 'GAMEPAD';
