@@ -67,9 +67,10 @@ export class SectorLoaderService {
                 .map(s => {
                     // Determine primary axis
                     const vertical = (s.h || 0) > (s.w || 0);
+                    const base = { entityId: s.entityId, role: 'DEFAULT' }; // Future: pull role from data
                     if (vertical) {
                         return {
-                            entityId: s.entityId,
+                            ...base,
                             x1: s.x,
                             y1: s.y - s.h / 2,
                             x2: s.x,
@@ -77,7 +78,7 @@ export class SectorLoaderService {
                         };
                     } else {
                         return {
-                            entityId: s.entityId,
+                            ...base,
                             x1: s.x - s.w / 2,
                             y1: s.y,
                             x2: s.x + s.w / 2,
@@ -86,6 +87,13 @@ export class SectorLoaderService {
                     }
                 });
               
+              // Debug dump for troubleshooting geometry conflicts
+              // console.groupCollapsed('[DEBUG] Structural Segments');
+              // segments.forEach((s, i) => {
+              //   console.log('i=%o entityId=%o x1=%o y1=%o x2=%o y2=%o', i, s.entityId, s.x1, s.y1, s.x2, s.y2);
+              // });
+              // console.groupEnd();
+
               // New Segment Check
               this.proofKernel.verifyStructuralSegments(segments);
               

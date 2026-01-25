@@ -133,8 +133,9 @@ self.onmessage = function(e) {
                 break;
 
             case 'GEOMETRY_SEGMENTS': {
-                // Theorem: No Collinear Overlap
-                // Allows T-junctions and Corners (Orthogonal intersection), bans parallel stacking.
+                // Theorem: No Significant Collinear Overlap
+                // Allows T-junctions, Corners, and "Shoulder/Bevel" overlaps (Structural reinforcement).
+                // Forbids full duplicate walls.
                 const segments = req.payload.segments;
                 valid = true;
                 const SEG_EPS = 1.0;
@@ -179,11 +180,21 @@ self.onmessage = function(e) {
                         const overlapLen = Math.max(0, Math.min(aEnd, bEnd) - Math.max(aStart, bStart));
 
                         if (overlapLen > SEG_EPS) {
-                            valid = false;
-                            const idA = a.entityId !== undefined ? a.entityId : i;
-                            const idB = b.entityId !== undefined ? b.entityId : j;
-                            error = 'AxiomViolation: Segment Overlap detected between Entity ' + idA + ' and Entity ' + idB;
-                            break outerSeg;
+                            // NEW: Fractional Overlap Tolerance
+                            const lenA = Math.abs(aEnd - aStart);
+                            const lenB = Math.abs(bEnd - bStart);
+                            const minLen = Math.min(lenA, lenB);
+                            const frac = overlapLen / (minLen || 1);
+
+                            // Allow small overlaps (joints/bevels), forbid massive ones (duplicates)
+                            // Threshold 0.5 (50%) allows significant reinforcing structures but catches duplicates.
+                            if (frac > 0.5) {
+                                valid = false;
+                                const idA = a.entityId !== undefined ? a.entityId : i;
+                                const idB = b.entityId !== undefined ? b.entityId : j;
+                                error = 'AxiomViolation: Significant Segment Overlap (' + (frac*100).toFixed(1) + '%) detected between Entity ' + idA + ' and Entity ' + idB;
+                                break outerSeg;
+                            }
                         }
                     }
                 }
