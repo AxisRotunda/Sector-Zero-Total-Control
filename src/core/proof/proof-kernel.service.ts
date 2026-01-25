@@ -5,16 +5,39 @@ import { DamageResult, DamagePacket } from '../../models/damage.model';
 import { DialogueNode, Requirement } from '../../models/narrative.models';
 import { Item } from '../../models/item.models';
 
-/**
- * THE AXIOMATIC SENTINEL
- * 
- * Represents a runtime approximation of a formal verification kernel.
- * Enforces "Reality Consistency" via runtime axiom checks.
- */
-
 export interface ValidationResult {
     isValid: boolean;
     errors: string[];
+}
+
+export class Transaction<T> {
+    private snapshot: string;
+
+    constructor(private state: T) {
+        this.snapshot = JSON.stringify(state);
+    }
+
+    /**
+     * Executes a mutation on a clone of the state. 
+     * If validation passes, returns the new state.
+     * If validation fails, returns null (Rollback).
+     */
+    attempt(mutator: (draft: T) => void, validator: (draft: T) => ValidationResult): { success: boolean; newState: T | null; errors: string[] } {
+        try {
+            // Deep clone for the draft
+            const draft = JSON.parse(this.snapshot) as T;
+            mutator(draft);
+            
+            const result = validator(draft);
+            if (result.isValid) {
+                return { success: true, newState: draft, errors: [] };
+            } else {
+                return { success: false, newState: null, errors: result.errors };
+            }
+        } catch (e: any) {
+            return { success: false, newState: null, errors: [`Runtime Exception: ${e.message}`] };
+        }
+    }
 }
 
 @Injectable({
@@ -43,6 +66,23 @@ export class ProofKernelService {
         this.metrics.avgCheckTime = (this.metrics.avgCheckTime * 0.95) + (duration * 0.05);
         
         return result;
+    }
+
+    // --- TRANSACTION FACTORY ---
+    
+    createTransaction<T>(state: T): Transaction<T> {
+        return new Transaction(state);
+    }
+
+    computeChecksum(data: any): string {
+        const str = JSON.stringify(data);
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // Convert to 32bit integer
+        }
+        return hash.toString(16);
     }
 
     // --- DOMAIN: WORLD TOPOLOGY ---
@@ -160,10 +200,6 @@ export class ProofKernelService {
 
     // --- DOMAIN: COMBAT CALCULATIONS ---
 
-    /**
-     * Axiom: Damage Conservation.
-     * The output total damage cannot exceed the input raw damage multiplied by the max critical multiplier + weakness.
-     */
     verifyCombatTransaction(input: DamagePacket, output: DamageResult, sourceMultiplier: number = 1.0): ValidationResult {
         return this.measure(() => {
             const errors: string[] = [];
@@ -207,10 +243,6 @@ export class ProofKernelService {
 
     // --- DOMAIN: INVENTORY INTEGRITY ---
 
-    /**
-     * Axiom: Conservation of Assets.
-     * Verify that inventory state contains no negative quantities or invalid item references.
-     */
     verifyInventoryState(bag: Item[], credits: number, scrap: number): ValidationResult {
         return this.measure(() => {
             const errors: string[] = [];
@@ -233,25 +265,18 @@ export class ProofKernelService {
 
     // --- DOMAIN: STATUS EFFECTS ---
 
-    /**
-     * Axiom: Temporal Causality.
-     * Verify that status effects have positive durations and valid stack counts.
-     */
     verifyStatusEffects(entity: Entity): ValidationResult {
         return this.measure(() => {
             const errors: string[] = [];
             const s = entity.status;
 
-            // 1. Duration Positivity
             if (s.poison && s.poison.duration < 0) errors.push(`Temporal Paradox: Entity ${entity.id} has negative Poison duration.`);
             if (s.burn && s.burn.duration < 0) errors.push(`Temporal Paradox: Entity ${entity.id} has negative Burn duration.`);
             if (s.weakness && s.weakness.duration < 0) errors.push(`Temporal Paradox: Entity ${entity.id} has negative Weakness duration.`);
 
-            // 2. Logic Consistency
             if (s.stun < 0) errors.push(`Causality Break: Entity ${entity.id} has negative Stun frames.`);
             if (s.slow < 0) errors.push(`Causality Break: Entity ${entity.id} has negative Slow value.`);
 
-            // 3. Stack Bounds
             if (s.bleed && s.bleed.stacks <= 0) errors.push(`Matter Underflow: Entity ${entity.id} has non-positive Bleed stacks.`);
 
             if (errors.length > 0) this.metrics.failedChecks++;
