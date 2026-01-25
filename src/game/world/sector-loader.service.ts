@@ -59,22 +59,23 @@ export class SectorLoaderService {
               if (rects.length > 0) {
                   // Run synchronous geometric proof
                   // Pass source as SECTOR_LOAD
+                  // Gate logic handled inside verifyGeometry (SOFT vs STRICT)
                   const proof = this.proofKernel.verifyGeometry(rects, zoneId, "SECTOR_LOAD");
                   
                   if (!proof.valid) {
-                      if (this.proofKernel.getGeometryGateMode() === "SOFT_PROD") {
-                          // Prod Mode: Degrade and Log
-                          console.warn(`[SectorLoader] Sector ${zoneId} tainted by geometric conflict. Flagging as degraded.`);
-                          // The ProofKernel has already emitted a REALITY_BLEED event.
-                      }
-                      // If STRICT_DEV, verifyGeometry threw an error, caught by outer block.
+                      // If we are here, we are in SOFT_PROD (STRICT_DEV throws)
+                      console.warn(`[SectorLoader] Sector ${zoneId} tainted by geometric conflict. Flagging as degraded.`);
                   }
               }
               
-          } catch (verifyErr) {
+          } catch (verifyErr: any) {
+              // If we are here, verifyGeometry threw an error (STRICT_DEV)
+              // OR there was a system error
               if (this.proofKernel.getGeometryGateMode() === "STRICT_DEV") {
-                  throw verifyErr;
+                  console.error('[SectorLoader] HARD GATE REJECTION:', verifyErr.message);
+                  throw verifyErr; // Bubble up to crash the load
               }
+              
               console.warn('[SectorLoader] Verification Exception:', verifyErr);
               this.eventBus.dispatch({
                   type: GameEvents.REALITY_BLEED,

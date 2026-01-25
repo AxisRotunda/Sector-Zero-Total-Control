@@ -137,6 +137,7 @@ export class LeanBridgeService {
   /**
    * Canonical geometry function: pure, deterministic, boolean.
    * "Implement one canonical function validLevel(rects: LeanRect[]): boolean"
+   * O(n^2) check.
    */
   public validLevel(rects: readonly LeanRect[]): boolean {
     const n = rects.length;
@@ -155,11 +156,11 @@ export class LeanBridgeService {
   /**
    * Generates detailed proof result.
    * Used when we need to know *why* it failed (the Pair).
+   * This is an interpretation layer over the boolean predicate logic.
    */
   public proveGeometryValidity(rects: readonly LeanRect[], sectorId?: string, source: GeometryDetails["source"] = "WORLD_GEN"): LeanProofResult {
     const n = rects.length;
     
-    // We duplicate the loop here to extract the offending pair efficiently without allocating a closure/object in the boolean check
     for (let i = 0; i < n; i++) {
       const ri = rects[i];
       for (let j = i + 1; j < n; j++) {

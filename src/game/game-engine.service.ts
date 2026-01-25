@@ -60,64 +60,69 @@ export class GameEngineService {
     if (this.animationFrameId) cancelAnimationFrame(this.animationFrameId);
     
     // Expose headless test to window for automated runners
-    (window as any).runHeadlessGeometryTest = () => this.debugRunHeadlessTest();
+    (window as any).runHeadlessGeometryTest = () => this.runHeadlessGeometryTest();
     
     this.loop();
   }
 
   /**
    * 4. Automation and CI for “practical certainty”
-   * Simulates a boot-up scan of all geometry.
+   * Sets STRICT_DEV mode and verifies all static geometry in the graph.
    */
-  async debugRunHeadlessTest() {
-      console.log('%c[CI] STARTING GEOMETRY VERIFICATION', 'color: #06b6d4; font-weight: bold;');
+  async runHeadlessGeometryTest() {
+      console.group('%c[CI] HEADLESS GEOMETRY VERIFICATION', 'color: #a855f7; font-weight: bold; font-size: 14px;');
       
-      // 1. Boot Kernel in STRICT_DEV
+      // 1. Boot Kernel in STRICT_DEV (This ensures any failure THROWS)
       this.proofKernel.setGeometryGateMode('STRICT_DEV');
       
-      // 2. Run Self Test
-      console.log('[CI] Running Bridge Self-Test...');
-      this.proofKernel.debugRunGeometrySelfTest();
-      
-      // 3. Iterate Sector Templates
-      let failures = 0;
-      const zones = Object.values(WORLD_GRAPH.zones);
-      
-      console.log(`[CI] Scanning ${zones.length} Sectors...`);
-      
-      for (const config of zones) {
-          const tmpl = config.template;
-          if (!tmpl.geometry.walls || tmpl.geometry.walls.length === 0) continue;
+      try {
+          // 2. Run Self Test
+          console.log('[CI] Running Bridge Self-Test...');
+          this.proofKernel.debugRunGeometrySelfTest();
           
-          // Map to Canonical Model
-          const rects: LeanRect[] = tmpl.geometry.walls.map(w => ({
-              id: `static_wall_${w.x}_${w.y}`,
-              x: w.x - (w.w / 2),
-              y: w.y - (w.h || w.w / 2),
-              w: w.w,
-              h: w.depth || w.h // Use depth for height in top-down rect logic
-          }));
+          // 3. Iterate Sector Templates
+          let totalZones = 0;
+          const zones = Object.values(WORLD_GRAPH.zones);
+          console.log(`[CI] Scanning ${zones.length} Zones in Graph...`);
           
-          try {
-              const proof = this.proofKernel.verifyGeometry(rects, tmpl.id, "CI_SCAN");
-              if (!proof.valid) {
-                  console.error(`[CI] FAILURE in ${tmpl.id}: ${proof.reason}`, proof.details);
-                  failures++;
-              }
-          } catch (e) {
-              console.error(`[CI] CRITICAL ERROR in ${tmpl.id}:`, e);
-              failures++;
+          for (const config of zones) {
+              const tmpl = config.template;
+              
+              // Skip zones with no static walls (e.g. purely procedural ones generated at runtime)
+              if (!tmpl.geometry.walls || tmpl.geometry.walls.length === 0) continue;
+              
+              totalZones++;
+              
+              // Map to Canonical Model (LeanRect)
+              // Note: We replicate the SectorLoader transformation here to ensure parity
+              const rects: LeanRect[] = tmpl.geometry.walls.map((w, index) => {
+                  const width = w.w || 40;
+                  const depth = w.depth || w.h || 40; // Depth is H in schema usually, mapping carefully
+                  
+                  return {
+                      id: `static_${tmpl.id}_${index}`,
+                      x: w.x - (width / 2),
+                      y: w.y - (depth / 2),
+                      w: width,
+                      h: depth
+                  };
+              });
+              
+              // This CALL will throw if invalid because we are in STRICT_DEV
+              this.proofKernel.verifyGeometry(rects, tmpl.id, "CI_SCAN");
           }
+          
+          console.log(`%c[CI] SUCCESS. Verified ${totalZones} Zones. No Overlaps.`, 'color: #22c55e; font-weight: bold;');
+          
+      } catch (e: any) {
+          console.error(`%c[CI] CRITICAL FAILURE: ${e.message}`, 'color: #ef4444; font-weight: bold;');
+          // In a real CI environment, we would process.exit(1) here or similar
+          throw e; // Re-throw to ensure caller knows
+      } finally {
+          // Always reset to SOFT_PROD so the game doesn't crash if played after test
+          this.proofKernel.setGeometryGateMode('SOFT_PROD');
+          console.groupEnd();
       }
-      
-      if (failures === 0) {
-          console.log('%c[CI] ALL SECTORS VERIFIED. ZERO VIOLATIONS.', 'color: #22c55e; font-weight: bold;');
-      } else {
-          console.error(`%c[CI] VERIFICATION FAILED. ${failures} Sectors tainted.`, 'color: #ef4444; font-weight: bold;');
-      }
-      
-      // Reset to SOFT_PROD for gameplay
-      this.proofKernel.setGeometryGateMode('SOFT_PROD');
   }
 
   destroy() {

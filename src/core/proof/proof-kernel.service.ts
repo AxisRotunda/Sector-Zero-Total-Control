@@ -159,8 +159,7 @@ export class ProofKernelService implements OnDestroy {
   // Public signal for sampling rate to break dependency cycle with Supervisor
   public samplingProbability = signal(0.1);
   
-  // Observability Ledger
-  // 2. Simple, explicit gate
+  // --- KERNEL GATE & AUTOMATION STATE ---
   private geometryGateMode: GeometryGateMode = "SOFT_PROD";
   private geometryLedger: GeometryDetails[] = [];
   private geometryViolationCount = 0;
@@ -175,12 +174,73 @@ export class ProofKernelService implements OnDestroy {
     this.initWorker();
   }
 
-  getGeometryGateMode(): GeometryGateMode { return this.geometryGateMode; }
-  
+  // --- GATE API ---
   setGeometryGateMode(mode: GeometryGateMode) {
       this.geometryGateMode = mode;
-      console.log(`[ProofKernel] Geometry Gate Mode set to: ${mode}`);
+      console.log(`[ProofKernel] Gate Mode switched to: ${mode}`);
   }
+
+  getGeometryGateMode(): GeometryGateMode {
+      return this.geometryGateMode;
+  }
+
+  // --- ORCHESTRATION ---
+  
+  /**
+   * The canonical verification loop for geometry.
+   * 1. Call Bridge (Pure check)
+   * 2. Interpret Result
+   * 3. Ledger & Metrics (Side effects)
+   * 4. Gate Enforcement (Throw vs Log)
+   */
+  verifyGeometry(rects: readonly LeanRect[], sectorId?: string, source: GeometryDetails["source"] = "SECTOR_LOAD"): LeanProofResult {
+      const start = performance.now();
+      
+      // 1. Call Bridge
+      const proof = this.leanBridge.proveGeometryValidity(rects, sectorId, source);
+      
+      const time = performance.now() - start;
+
+      // 2. Interpret & Ledger
+      if (!proof.valid) {
+          this.geometryViolationCount++;
+          this.updateMetrics('GEOMETRY', time, 1);
+          
+          if (proof.details) {
+              this.pushGeometryLedger(proof.details);
+          }
+
+          this.eventBus.dispatch({
+              type: GameEvents.REALITY_BLEED,
+              payload: { 
+                  severity: 'HIGH', 
+                  source: `LEAN:GEOMETRY:${source}`, 
+                  message: proof.reason || 'Geometric overlapping detected',
+                  meta: proof.details 
+              }
+          });
+      } else {
+          this.updateMetrics('GEOMETRY', time, 0);
+      }
+
+      // 3. Gate Enforcement
+      if (!proof.valid && this.geometryGateMode === "STRICT_DEV") {
+         const msg = `[StrictGate] Sector ${sectorId ?? "UNKNOWN"} failed geometry: ${proof.reason}. Details: ${JSON.stringify(proof.details)}`;
+         console.error(msg);
+         throw new Error(msg);
+      }
+      
+      return proof;
+  }
+
+  private pushGeometryLedger(details: GeometryDetails) {
+      this.geometryLedger.push(details);
+      if (this.geometryLedger.length > this.LEDGER_CAP) {
+          this.geometryLedger.shift();
+      }
+  }
+
+  // --- Worker & Async Verification ---
 
   private shouldVerify(domain: AxiomDomain): boolean {
       if (CRITICAL_DOMAINS.has(domain)) return true;
@@ -222,57 +282,6 @@ export class ProofKernelService implements OnDestroy {
     this.worker.postMessage({ id: contextId, type: domain, payload: context });
   }
 
-  // Refactored to use LeanBridge canonical geometry
-  verifyGeometry(rects: readonly LeanRect[], sectorId?: string, source: GeometryDetails["source"] = "SECTOR_LOAD"): LeanProofResult {
-      const start = performance.now();
-      
-      // Use Canonical Interface
-      const proof = this.leanBridge.proveGeometryValidity(rects, sectorId, source);
-      
-      const time = performance.now() - start;
-
-      if (!proof.valid) {
-          this.geometryViolationCount++;
-          this.updateMetrics('GEOMETRY', time, 1);
-          
-          if (proof.details) {
-              this.pushGeometryLedger(proof.details);
-              
-              if (sectorId === "HUB") {
-                  console.warn("[Geometry/HUB] Overlap details:", proof.details);
-              }
-          }
-
-          this.eventBus.dispatch({
-              type: GameEvents.REALITY_BLEED,
-              payload: { 
-                  severity: 'HIGH', 
-                  source: `LEAN:GEOMETRY:${source}`, 
-                  message: proof.reason || 'Geometric overlapping detected',
-                  meta: proof.details 
-              }
-          });
-      } else {
-          this.updateMetrics('GEOMETRY', time, 0);
-      }
-
-      // Gate Logic
-      const mode = this.getGeometryGateMode();
-      if (!proof.valid && mode === "STRICT_DEV" && source !== "SELFTEST") {
-         // Throw only when mode is STRICT_DEV and valid === false
-         throw new Error(`[HardGate] Sector ${sectorId ?? "UNKNOWN"} failed geometry: ${proof.reason}`);
-      }
-      
-      return proof;
-  }
-
-  private pushGeometryLedger(details: GeometryDetails) {
-      this.geometryLedger.push(details);
-      if (this.geometryLedger.length > this.LEDGER_CAP) {
-          this.geometryLedger.shift();
-      }
-  }
-
   verifySpatialGridTopology(cellCount: number, entityCount: number, cellSize: number): void {
       this.verifyFormal('SPATIAL_TOPOLOGY', { cellCount, entityCount, cellSize }, `TOPO_${Date.now()}`);
   }
@@ -291,11 +300,13 @@ export class ProofKernelService implements OnDestroy {
 
   createTransaction<T>(state: T) { return { state }; }
 
+  // Combat Verification
   verifyCombatTransaction(context: { oldHp: number, damage: number, newHp: number }): ValidationResult {
     const prev: LeanCombatState = { hp: context.oldHp, max_hp: 10000, armor: 0 }; 
     const next: LeanCombatState = { hp: context.newHp, max_hp: 10000, armor: 0 };
     const input: LeanCombatInput = { damage: context.damage, penetration: 0 };
     
+    // Reuse Gate pattern for Combat if needed, currently Soft
     const proof = this.leanBridge.proveCombatStep(prev, input, next);
     
     if (!proof.valid) {
@@ -328,6 +339,7 @@ export class ProofKernelService implements OnDestroy {
       return { isValid: true, errors: [] };
   }
   
+  // High-level wrapper for World Gen
   verifyNonOverlap(entities: Entity[]): ValidationResult {
       const rects: LeanRect[] = entities
         .filter(e => e.type === 'WALL' && e.width && e.depth)
