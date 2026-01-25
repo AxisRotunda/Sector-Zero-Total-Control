@@ -14,6 +14,8 @@ export class StructureRendererService {
   private narrative = inject(NarrativeService);
 
   private gateStateCache = new Map<string, number>();
+  // OPTIMIZATION: Memoize structure cache keys to avoid constant string concatenation
+  private keyCache = new WeakMap<Entity, string>();
 
   // Vector Pools to prevent GC allocation in hot paths
   private _isoMinMax = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
@@ -39,23 +41,38 @@ export class StructureRendererService {
       if (e.subType === 'BARRIER') { this.drawEnergyBarrier(ctx, e); return; }
 
       // Standard Prism Renderer
-      const structureType = e.subType || 'WALL';
+      
+      // OPTIMIZATION: Check Cache Key first
+      let cacheKey = this.keyCache.get(e);
       let w = e.width || 40;
       let d = e.depth || e.width || 40;
       let h = e.height || 100;
-      let renderStyle = 'PRISM';
       let detailStyle = visuals.detailStyle;
 
-      if (DECORATIONS[structureType]) {
-          const config = DECORATIONS[structureType];
-          if (!e.width) w = config.width;
-          if (!e.depth) d = config.depth;
-          if (!e.height) h = config.height;
-          if (config.renderStyle) renderStyle = config.renderStyle;
-          if (config.detailStyle) detailStyle = config.detailStyle;
-      }
+      if (!cacheKey) {
+          const structureType = e.subType || 'WALL';
+          
+          if (DECORATIONS[structureType]) {
+              const config = DECORATIONS[structureType];
+              if (!e.width) w = config.width;
+              if (!e.depth) d = config.depth;
+              if (!e.height) h = config.height;
+              if (config.detailStyle) detailStyle = config.detailStyle;
+          }
 
-      const cacheKey = `STRUCT_${structureType}_${w}_${d}_${h}_${e.color}_${theme}_${e.locked}_${detailStyle}_v12`;
+          cacheKey = `STRUCT_${structureType}_${w}_${d}_${h}_${e.color}_${theme}_${e.locked}_${detailStyle}_v12`;
+          this.keyCache.set(e, cacheKey);
+      } else {
+          // Re-derive W/D/H if needed, but for rendering we need them. 
+          // If we hit cache, we assume standard properties.
+          // For safety in this hybrid implementation, we just recalculate w/d/h cheaply:
+          if (DECORATIONS[e.subType || 'WALL']) {
+              const config = DECORATIONS[e.subType || 'WALL'];
+              if (!e.width) w = config.width;
+              if (!e.depth) d = config.depth;
+              if (!e.height) h = config.height;
+          }
+      }
       
       // Use zero-alloc bounds calculation
       const isoBounds = this.calculateIsoBounds(w, d, h);
@@ -72,6 +89,7 @@ export class StructureRendererService {
           this.renderPrism(bufferCtx, w, d, h, anchorX, anchorY, e.color, visuals, detailStyle);
       });
 
+      // Use pooled vector
       const pos = IsoUtils.toIso(e.x, e.y, e.z || 0, this._isoTemp); 
       ctx.drawImage(sprite, Math.floor(pos.x - anchorX), Math.floor(pos.y - anchorY)); 
   }
@@ -294,22 +312,13 @@ export class StructureRendererService {
 
   private renderMonolithVoid(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, w: number, d: number, h: number) {
       const halfW = w / 2; const halfD = d / 2;
-      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz, this._isoTemp);
-
-      // Use temp vars to avoid alloc, but need multiple points. Use local scope copies since p overwrites.
-      // Actually we need distinct points. 
-      // For one-time render calls, a few allocs are fine. Hot path is `calculateIsoBounds`.
-      // But let's use the pool if possible or clones.
-      // Since this is inside a cache generation, alloc is acceptable.
       
-      // ... implementation similar to original but using toIso return value immediately ...
-      // Optimization: Manually calc to avoid overwrite issues with single temp
-      
-      const pClone = (lx: number, ly: number, lz: number) => ({...IsoUtils.toIso(lx, ly, lz)});
+      // Use local allocs for cache generation (rare)
+      const p = (lx: number, ly: number, lz: number) => ({...IsoUtils.toIso(lx, ly, lz)});
 
-      const topT = pClone(-halfW, -halfD, h); const topR = pClone(halfW, -halfD, h); 
-      const topB = pClone(halfW, halfD, h); const topL = pClone(-halfW, halfD, h);
-      const baseB = pClone(halfW, halfD, 0); const baseR = pClone(halfW, -halfD, 0); const baseL = pClone(-halfW, halfD, 0);
+      const topT = p(-halfW, -halfD, h); const topR = p(halfW, -halfD, h); 
+      const topB = p(halfW, halfD, h); const topL = p(-halfW, halfD, h);
+      const baseB = p(halfW, halfD, 0); const baseR = p(halfW, -halfD, 0); const baseL = p(-halfW, halfD, 0);
 
       const grad = ctx.createLinearGradient(0, topT.y, 0, baseB.y);
       grad.addColorStop(0, '#000000'); 
@@ -328,11 +337,9 @@ export class StructureRendererService {
   }
 
   private renderMonolithDynamic(ctx: CanvasRenderingContext2D, w: number, d: number, h: number) {
-      // Dynamic rendering - allocs are unavoidable without massive refactor, 
-      // but this is rare (only when transparent).
       const t = Date.now() * 0.0005;
       const halfW = w / 2; const halfD = d / 2;
-      const p = (lx: number, ly: number, lz: number) => ({...IsoUtils.toIso(lx, ly, lz)}); // Clone
+      const p = (lx: number, ly: number, lz: number) => ({...IsoUtils.toIso(lx, ly, lz)}); 
 
       const height = h + Math.sin(t * 2) * 10;
 
@@ -456,16 +463,7 @@ export class StructureRendererService {
       ctx.translate(anchorX, anchorY);
       const halfW = w / 2; const halfD = d / 2;
       
-      // Use local variables to hold points to prevent overwrite if reusing globals, 
-      // but since we draw sequentially, we can reuse a small set of pooled vectors if careful.
-      // However, for path drawing, we need all 8 points available.
-      // We will clone into local objects just for this render step (cached), or use 8 specialized pools.
-      // Using 8 pools is safer for zero-alloc.
-      // But `_isoTemp` is already used. 
-      // Let's alloc locally here because this runs ONCE per unique structure type (Cached Sprite).
-      // The optimization was for `calculateIsoBounds` which runs EVERY frame.
-      // `renderPrism` is infrequent.
-      
+      // Use local allocations for sprite generation (infrequent)
       const p = (lx: number, ly: number, lz: number) => ({...IsoUtils.toIso(lx, ly, lz)});
 
       const baseL = p(-halfW, halfD, 0); const baseR = p(halfW, -halfD, 0); const baseB = p(halfW, halfD, 0); 
@@ -593,7 +591,8 @@ export class StructureRendererService {
   // --- LEGACY HELPERS ---
 
   private drawBanner(ctx: CanvasRenderingContext2D, e: Entity) {
-      const w = e.width || 60; const h = e.height || 180; const pos = IsoUtils.toIso(e.x, e.y, e.z || 200, this._isoTemp);
+      const w = e.width || 60; const h = e.height || 180; 
+      const pos = IsoUtils.toIso(e.x, e.y, e.z || 200, this._isoTemp);
       ctx.save(); ctx.translate(pos.x, pos.y);
       const wind = Math.sin(Date.now() * 0.002 + e.id) * 5;
       ctx.fillStyle = e.color || '#06b6d4';
@@ -602,7 +601,8 @@ export class StructureRendererService {
   }
 
   private drawHoloSign(ctx: CanvasRenderingContext2D, e: Entity) {
-      const w = e.width || 120; const h = e.height || 60; const pos = IsoUtils.toIso(e.x, e.y, e.z || 150, this._isoTemp);
+      const w = e.width || 120; const h = e.height || 60; 
+      const pos = IsoUtils.toIso(e.x, e.y, e.z || 150, this._isoTemp);
       ctx.save(); ctx.translate(pos.x, pos.y);
       ctx.globalCompositeOperation = 'screen';
       ctx.fillStyle = e.color || '#ef4444'; ctx.shadowColor = e.color || '#ef4444'; ctx.shadowBlur = 15;
@@ -623,6 +623,7 @@ export class StructureRendererService {
       const pos = IsoUtils.toIso(e.x, e.y, 0, this._isoTemp);
       ctx.save(); ctx.translate(pos.x, pos.y);
       const hw = w/2; const hd = d/2;
+      
       const p1 = IsoUtils.toIso(-hw, hd, 0, this._p1); 
       const p2 = IsoUtils.toIso(hw, hd, 0, this._p2); 
       const p3 = IsoUtils.toIso(hw, hd, h, this._p3); 

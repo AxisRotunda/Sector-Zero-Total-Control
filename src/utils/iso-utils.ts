@@ -22,10 +22,10 @@ export const IsoUtils = {
   /**
    * Converts World (Cartesian) to Screen (Isometric).
    * Applies rotation around the set context center.
+   * OPTIMIZED: Mutates target if provided to avoid allocation.
    */
-  toIso: function(x: number, y: number, z: number = 0, out: {x: number, y: number} = {x:0, y:0}) {
+  toIso: function(x: number, y: number, z: number = 0, target?: {x: number, y: number}) {
     // 1. Rotate around camera center
-    // Optimization: If rotation is effectively zero, skip math
     let rx = x;
     let ry = y;
 
@@ -37,9 +37,16 @@ export const IsoUtils = {
     }
 
     // 2. Isometric Projection
-    out.x = (rx - ry);
-    out.y = (rx + ry) * 0.5 - z;
-    return out;
+    const isoX = (rx - ry);
+    const isoY = (rx + ry) * 0.5 - z;
+
+    if (target) {
+        target.x = isoX;
+        target.y = isoY;
+        return target;
+    }
+
+    return { x: isoX, y: isoY };
   },
 
   /**
@@ -77,11 +84,6 @@ export const IsoUtils = {
   /**
    * Calculates the sorting depth of a point given a specific camera rotation.
    * This is critical for Z-sorting in a rotated isometric view.
-   * 
-   * @param x World X
-   * @param y World Y
-   * @param z World Z (Height)
-   * @param rotation Camera Rotation (Radians)
    */
   getSortDepth: function(x: number, y: number, z: number, rotation: number): number {
       let rx = x;
@@ -96,9 +98,6 @@ export const IsoUtils = {
       }
 
       // Isometric depth is essentially (x + y) in the aligned space.
-      // We bias by Z slightly to ensure floor objects draw behind elevated objects at same footprint.
-      // However, for walls, we often want the BASE to sort them.
-      
       return rx + ry + (z * 0.01); 
   }
 };

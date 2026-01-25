@@ -119,6 +119,7 @@ export class EntityRendererService {
 
   // Draw Riftgate / Personal Rift
   private drawRiftgate(ctx: CanvasRenderingContext2D, e: Entity) {
+      // Use pooled vector
       const pos = IsoUtils.toIso(e.x, e.y, 40, this._iso);
       const t = Date.now() * 0.002;
       const isPersonal = e.subType === 'PORTAL';
@@ -164,27 +165,25 @@ export class EntityRendererService {
   // --- SUB-STRUCTURE RENDERERS ---
   
   drawEnergyBarrier(ctx: CanvasRenderingContext2D, e: Entity) {
-      const h = e.height || 80; const w = e.width || 100; const pos = IsoUtils.toIso(e.x, e.y, 0, this._iso);
+      const h = e.height || 150; const w = e.width || 100; const d = e.depth || 20; 
+      // Reuse _iso
+      const pos = IsoUtils.toIso(e.x, e.y, 0, this._iso);
       ctx.save(); ctx.translate(pos.x, pos.y);
+      const hw = w/2; const hd = d/2;
+      
+      // OPTIMIZED: Use pooled vectors for all corners
+      const p1 = IsoUtils.toIso(-hw, hd, 0, this._p1); 
+      const p2 = IsoUtils.toIso(hw, hd, 0, this._p2); 
+      const p3 = IsoUtils.toIso(hw, hd, h, this._p3); 
+      const p4 = IsoUtils.toIso(-hw, hd, h, this._p4);
+      
+      ctx.fillStyle = '#18181b'; ctx.fillRect(p1.x - 5, p1.y - 5, 10, 10); ctx.fillRect(p2.x - 5, p2.y - 5, 10, 10);
+      ctx.globalCompositeOperation = 'screen';
+      const grad = ctx.createLinearGradient(0, p1.y, 0, p3.y); 
       const color = this.normalizeHex(e.color || '#ef4444');
       
-      const p1 = IsoUtils.toIso(-w/2, 0, 0, this._p1); 
-      const p2 = IsoUtils.toIso(w/2, 0, 0, this._p2); 
-      const p3 = IsoUtils.toIso(w/2, 0, h, this._p3); 
-      const p4 = IsoUtils.toIso(-w/2, 0, h, this._p4);
-      
-      ctx.fillStyle = '#18181b'; ctx.fillRect(p1.x - 5, p1.y - 10, 10, 10); ctx.fillRect(p2.x - 5, p2.y - 10, 10, 10);
-      ctx.globalCompositeOperation = 'screen';
-      const pulse = Math.sin(Date.now() * 0.005) * 0.2 + 0.5; 
-      const grad = ctx.createLinearGradient(0, p1.y, 0, p3.y); 
-      
-      grad.addColorStop(0, `${color}00`); 
-      grad.addColorStop(0.5, `${color}${Math.floor(pulse * 255).toString(16).padStart(2,'0')}`); 
-      grad.addColorStop(1, `${color}00`); 
-      
+      grad.addColorStop(0, `${color}00`); grad.addColorStop(0.5, `${color}40`); grad.addColorStop(1, `${color}00`); 
       ctx.fillStyle = grad; ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.fill();
-      ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.globalAlpha = 0.3;
-      const lines = 5; for(let i=1; i<lines; i++) { const t = i/lines; const yOffset = (Date.now() * 0.02) % (h/lines); const lh = h * t + yOffset; if (lh > h) continue; const l1 = IsoUtils.toIso(-w/2, 0, lh, this._p1); const l2 = IsoUtils.toIso(w/2, 0, lh, this._p2); ctx.beginPath(); ctx.moveTo(l1.x, l1.y); ctx.lineTo(l2.x, l2.y); ctx.stroke(); }
       ctx.restore();
   }
 
