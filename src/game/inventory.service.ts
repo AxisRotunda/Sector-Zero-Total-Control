@@ -52,6 +52,9 @@ export class InventoryService {
 
   activeDropTarget = signal<DropTarget | null>(null);
   bagSize = CONFIG.INVENTORY.BAG_SIZE;
+  
+  // Correction Lock
+  private isLocked = signal(false);
 
   equipmentStats = computed(() => {
     const stats: Record<string, number> = { 
@@ -76,6 +79,10 @@ export class InventoryService {
     
     return stats;
   });
+
+  // === LOCKING MECHANISM ===
+  lock() { this.isLocked.set(true); }
+  unlock() { this.isLocked.set(false); }
 
   public getItemSlot(type: ItemType): 'weapon' | 'armor' | 'implant' | 'stim' | 'amulet' | 'ring' {
     if (type === 'PSI_BLADE') return 'weapon';
@@ -103,6 +110,7 @@ export class InventoryService {
   }
 
   startDrag(item: Item, sourceType: 'bag' | 'equipment', sourceIndex?: number, sourceSlot?: any, clientX: number = 0, clientY: number = 0) {
+    if (this.isLocked()) return;
     this.dragState.set({ isDragging: true, item: item, sourceType: sourceType, sourceIndex: sourceIndex ?? null, sourceSlot: sourceSlot ?? null, cursorX: clientX, cursorY: clientY });
   }
 
@@ -153,22 +161,14 @@ export class InventoryService {
   }
   
   moveItem(item: Item, source: { type: 'bag'|'equipment', index?: number, slot?: any }, target: { type: 'bag'|'equipment', index?: number, slot?: any }): boolean {
+      if (this.isLocked()) return false;
+      
       this.dragState.set({ isDragging: true, item: item, sourceType: source.type, sourceIndex: source.index ?? null, sourceSlot: source.slot ?? null, cursorX: 0, cursorY: 0 });
       const validation = this.validateDropTarget(target.type, target.index, target.slot);
       if (validation.isValid) {
           // Transactional Wrapper
           const tx = this.proofKernel.createTransaction({ bag: this.bag(), equipped: this.equipped() });
-          const result = tx.attempt(
-              (draft) => {
-                  // Mock update functions on draft (this requires separating logic from Signal updates)
-                  // For streamlined implementation, we execute logic then validate directly.
-                  // Since signals are immutable, we can treat current values as "Draft".
-                  // Actually, refactoring executeDrop to work on a draft object is heavy.
-                  // We will rely on POST-VALIDATION Rollback for this streamlined version.
-              },
-              () => ({ isValid: true, errors: [] }) // Dummy validator for transaction object, strict logic below
-          );
-
+          
           // Execute Logic (Signals update)
           this.executeDrop(this.dragState(), target.type, target.index, target.slot, validation.isSwap, validation.isMerge);
           
@@ -176,9 +176,7 @@ export class InventoryService {
           const verify = this.proofKernel.verifyInventoryState(this.bag(), this.progression.credits(), this.progression.scrap());
           
           if (!verify.isValid) {
-              // ROLLBACK (Manual since we mutated signals directly)
-              // In a full implementation, executeDrop would return a new state without setting signals.
-              // Here we just trigger the bleed event.
+              // ROLLBACK implicitly by triggering bleed (Real rollback would revert signals here)
               this.eventBus.dispatch({
                   type: GameEvents.REALITY_BLEED,
                   payload: { severity: 'CRITICAL', source: 'INVENTORY_TRANSACTION', message: verify.errors[0] }
@@ -195,6 +193,7 @@ export class InventoryService {
   }
 
   quickAction(item: Item, source: { type: 'bag' | 'equipment', index?: number, slot?: string }) {
+      if (this.isLocked()) return;
       if (source.type === 'bag' && source.index !== undefined) {
           this.equip(item, source.index);
       } else if (source.type === 'equipment' && source.slot) {
@@ -234,6 +233,8 @@ export class InventoryService {
   }
 
   addItem(item: Item): boolean {
+    if (this.isLocked()) return false;
+
     // Transaction Start
     const previousBag = this.bag();
     

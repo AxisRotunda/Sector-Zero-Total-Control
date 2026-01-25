@@ -17,6 +17,7 @@ import { ZoneManagerService } from './world/zone-manager.service';
 import { LightingService } from '../systems/rendering/lighting.service';
 import { GameStateService } from './game-state.service';
 import { SpatialGridService } from '../systems/spatial-grid.service';
+import { RealityCorrectorService } from '../core/reality-corrector.service';
 
 @Injectable({
   providedIn: 'root'
@@ -41,6 +42,8 @@ export class GameEngineService {
   private lighting = inject(LightingService);
   private gameState = inject(GameStateService);
   private spatialGrid = inject(SpatialGridService);
+  // Inject to initialize
+  private realityCorrector = inject(RealityCorrectorService);
 
   isInMenu = this.gameState.isInMenu;
   private frameCount = 0;

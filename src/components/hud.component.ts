@@ -18,6 +18,7 @@ import { Entity } from '../models/game.models';
 import { EventBusService } from '../core/events/event-bus.service';
 import { GameEvents, RealityBleedPayload } from '../core/events/game-events';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { RealityCorrectorService } from '../core/reality-corrector.service';
 
 @Component({
   selector: 'app-hud',
@@ -60,7 +61,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
                </div>
             </div>
             
-            <!-- REALITY INTEGRITY INDICATOR (Enlarged & Readable) -->
+            <!-- REALITY INTEGRITY INDICATOR -->
             <div class="mt-2 pt-2 border-t border-zinc-800">
               <div class="flex justify-between text-[11px] uppercase tracking-widest font-bold mb-1">
                 <span class="text-cyan-600 drop-shadow-[0_0_4px_rgba(6,182,212,0.8)]">REALITY STABILITY</span>
@@ -91,6 +92,20 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
                 </div>
               }
             </div>
+
+            <!-- AUTO-CORRECTION STATS -->
+            @if (getCorrectionStats().totalCorrections > 0) {
+              <div class="mt-2 pt-2 border-t border-zinc-800">
+                <div class="text-[10px] text-orange-500 font-bold tracking-widest">
+                  AUTO-CORRECTIONS: {{ getCorrectionStats().totalCorrections }}
+                </div>
+                @for (correction of getCorrectionStats().recentCorrections; track correction.timestamp) {
+                  <div class="text-[8px] text-zinc-500 truncate">
+                    {{ correction.action }}: {{ correction.context }}
+                  </div>
+                }
+              </div>
+            }
           </div>
 
           <!-- RIGHT: MAP & MENU -->
@@ -111,7 +126,6 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
              <!-- ICON NAV BAR -->
              <div class="flex gap-1 items-center bg-black/40 p-1 border border-zinc-800 rounded shadow-xl">
-                <!-- FACTION STANDINGS -->
                 <div class="flex gap-1 px-1 border-r border-zinc-800 mr-1">
                     @for (s of narrative.factionStandings(); track s.factionId) {
                         <div class="w-2 h-2 rounded-full shadow-[0_0_5px]" 
@@ -194,6 +208,7 @@ export class HudComponent {
   ui = inject(UiPanelService);
   interaction = inject(InteractionService);
   private eventBus = inject(EventBusService);
+  private realityCorrector = inject(RealityCorrectorService);
 
   openInventory = output<void>();
   openSkills = output<void>();
@@ -218,7 +233,6 @@ export class HudComponent {
             this.realityIntegrity.update(v => Math.max(0, v - drop));
             this.lastBleedMessage.set(`[${payload.source}] ${payload.message}`);
             
-            // Auto-heal stability over time in a real app, or leave as flavor
             setTimeout(() => this.lastBleedMessage.set(null), 3000);
         });
         
@@ -226,5 +240,9 @@ export class HudComponent {
       setInterval(() => {
           this.realityIntegrity.update(v => Math.min(100, v + 1));
       }, 1000);
+  }
+
+  getCorrectionStats() {
+    return this.realityCorrector.getStats();
   }
 }

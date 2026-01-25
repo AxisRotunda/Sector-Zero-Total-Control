@@ -1,5 +1,5 @@
 
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { Entity, Zone, ZoneTheme } from '../../models/game.models';
 import * as CONFIG from '../../config/game.config';
 import { EntityPoolService } from '../../services/entity-pool.service';
@@ -19,13 +19,21 @@ export class WorldGeneratorService {
   private eventBus = inject(EventBusService);
 
   private readonly MAX_RETRIES = 5;
+  private entropyModifier = signal(1.0); // 1.0 = normal, <1.0 = safer
+
+  reduceEntropy(amount: number) {
+      this.entropyModifier.update(v => Math.max(0.5, v - amount));
+  }
 
   public generate(theme: ZoneTheme, difficulty: number, sectorId: string): GenerationResult {
     let attempt = 0;
     
+    // Apply entropy modifier to difficulty effectively reducing complexity
+    const effectiveDifficulty = difficulty * this.entropyModifier();
+
     while (attempt < this.MAX_RETRIES) {
         attempt++;
-        const result = this.attemptGeneration(theme, difficulty, sectorId);
+        const result = this.attemptGeneration(theme, effectiveDifficulty, sectorId);
         
         // --- PROOF PHASE ---
         const overlapProof = this.proofKernel.verifyNonOverlap(result.entities);
@@ -40,18 +48,13 @@ export class WorldGeneratorService {
             continue; // Retry
         }
 
-        // --- SEED VERIFICATION ---
-        // Robust structural hash check to ensure generation matches expected deterministic output for the sector ID
-        // (Optimized in ProofKernel to be allocation-free on arrays)
         const checksum = this.proofKernel.computeChecksum(result.entities); 
         console.log(`[WorldGen] Sector ${sectorId} Verified. Checksum: ${checksum}`);
 
-        // Merge walls AFTER validation to simplify the proof step above
         result.entities = MapUtils.mergeWalls(result.entities);
         return result;
     }
 
-    // Fallback if all attempts fail (Safe Room)
     this.eventBus.dispatch({
         type: GameEvents.REALITY_BLEED,
         payload: { severity: 'CRITICAL', source: 'WORLD_GEN', message: `Generation collapse for ${sectorId}. Safe Mode engaged.` }
@@ -61,11 +64,10 @@ export class WorldGeneratorService {
   }
 
   private attemptGeneration(theme: ZoneTheme, difficulty: number, sectorId: string): GenerationResult {
-    // Determine colors based on Theme
     const colors = this.getThemeColors(theme);
     
     const zone: Zone = {
-        id: sectorId, // Set ID
+        id: sectorId,
         name: sectorId,
         theme: theme,
         groundColor: colors.ground,
@@ -80,10 +82,11 @@ export class WorldGeneratorService {
     const entities: Entity[] = [];
     const size = 3000;
     const bounds = { minX: -size, maxX: size, minY: -size, maxY: size };
-    const rooms = 6 + Math.floor(difficulty * 2);
+    
+    // Scale room count by entropy
+    const rooms = Math.floor((6 + Math.floor(difficulty * 2)) * this.entropyModifier());
     const roomSize = 500;
     
-    // Always start with an UP exit back to previous sector
     const exitUp = this.entityPool.acquire('EXIT');
     exitUp.exitType = 'UP'; exitUp.x = 0; exitUp.y = 0; exitUp.zoneId = sectorId; entities.push(exitUp);
 
@@ -98,7 +101,6 @@ export class WorldGeneratorService {
         this.buildCorridor(cx, cy, nx, ny, 150, entities, colors, sectorId);
         this.buildRoom(nx, ny, roomSize, roomSize, entities, colors, theme, sectorId);
         
-        // Populate
         const mobType = this.getEnemyForTheme(theme);
         this.createSpawner(nx, ny, mobType, 1 + Math.floor(difficulty), 500, entities, sectorId);
 
@@ -144,11 +146,11 @@ export class WorldGeneratorService {
 
   private getThemeColors(theme: ZoneTheme) {
       switch(theme) {
-          case 'RESIDENTIAL': return { ground: '#020617', wall: '#1e1b4b', detail: '#f472b6' }; // Neon Pink/Blue
-          case 'HIGH_TECH': return { ground: '#f8fafc', wall: '#cbd5e1', detail: '#0ea5e9' }; // White/Cyan
-          case 'ORGANIC': return { ground: '#052e16', wall: '#14532d', detail: '#22c55e' }; // Dark Green
-          case 'VOID': return { ground: '#000000', wall: '#3b0764', detail: '#d8b4fe' }; // Purple/Black
-          default: return { ground: '#1c1917', wall: '#44403c', detail: '#f59e0b' }; // Industrial
+          case 'RESIDENTIAL': return { ground: '#020617', wall: '#1e1b4b', detail: '#f472b6' };
+          case 'HIGH_TECH': return { ground: '#f8fafc', wall: '#cbd5e1', detail: '#0ea5e9' };
+          case 'ORGANIC': return { ground: '#052e16', wall: '#14532d', detail: '#22c55e' };
+          case 'VOID': return { ground: '#000000', wall: '#3b0764', detail: '#d8b4fe' };
+          default: return { ground: '#1c1917', wall: '#44403c', detail: '#f59e0b' };
       }
   }
 
@@ -156,20 +158,18 @@ export class WorldGeneratorService {
       switch(theme) {
           case 'RESIDENTIAL': return Math.random() > 0.5 ? 'STALKER' : 'STEALTH';
           case 'HIGH_TECH': return Math.random() > 0.5 ? 'SNIPER' : 'HEAVY';
-          case 'ORGANIC': return 'GRUNT'; // Swarmers
-          case 'VOID': return 'BOSS'; // Mini-bosses
+          case 'ORGANIC': return 'GRUNT';
+          case 'VOID': return 'BOSS';
           default: return 'GRUNT';
       }
   }
 
   private buildRoom(x: number, y: number, w: number, h: number, entities: Entity[], colors: any, theme: ZoneTheme, zoneId: string) {
-      // Floor Decoration
       const rug = this.entityPool.acquire('DECORATION', 'RUG');
       rug.x = x; rug.y = y; rug.width = w; rug.height = h; rug.color = colors.ground;
       rug.zoneId = zoneId;
       entities.push(rug);
 
-      // Walls Corners
       const addWall = (wx: number, wy: number, ww: number, wh: number) => {
           const wall = this.entityPool.acquire('WALL');
           wall.x = wx; wall.y = wy; wall.width = ww; wall.height = 120; wall.depth = wh; wall.color = colors.wall;
@@ -177,11 +177,11 @@ export class WorldGeneratorService {
           entities.push(wall);
       };
       
-      const t = 40; // thickness
-      addWall(x - w/2, y, t, h); // Left
-      addWall(x + w/2, y, t, h); // Right
-      addWall(x, y - h/2, w, t); // Top
-      addWall(x, y + h/2, w, t); // Bottom
+      const t = 40;
+      addWall(x - w/2, y, t, h);
+      addWall(x + w/2, y, t, h);
+      addWall(x, y - h/2, w, t);
+      addWall(x, y + h/2, w, t);
       
       if (theme === 'ORGANIC') {
           const vent = this.entityPool.acquire('DECORATION', 'VENT');
@@ -193,7 +193,6 @@ export class WorldGeneratorService {
 
   private buildCorridor(x1: number, y1: number, x2: number, y2: number, width: number, entities: Entity[], colors: any, zoneId: string) {
       const midX = (x1 + x2) / 2; const midY = (y1 + y2) / 2;
-      const len = Math.hypot(x2-x1, y2-y1);
       
       const rug = this.entityPool.acquire('DECORATION', 'RUG');
       rug.x = midX; rug.y = midY; 
