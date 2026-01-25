@@ -52,7 +52,7 @@ export class DialogueService implements OnDestroy {
       if (!proof.isValid) {
           this.eventBus.dispatch({
               type: GameEvents.REALITY_BLEED,
-              payload: { severity: 'MEDIUM', source: 'DialogueCheck', message: proof.errors[0] }
+              payload: { severity: 'MEDIUM', source: 'DialogueCheck', message: proof.errors[0].message }
           });
           
           // Glitch fallback: Override mood to show corruption

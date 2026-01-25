@@ -26,7 +26,7 @@ export class StatusEffectService {
             payload: {
                 severity: 'LOW',
                 source: `STATUS_CHECK:${e.id}`,
-                message: proof.errors[0]
+                message: proof.errors[0].message
             }
         });
         

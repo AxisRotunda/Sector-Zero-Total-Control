@@ -75,7 +75,6 @@ export class CombatService {
     // For now, we simulate sending the data to the worker via the Kernel.
     this.proofKernel.verifyFormal('COMBAT', 
         { oldHp: target.hp + result.total, damage: result.total, newHp: target.hp }, 
-        { oldHp: target.hp + result.total, damage: result.total, newHp: target.hp }, // Same for now in sim
         'PROCESS_HIT'
     );
     

@@ -35,7 +35,7 @@ export type CombatHitPayload = {
 };
 
 export type RealityBleedPayload = {
-    severity: 'LOW' | 'MEDIUM' | 'CRITICAL';
+    severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
     source: string;
     message: string;
     meta?: any;
