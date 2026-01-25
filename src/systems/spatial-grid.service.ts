@@ -36,7 +36,9 @@ export class SpatialGridService {
       failures: m.failures
     }));
 
-    // Async Topology Verification
+    // Async Topology Verification - Fire and Forget
+    // The worker will calculate density and send back a message,
+    // which ProofKernel translates into a REALITY_BLEED event if critical.
     this.proofKernel.verifySpatialGridTopology(this.grid.size, activeEntities.length, this.cellSize);
   }
 

@@ -79,7 +79,7 @@ export class KernelSupervisorService {
       const penalty = payload.severity === 'CRITICAL' ? 20 : (payload.severity === 'MEDIUM' ? 5 : 1);
       this.stabilityScore.update(s => Math.max(0, s - penalty));
 
-      // 2. Extract Domain (Format: "KERNEL:{DOMAIN}")
+      // 2. Extract Domain (Format: "KERNEL:{DOMAIN}" or just "{DOMAIN}")
       const rawSource = payload.source;
       const domainKey = Object.keys(POLICIES).find(k => rawSource.includes(k));
       
@@ -95,12 +95,15 @@ export class KernelSupervisorService {
 
       // 4. Execute Policy
       if (policy) {
+          // Trigger Corrector Action if defined
           if (policy.action) {
               this.corrector.triggerCorrection(policy.action);
           }
           
-          if (policy.capQuality && policy.condition) {
-              if (policy.condition(payload.severity)) {
+          // Apply Quality Cap if conditions met
+          if (policy.capQuality) {
+              const shouldCap = policy.condition ? policy.condition(payload.severity) : true;
+              if (shouldCap) {
                   this.adaptiveQuality.setSafetyCap(policy.capQuality);
               }
           }

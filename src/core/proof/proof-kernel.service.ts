@@ -41,6 +41,7 @@ export interface DomainMetrics {
   checks: number;
   failures: number;
   totalTimeMs: number;
+  lastFailure: number; // Timestamp of last failure for UI cooling
 }
 
 export interface AxiomStats {
@@ -50,7 +51,7 @@ export interface AxiomStats {
 }
 
 export interface KernelDiagnostics {
-  domains: { domain: string; checks: number; failures: number; avgMs: number }[];
+  domains: { domain: string; checks: number; failures: number; avgMs: number; lastFailure: number }[];
   failingAxioms: AxiomStats[];
   ledgerSize: number;
 }
@@ -225,7 +226,6 @@ export class ProofKernelService implements OnDestroy {
   
   // Ledger and Stats
   private ledger: any[] = [];
-  private currentHeadHash = 'GENESIS_HASH';
   private axioms = new Map<string, Axiom>();
   private axiomStats = new Map<string, AxiomStats>();
 
@@ -238,7 +238,7 @@ export class ProofKernelService implements OnDestroy {
   private initMetrics() {
       const domains: AxiomDomain[] = ['COMBAT', 'INVENTORY', 'WORLD', 'STATUS', 'RENDER', 'INTEGRITY', 'GEOMETRY', 'GEOMETRY_SEGMENTS', 'SPATIAL_TOPOLOGY', 'PATH_CONTINUITY', 'RENDER_DEPTH'];
       domains.forEach(d => {
-          this.metrics[d] = signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 });
+          this.metrics[d] = signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0, lastFailure: 0 });
       });
   }
 
@@ -289,7 +289,7 @@ export class ProofKernelService implements OnDestroy {
   // --- SYNC API (Critical Path) ---
 
   createTransaction<T>(state: T) {
-      return { state }; // Simplified for now
+      return { state }; 
   }
 
   verifyCombatTransaction(damagePacket: DamagePacket, result: DamageResult): ValidationResult {
@@ -326,6 +326,7 @@ export class ProofKernelService implements OnDestroy {
           return;
       }
 
+      // Derive severity from response type/content
       let severity: AxiomSeverity = 'LOW';
       if (data.error.includes('Critical') || data.error.includes('KernelPanic')) severity = 'CRITICAL';
       else if (data.error.includes('Overlap') || data.error.includes('Density')) severity = 'MEDIUM';
@@ -379,7 +380,8 @@ export class ProofKernelService implements OnDestroy {
       signal.update(m => ({
         checks: m.checks + 1,
         failures: m.failures + (failureCount > 0 ? 1 : 0),
-        totalTimeMs: m.totalTimeMs + time
+        totalTimeMs: m.totalTimeMs + time,
+        lastFailure: failureCount > 0 ? Date.now() : m.lastFailure
       }));
     }
   }
@@ -411,7 +413,8 @@ export class ProofKernelService implements OnDestroy {
         domain: key, 
         checks: m.checks, 
         failures: m.failures, 
-        avgMs: m.checks > 0 ? parseFloat((m.totalTimeMs / m.checks).toFixed(4)) : 0 
+        avgMs: m.checks > 0 ? parseFloat((m.totalTimeMs / m.checks).toFixed(4)) : 0,
+        lastFailure: m.lastFailure 
       };
     });
     const failingAxioms = Array.from(this.axiomStats.values()).filter(s => s.failures > 0);

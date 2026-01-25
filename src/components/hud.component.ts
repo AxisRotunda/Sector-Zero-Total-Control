@@ -266,7 +266,14 @@ export class HudComponent {
       if (displayDomain === 'RENDER') key = 'RENDER_DEPTH';
 
       const domainData = diag.domains.find(d => d.domain === key);
-      return domainData ? domainData.failures > 0 : false;
+      
+      // Use lastFailure timestamp to "cool off" the warning (show red for 2s after failure)
+      // This prevents the HUD from staying red forever after one error.
+      if (domainData && domainData.lastFailure > 0) {
+          const timeSinceFailure = Date.now() - domainData.lastFailure;
+          return timeSinceFailure < 2000;
+      }
+      return false;
   }
 
   getCorrectionStats() {
