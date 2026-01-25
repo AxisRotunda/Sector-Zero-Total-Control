@@ -41,9 +41,9 @@ export class WorldGeneratorService {
         }
 
         // --- SEED VERIFICATION ---
-        // Simple hash check to ensure generation matches expected deterministic output for the sector ID
-        // (In a real deterministic engine, we would seed PRNG with sectorId)
-        const checksum = this.proofKernel.computeChecksum(result.entities.length); // Use simple length hash for speed
+        // Robust structural hash check to ensure generation matches expected deterministic output for the sector ID
+        // (Optimized in ProofKernel to be allocation-free on arrays)
+        const checksum = this.proofKernel.computeChecksum(result.entities); 
         console.log(`[WorldGen] Sector ${sectorId} Verified. Checksum: ${checksum}`);
 
         // Merge walls AFTER validation to simplify the proof step above

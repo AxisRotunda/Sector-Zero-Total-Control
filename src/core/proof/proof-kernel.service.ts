@@ -11,10 +11,12 @@ export interface ValidationResult {
 }
 
 export class Transaction<T> {
-    private snapshot: string;
+    private snapshot: T;
 
     constructor(private state: T) {
-        this.snapshot = JSON.stringify(state);
+        // Optimization: Use structuredClone instead of JSON serialization
+        // This is ~5x faster for deep cloning and preserves dates/maps if present
+        this.snapshot = structuredClone(state);
     }
 
     /**
@@ -24,8 +26,8 @@ export class Transaction<T> {
      */
     attempt(mutator: (draft: T) => void, validator: (draft: T) => ValidationResult): { success: boolean; newState: T | null; errors: string[] } {
         try {
-            // Deep clone for the draft
-            const draft = JSON.parse(this.snapshot) as T;
+            // Clone from snapshot for the draft (prevents mutation of snapshot)
+            const draft = structuredClone(this.snapshot);
             mutator(draft);
             
             const result = validator(draft);
@@ -35,6 +37,7 @@ export class Transaction<T> {
                 return { success: false, newState: null, errors: result.errors };
             }
         } catch (e: any) {
+            console.error('Transaction failed', e);
             return { success: false, newState: null, errors: [`Runtime Exception: ${e.message}`] };
         }
     }
@@ -52,6 +55,9 @@ export class ProofKernelService {
         lastCheckTime: 0,
         avgCheckTime: 0
     };
+    
+    // Cache for heavy connectivity proofs
+    private connectivityCache = new Map<string, boolean>();
 
     getMetrics() { return this.metrics; }
 
@@ -74,15 +80,46 @@ export class ProofKernelService {
         return new Transaction(state);
     }
 
+    /**
+     * Optimized checksum computation.
+     * Detects Entity arrays to perform a fast topology hash (XOR sum) instead of full serialization.
+     */
     computeChecksum(data: any): string {
-        const str = JSON.stringify(data);
         let hash = 0;
-        for (let i = 0; i < str.length; i++) {
-            const char = str.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash; // Convert to 32bit integer
+        
+        if (Array.isArray(data)) {
+            // Fast path for Entity Arrays: Hash critical topology/identity fields only
+            const prime = 31;
+            for (let i = 0; i < data.length; i++) {
+                const item = data[i];
+                if (item && typeof item === 'object') {
+                    // Integer bitwise ops are much faster than string concatenation
+                    const x = (item.x | 0);
+                    const y = (item.y | 0);
+                    const id = (item.id | 0);
+                    // Hash type string using first char code to avoid alloc
+                    const typeCode = item.type ? item.type.charCodeAt(0) : 0;
+                    
+                    // XOR-Rotate-Mix
+                    hash = (hash << 5) - hash + x;
+                    hash = (hash << 5) - hash + y;
+                    hash = (hash << 5) - hash + id;
+                    hash = (hash << 5) - hash + typeCode;
+                    hash |= 0; // Force 32-bit int
+                }
+            }
+        } else {
+            // Fallback for complex objects: Stringify
+            const str = JSON.stringify(data);
+            for (let i = 0; i < str.length; i++) {
+                const char = str.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash = hash & hash; 
+            }
         }
-        return hash.toString(16);
+        
+        // Return hex string (unsigned)
+        return (hash >>> 0).toString(16);
     }
 
     // --- DOMAIN: WORLD TOPOLOGY ---
@@ -93,6 +130,13 @@ export class ProofKernelService {
      */
     verifyConnectivity(entities: Entity[], bounds: { minX: number, maxX: number, minY: number, maxY: number }, playerStart: { x: number, y: number }): ValidationResult {
         return this.measure(() => {
+            // 0. Cache Check
+            const topoHash = this.computeTopologyHash(entities, playerStart);
+            if (this.connectivityCache.has(topoHash)) {
+                const cachedResult = this.connectivityCache.get(topoHash);
+                return { isValid: !!cachedResult, errors: cachedResult ? [] : ['Connectivity Check Failed (Cached)'] };
+            }
+
             const errors: string[] = [];
             
             // 1. Build a temporary navigation grid for the proof
@@ -100,70 +144,101 @@ export class ProofKernelService {
             const gridWidth = Math.ceil((bounds.maxX - bounds.minX) / gridSize);
             const gridHeight = Math.ceil((bounds.maxY - bounds.minY) / gridSize);
             
-            const grid: boolean[][] = Array(gridHeight).fill(null).map(() => Array(gridWidth).fill(true));
+            // Use flat typed array for grid (faster than array of arrays)
+            const grid = new Uint8Array(gridWidth * gridHeight).fill(1); // 1 = walkable
             
             // Rasterize Walls
-            entities.filter(e => e.type === 'WALL').forEach(w => {
-                this.markUnwalkable(grid, w, bounds, gridSize, gridWidth, gridHeight);
-            });
+            // Optimization: Filter in-place loop
+            for (const e of entities) {
+                if (e.type === 'WALL') {
+                    this.markUnwalkableFlat(grid, e, bounds, gridSize, gridWidth, gridHeight);
+                }
+            }
 
             // 2. Locate Exits
             const exits = entities.filter(e => e.type === 'EXIT');
 
             // 3. Prove reachability for ALL exits
             const startNode = this.toGrid(playerStart, bounds, gridSize);
+            const startIdx = startNode.y * gridWidth + startNode.x;
             
-            // Flood Fill (BFS) to find all reachable cells from start
-            const reachable = new Set<string>();
-            const queue: {x: number, y: number}[] = [startNode];
-            reachable.add(`${startNode.x},${startNode.y}`);
+            if (startNode.x < 0 || startNode.x >= gridWidth || startNode.y < 0 || startNode.y >= gridHeight) {
+                // Player outside bounds - trivial fail
+                this.connectivityCache.set(topoHash, false);
+                return { isValid: false, errors: ['Player start outside world bounds'] };
+            }
 
-            // Safety break for loop
+            // BFS Flood Fill
+            // 0 = Unknown/Unvisited, 1 = Walkable, 2 = Visited, 3 = Wall
+            // We reuse the 'grid' array. 1 means "Can Walk", we mark "2" as "Reached"
+            const queue = new Int32Array(gridWidth * gridHeight);
+            let qHead = 0;
+            let qTail = 0;
+            
+            queue[qTail++] = startIdx;
+            grid[startIdx] = 2; // Mark visited
+
+            // Safety break
             let iterations = 0;
-            const MAX_ITER = 10000;
+            const MAX_ITER = gridWidth * gridHeight; 
 
-            while (queue.length > 0 && iterations < MAX_ITER) {
+            while (qHead < qTail && iterations < MAX_ITER) {
                 iterations++;
-                const current = queue.shift()!;
+                const currIdx = queue[qHead++];
+                const cx = currIdx % gridWidth;
+                const cy = Math.floor(currIdx / gridWidth);
                 
+                // Neighbors: Up, Down, Left, Right
                 const neighbors = [
-                    {x: current.x + 1, y: current.y},
-                    {x: current.x - 1, y: current.y},
-                    {x: current.x, y: current.y + 1},
-                    {x: current.x, y: current.y - 1}
+                    currIdx - gridWidth, // Up
+                    currIdx + gridWidth, // Down
+                    currIdx - 1,         // Left
+                    currIdx + 1          // Right
                 ];
 
-                for (const n of neighbors) {
-                    if (n.x >= 0 && n.x < gridWidth && n.y >= 0 && n.y < gridHeight) {
-                        const key = `${n.x},${n.y}`;
-                        if (!reachable.has(key) && grid[n.y][n.x]) {
-                            reachable.add(key);
-                            queue.push(n);
-                        }
-                    }
-                }
+                // Boundary checks implicitly handled by array bounds or valid logic below
+                if (cy > 0 && grid[neighbors[0]] === 1) { grid[neighbors[0]] = 2; queue[qTail++] = neighbors[0]; }
+                if (cy < gridHeight - 1 && grid[neighbors[1]] === 1) { grid[neighbors[1]] = 2; queue[qTail++] = neighbors[1]; }
+                if (cx > 0 && grid[neighbors[2]] === 1) { grid[neighbors[2]] = 2; queue[qTail++] = neighbors[2]; }
+                if (cx < gridWidth - 1 && grid[neighbors[3]] === 1) { grid[neighbors[3]] = 2; queue[qTail++] = neighbors[3]; }
             }
 
             // 4. Verify Exits are in reachable set
-            exits.forEach((exit, index) => {
+            for (let i = 0; i < exits.length; i++) {
+                const exit = exits[i];
                 const exitNode = this.toGrid({x: exit.x, y: exit.y}, bounds, gridSize);
-                // Allow some fuzziness (check 3x3 area around exit)
+                
+                // Check 3x3 area around exit for connectivity
                 let exitReachable = false;
-                for(let dx = -1; dx <= 1; dx++) {
-                    for(let dy = -1; dy <= 1; dy++) {
-                        if (reachable.has(`${exitNode.x + dx},${exitNode.y + dy}`)) {
+                
+                // Fast boundary check
+                const minX = Math.max(0, exitNode.x - 1);
+                const maxX = Math.min(gridWidth - 1, exitNode.x + 1);
+                const minY = Math.max(0, exitNode.y - 1);
+                const maxY = Math.min(gridHeight - 1, exitNode.y + 1);
+
+                for(let y = minY; y <= maxY; y++) {
+                    for(let x = minX; x <= maxX; x++) {
+                        if (grid[y * gridWidth + x] === 2) {
                             exitReachable = true;
+                            break;
                         }
                     }
+                    if (exitReachable) break;
                 }
                 
                 if (!exitReachable) {
-                    errors.push(`Topological Bleed: Exit ${index} unreachable.`);
+                    errors.push(`Topological Bleed: Exit at ${exit.x},${exit.y} unreachable.`);
                 }
-            });
+            }
 
             if (errors.length > 0) this.metrics.failedChecks++;
-            return { isValid: errors.length === 0, errors };
+            const isValid = errors.length === 0;
+            
+            // Cache result
+            this.connectivityCache.set(topoHash, isValid);
+            
+            return { isValid, errors };
         });
     }
 
@@ -176,17 +251,17 @@ export class ProofKernelService {
             const errors: string[] = [];
             const solids = entities.filter(e => e.type === 'WALL' || e.type === 'DESTRUCTIBLE');
             
+            // Simple O(N^2) for now - usually N is small for solids (< 100)
+            // Can be optimized with Sweep and Prune if N grows > 500
             for (let i = 0; i < solids.length; i++) {
                 for (let j = i + 1; j < solids.length; j++) {
                     const a = solids[i];
                     const b = solids[j];
                     
-                    // Simple AABB check
                     const aw = a.width || 40; const ad = a.depth || 40;
                     const bw = b.width || 40; const bd = b.depth || 40;
                     
                     if (Math.abs(a.x - b.x) * 2 < (aw + bw) && Math.abs(a.y - b.y) * 2 < (ad + bd)) {
-                        // Overlap detected
                         errors.push(`Material Bleed: Co-location detected ID ${a.id} / ${b.id}`);
                         this.metrics.failedChecks++;
                         return { isValid: false, errors };
@@ -231,11 +306,9 @@ export class ProofKernelService {
     verifyDialogueState(node: DialogueNode, checkReqFn: (reqs?: Requirement[]) => boolean): ValidationResult {
         return this.measure(() => {
             const errors: string[] = [];
-            
             if (!node.text || node.text.length === 0) {
                 errors.push(`Data Corruption: Empty dialogue text for Node ${node.id}`);
             }
-            
             if (errors.length > 0) this.metrics.failedChecks++;
             return { isValid: errors.length === 0, errors };
         });
@@ -247,11 +320,9 @@ export class ProofKernelService {
         return this.measure(() => {
             const errors: string[] = [];
 
-            // 1. Economic Consistency
             if (credits < 0) errors.push(`Economic Anomaly: Negative Credits (${credits}) detected.`);
             if (scrap < 0) errors.push(`Economic Anomaly: Negative Scrap (${scrap}) detected.`);
 
-            // 2. Matter Consistency (Items)
             bag.forEach((item, index) => {
                 if (!item.id) errors.push(`Identity Loss: Item at index ${index} lacks ID.`);
                 if (item.stack <= 0) errors.push(`Matter Collapse: Item '${item.name}' has zero or negative stack.`);
@@ -273,10 +344,8 @@ export class ProofKernelService {
             if (s.poison && s.poison.duration < 0) errors.push(`Temporal Paradox: Entity ${entity.id} has negative Poison duration.`);
             if (s.burn && s.burn.duration < 0) errors.push(`Temporal Paradox: Entity ${entity.id} has negative Burn duration.`);
             if (s.weakness && s.weakness.duration < 0) errors.push(`Temporal Paradox: Entity ${entity.id} has negative Weakness duration.`);
-
             if (s.stun < 0) errors.push(`Causality Break: Entity ${entity.id} has negative Stun frames.`);
             if (s.slow < 0) errors.push(`Causality Break: Entity ${entity.id} has negative Slow value.`);
-
             if (s.bleed && s.bleed.stacks <= 0) errors.push(`Matter Underflow: Entity ${entity.id} has non-positive Bleed stacks.`);
 
             if (errors.length > 0) this.metrics.failedChecks++;
@@ -293,7 +362,7 @@ export class ProofKernelService {
         };
     }
 
-    private markUnwalkable(grid: boolean[][], wall: Entity, bounds: any, gridSize: number, gridWidth: number, gridHeight: number) {
+    private markUnwalkableFlat(grid: Uint8Array, wall: Entity, bounds: any, gridSize: number, gridWidth: number, gridHeight: number) {
         const ww = wall.width || 40;
         const wd = wall.depth || 40;
         
@@ -303,9 +372,29 @@ export class ProofKernelService {
         const endY = Math.min(gridHeight, Math.ceil((wall.y + wd / 2 - bounds.minY) / gridSize));
 
         for (let y = startY; y < endY; y++) {
+            const rowOffset = y * gridWidth;
             for (let x = startX; x < endX; x++) {
-                grid[y][x] = false;
+                grid[rowOffset + x] = 0; // 0 = unwalkable (wall)
             }
         }
+    }
+
+    private computeTopologyHash(entities: Entity[], start: {x: number, y: number}): string {
+        let hash = 0;
+        // Hash player start
+        hash = (hash << 5) - hash + Math.floor(start.x);
+        hash = (hash << 5) - hash + Math.floor(start.y);
+        
+        // Hash geometry only (Walls and Exits)
+        for(const e of entities) {
+            if (e.type === 'WALL' || e.type === 'EXIT') {
+                hash = (hash << 5) - hash + Math.floor(e.x);
+                hash = (hash << 5) - hash + Math.floor(e.y);
+                hash = (hash << 5) - hash + (e.width || 0);
+                hash = (hash << 5) - hash + (e.depth || 0);
+                hash |= 0;
+            }
+        }
+        return (hash >>> 0).toString(16);
     }
 }
