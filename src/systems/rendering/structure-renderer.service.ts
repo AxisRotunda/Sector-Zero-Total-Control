@@ -101,6 +101,122 @@ export class StructureRendererService {
       ctx.drawImage(sprite, Math.floor(pos.x - anchorX), Math.floor(pos.y - anchorY)); 
   }
 
+  // --- NEW RENDERERS: INDUSTRIAL GRATE (DYNAMIC_GLOW) ---
+
+  drawDynamicGlow(ctx: CanvasRenderingContext2D, e: Entity) {
+      const w = e.width || 150; 
+      const d = e.depth || 150;
+      const z = e.height || 0;
+      const pos = IsoUtils.toIso(e.x, e.y, e.z || 0);
+      
+      const cacheKey = `GLOW_GRATE_${w}_${d}_${e.color}_v2`;
+      
+      // Calculate bounds for a flat object slightly raised
+      const isoBounds = this.calculateIsoBounds(w, d, 20);
+      const padding = 20;
+      const canvasW = Math.ceil(isoBounds.maxX - isoBounds.minX + padding * 2);
+      const canvasH = Math.ceil(isoBounds.maxY - isoBounds.minY + padding * 2);
+      const aX = -isoBounds.minX + padding;
+      const aY = -isoBounds.minY + padding;
+      
+      const sprite = this.cache.getOrRender(cacheKey, canvasW, canvasH, (bCtx) => {
+          bCtx.translate(aX, aY);
+          this.renderIndustrialGrate(bCtx, w, d, e.color || '#f59e0b');
+          bCtx.translate(-aX, -aY);
+      });
+      
+      ctx.drawImage(sprite, Math.floor(pos.x - aX), Math.floor(pos.y + z - aY));
+  }
+
+  private renderIndustrialGrate(ctx: any, w: number, d: number, color: string) {
+      const hw = w / 2;
+      const hd = d / 2;
+      const p = (lx: number, ly: number) => IsoUtils.toIso(lx, ly, 0);
+      
+      // 1. Dark Base Plate (Background)
+      const tl = p(-hw, -hd);
+      const tr = p(hw, -hd);
+      const br = p(hw, hd);
+      const bl = p(-hw, hd);
+      
+      ctx.fillStyle = '#0f172a'; // Deep dark blue/black
+      ctx.beginPath();
+      ctx.moveTo(tl.x, tl.y);
+      ctx.lineTo(tr.x, tr.y);
+      ctx.lineTo(br.x, br.y);
+      ctx.lineTo(bl.x, bl.y);
+      ctx.fill();
+      
+      // 2. Glow (Inner Emissive)
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      // Create radial gradient in Iso space approximation
+      // We essentially just draw a blob in center
+      const center = p(0,0);
+      const glowGrad = ctx.createRadialGradient(center.x, center.y, w*0.1, center.x, center.y, w*0.6);
+      glowGrad.addColorStop(0, color);
+      glowGrad.addColorStop(1, 'rgba(0,0,0,0)');
+      
+      ctx.fillStyle = glowGrad;
+      ctx.globalAlpha = 0.6;
+      
+      // Draw quad again with glow
+      ctx.beginPath();
+      ctx.moveTo(tl.x, tl.y);
+      ctx.lineTo(tr.x, tr.y);
+      ctx.lineTo(br.x, br.y);
+      ctx.lineTo(bl.x, bl.y);
+      ctx.fill();
+      ctx.restore();
+
+      // 3. Grate Bars (Isometric Grid)
+      ctx.strokeStyle = '#334155'; // Metal color
+      ctx.lineWidth = 4;
+      
+      // Horizontal slats
+      const slats = 6;
+      for (let i = 0; i <= slats; i++) {
+          const t = i / slats;
+          const x = -hw + (w * t);
+          
+          const p1 = p(x, -hd);
+          const p2 = p(x, hd);
+          
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.stroke();
+      }
+      
+      // Frame Border
+      ctx.lineWidth = 6;
+      ctx.strokeStyle = '#475569';
+      ctx.beginPath();
+      ctx.moveTo(tl.x, tl.y);
+      ctx.lineTo(tr.x, tr.y);
+      ctx.lineTo(br.x, br.y);
+      ctx.lineTo(bl.x, bl.y);
+      ctx.closePath();
+      ctx.stroke();
+      
+      // 4. Rivets at corners
+      ctx.fillStyle = '#64748b';
+      const rivetOffset = 10;
+      const rivetSize = 3;
+      
+      const drawRivet = (x: number, y: number) => {
+          const rp = p(x, y);
+          ctx.beginPath();
+          ctx.arc(rp.x, rp.y, rivetSize, 0, Math.PI * 2);
+          ctx.fill();
+      };
+      
+      drawRivet(-hw + rivetOffset, -hd + rivetOffset);
+      drawRivet(hw - rivetOffset, -hd + rivetOffset);
+      drawRivet(hw - rivetOffset, hd - rivetOffset);
+      drawRivet(-hw + rivetOffset, hd - rivetOffset);
+  }
+
   // --- NEW RENDERERS: PROPAGANDA & BANNERS ---
 
   private drawBanner(ctx: CanvasRenderingContext2D, e: Entity) {
@@ -682,14 +798,6 @@ export class StructureRendererService {
       ctx.beginPath(); ctx.moveTo(p4.x, p4.y); ctx.lineTo(p3.x, p3.y); ctx.stroke();
       
       ctx.shadowBlur = 0;
-      ctx.restore();
-  }
-
-  drawDynamicGlow(ctx: CanvasRenderingContext2D, e: Entity) {
-      const w = e.width || 500; const thickness = e.depth || 10; const elevation = e.height || 0; const pos = IsoUtils.toIso(e.x, e.y, e.z + elevation);
-      ctx.save(); ctx.translate(pos.x, pos.y); ctx.fillStyle = e.color;
-      const p = (lx: number, ly: number) => IsoUtils.toIso(lx, ly, 0); const p1 = p(-w/2, 0); const p2 = p(w/2, 0); const h = thickness; 
-      ctx.beginPath(); ctx.moveTo(p1.x, p1.y - h/2); ctx.lineTo(p2.x, p2.y - h/2); ctx.lineTo(p2.x, p2.y + h/2); ctx.lineTo(p1.x, p1.y + h/2); ctx.fill();
       ctx.restore();
   }
 

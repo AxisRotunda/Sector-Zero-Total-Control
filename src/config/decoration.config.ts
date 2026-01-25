@@ -36,7 +36,10 @@ export const DECORATIONS: Record<string, DecorationDef> = {
     'MONOLITH': { id: 'MONOLITH', width: 200, depth: 200, height: 600, baseColor: '#06b6d4', isStaticFloor: false, renderStyle: 'CUSTOM' },
     'OBSERVATION_DECK': { id: 'OBSERVATION_DECK', width: 400, depth: 400, height: 200, baseColor: '#3f3f46', isStaticFloor: false, renderStyle: 'CUSTOM' },
     'TRAINING_EXTERIOR': { id: 'TRAINING_EXTERIOR', width: 500, depth: 400, height: 350, baseColor: '#3f3f46', isStaticFloor: false, renderStyle: 'CUSTOM' },
-    'DYNAMIC_GLOW': { id: 'DYNAMIC_GLOW', width: 100, depth: 100, height: 10, baseColor: '#fff', isStaticFloor: false, renderStyle: 'CUSTOM' },
+    
+    // Updated: Defined DYNAMIC_GLOW properly
+    'DYNAMIC_GLOW': { id: 'DYNAMIC_GLOW', width: 150, depth: 150, height: 5, baseColor: '#f59e0b', isStaticFloor: false, renderStyle: 'CUSTOM' },
+    
     'NEON': { id: 'NEON', width: 60, depth: 10, height: 30, baseColor: '#fff', isStaticFloor: false, renderStyle: 'CUSTOM' },
     'OVERSEER_EYE': { id: 'OVERSEER_EYE', width: 60, depth: 60, height: 60, baseColor: '#fff', isStaticFloor: false, renderStyle: 'CUSTOM' },
     

@@ -251,7 +251,19 @@ export class RenderService {
               } else if (ent.subType === 'NEON') {
                   this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, color: ent.color, type: 'STATIC', ...presets.NEON });
               } else if (ent.subType === 'DYNAMIC_GLOW') {
-                  this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, color: ent.color, type: 'PULSE', flickerSpeed: ent.data?.pulseSpeed, ...presets.DYNAMIC_GLOW });
+                  // SAFE FALLBACK: Check data first, then default to 1.0 if unspecified
+                  const intensity = ent.data?.glowIntensity !== undefined ? ent.data.glowIntensity : 1.0;
+                  
+                  this.lighting.registerLight({ 
+                      id: `L_${ent.id}`, 
+                      x: ent.x, 
+                      y: ent.y, 
+                      color: ent.color, 
+                      intensity: intensity,
+                      type: 'PULSE', 
+                      flickerSpeed: ent.data?.pulseSpeed, 
+                      ...presets.DYNAMIC_GLOW 
+                  });
               }
           }
           else if (ent.type === 'HITBOX' && ent.source !== 'PLAYER') {

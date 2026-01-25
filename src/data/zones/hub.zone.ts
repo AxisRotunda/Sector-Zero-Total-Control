@@ -111,9 +111,9 @@ const manualEntities: ZoneEntityDef[] = [
     { type: 'DECORATION', subType: 'GRAFFITI', x: 0, y: 800, data: { label: "SECTOR 9 ACCESS ↓", color: '#f59e0b', width: 400 } },
     { type: 'DECORATION', subType: 'GRAFFITI', x: 0, y: -650, data: { label: "TRANSIT DOCK 04", color: '#06b6d4', width: 300 } },
 
-    // Lighting
-    { type: 'DECORATION', subType: 'DYNAMIC_GLOW', x: 400, y: 100, data: { width: 150, depth: 150, color: COLOR_WARM_LIGHT, glowIntensity: 0.8 } }, 
-    { type: 'DECORATION', subType: 'DYNAMIC_GLOW', x: -400, y: 100, data: { width: 150, depth: 150, color: COLOR_WARM_LIGHT, glowIntensity: 0.8 } }, 
+    // Lighting (Updated to remove redundant dimensions, relying on config defaults)
+    { type: 'DECORATION', subType: 'DYNAMIC_GLOW', x: 400, y: 100, data: { glowIntensity: 0.8 } }, 
+    { type: 'DECORATION', subType: 'DYNAMIC_GLOW', x: -400, y: 100, data: { glowIntensity: 0.8 } }, 
     { type: 'DECORATION', subType: 'STREET_LIGHT', x: -200, y: -200, data: { color: '#cffafe' } },
     { type: 'DECORATION', subType: 'STREET_LIGHT', x: 200, y: -200, data: { color: '#cffafe' } },
     { type: 'DECORATION', subType: 'STREET_LIGHT', x: -200, y: 200, data: { color: '#cffafe' } },
