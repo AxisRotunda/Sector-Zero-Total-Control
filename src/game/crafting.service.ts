@@ -1,3 +1,4 @@
+
 import { Injectable, inject } from '@angular/core';
 import { PlayerProgressionService } from './player/player-progression.service';
 import { Item } from '../models/item.models';
@@ -5,6 +6,7 @@ import { SoundService } from '../services/sound.service';
 import { ItemGeneratorService } from '../services/item-generator.service';
 import { EventBusService } from '../core/events/event-bus.service';
 import { GameEvents } from '../core/events/game-events';
+import { InventoryService } from './inventory.service';
 
 export interface AugmentDef {
     label: string;
@@ -22,6 +24,7 @@ export class CraftingService {
   private sound = inject(SoundService);
   private itemGen = inject(ItemGeneratorService);
   private eventBus = inject(EventBusService);
+  private inventory = inject(InventoryService);
 
   private readonly REROLL_COST = 50;
   private readonly UPGRADE_COST = 100;
@@ -78,8 +81,14 @@ export class CraftingService {
           forceType: item.type
       });
 
-      item.stats = newItem.stats;
-      item.name = newItem.name;
+      // Immutable Update
+      const updatedItem: Item = {
+          ...item,
+          stats: newItem.stats,
+          name: newItem.name
+      };
+      
+      this.updateInventoryWith(updatedItem);
       
       this.sound.play('CRAFT');
       this.eventBus.dispatch({ type: GameEvents.FLOATING_TEXT_SPAWN, payload: { onPlayer: true, yOffset: -60, text: "STATS RECONFIGURED", color: '#fbbf24', size: 20 } });
@@ -94,16 +103,25 @@ export class CraftingService {
 
       this.progression.gainScrap(-this.UPGRADE_COST);
       
-      item.level++;
-      // Boost stats by ~15%
+      // Immutable Update logic
+      const newStats: Record<string, number> = {};
+      
       for (const key in item.stats) {
           const val = item.stats[key];
           if (key === 'speed' || key === 'crit' || key === 'ls' || key === 'cdr') {
-              item.stats[key] = parseFloat((val * 1.05).toFixed(2));
+              newStats[key] = parseFloat((val * 1.05).toFixed(2));
           } else {
-              item.stats[key] = Math.ceil(val * 1.15);
+              newStats[key] = Math.ceil(val * 1.15);
           }
       }
+
+      const upgradedItem: Item = {
+          ...item,
+          level: item.level + 1,
+          stats: newStats
+      };
+
+      this.updateInventoryWith(upgradedItem);
 
       this.sound.play('POWERUP');
       this.eventBus.dispatch({ type: GameEvents.FLOATING_TEXT_SPAWN, payload: { onPlayer: true, yOffset: -60, text: "ITEM UPGRADED", color: '#06b6d4', size: 24 } });
@@ -118,17 +136,47 @@ export class CraftingService {
 
       this.progression.gainScrap(-augment.cost);
       
-      // Add stat
-      item.stats[augment.stat] = augment.value;
+      // Immutable Update
+      const newStats = { ...item.stats };
+      newStats[augment.stat] = augment.value;
       
+      let newRarity = item.rarity;
+      let newColor = item.color;
+
       // Upgrade rarity visual if it has many stats
-      if (Object.keys(item.stats).length >= 5 && item.rarity !== 'BLACK_MARKET') {
-          item.rarity = 'RARE';
-          item.color = '#3b82f6';
+      if (Object.keys(newStats).length >= 5 && item.rarity !== 'BLACK_MARKET') {
+          newRarity = 'RARE';
+          newColor = '#3b82f6';
       }
+
+      const augmentedItem: Item = {
+          ...item,
+          stats: newStats,
+          rarity: newRarity,
+          color: newColor
+      };
+
+      this.updateInventoryWith(augmentedItem);
 
       this.sound.play('CRAFT');
       this.eventBus.dispatch({ type: GameEvents.FLOATING_TEXT_SPAWN, payload: { onPlayer: true, yOffset: -60, text: "AUGMENT INSTALLED", color: '#a855f7', size: 22 } });
       return true;
+  }
+
+  private updateInventoryWith(newItem: Item) {
+      // Check Bag
+      this.inventory.bag.update(items => items.map(i => i.id === newItem.id ? newItem : i));
+      
+      // Check Equipped
+      this.inventory.equipped.update(eq => {
+          const updates: any = {};
+          if (eq.weapon?.id === newItem.id) updates.weapon = newItem;
+          if (eq.armor?.id === newItem.id) updates.armor = newItem;
+          if (eq.implant?.id === newItem.id) updates.implant = newItem;
+          if (eq.stim?.id === newItem.id) updates.stim = newItem;
+          if (eq.amulet?.id === newItem.id) updates.amulet = newItem;
+          if (eq.ring?.id === newItem.id) updates.ring = newItem;
+          return { ...eq, ...updates };
+      });
   }
 }

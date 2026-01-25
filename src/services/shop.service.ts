@@ -37,8 +37,12 @@ export class ShopService {
   };
 
   openShop(merchant: Entity) {
-      // 1. Determine Faction (Default to REMNANT or randomize if not set on entity)
-      const faction = merchant.factionId || (Math.random() > 0.5 ? 'VANGUARD' : 'REMNANT');
+      // 1. Determine Faction (Type Safe)
+      const validFactions: Faction['id'][] = ['VANGUARD', 'REMNANT', 'RESONANT'];
+      const faction = (merchant.factionId && validFactions.includes(merchant.factionId as any)) 
+          ? merchant.factionId as Faction['id'] 
+          : (Math.random() > 0.5 ? 'VANGUARD' : 'REMNANT');
+          
       this.currentFaction.set(faction);
       
       // 2. Set Volatility
@@ -122,10 +126,12 @@ export class ShopService {
               this.sound.play('UI'); 
               this.narrative.modifyReputation(this.currentFaction(), 1); // Small Rep gain
 
-              // Remove from both signal and source entity
-              this.merchantStock.update(stock => stock.filter(i => i.id !== item.id));
+              // Atomic update of stock
+              const newStock = this.merchantStock().filter(i => i.id !== item.id);
+              this.merchantStock.set(newStock);
+              
               if (this.currentMerchantEntity) {
-                  this.currentMerchantEntity.shopInventory = this.merchantStock();
+                  this.currentMerchantEntity.shopInventory = newStock;
               }
               return true;
           }

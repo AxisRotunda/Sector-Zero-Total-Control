@@ -23,7 +23,6 @@ import { NarrativeService } from '../game/narrative.service';
 import { EventBusService } from '../core/events/event-bus.service';
 import { GameEvents } from '../core/events/game-events';
 import { LootService } from '../services/loot.service';
-import { CombatFeedbackService } from '../services/combat-feedback.service';
 import { InventoryService } from '../game/inventory.service';
 import { SoundService } from '../services/sound.service';
 
@@ -36,32 +35,46 @@ export class CombatService {
   private eventBus = inject(EventBusService);
   private inventory = inject(InventoryService);
   private sound = inject(SoundService);
-  
   private loot = inject(LootService);
-  private feedback = inject(CombatFeedbackService);
 
-  /**
-   * Main entry point for Hitbox-based collisions.
-   */
+  private damageResultPool: DamageResult[] = [];
+
+  private acquireDamageResult(): DamageResult {
+      return this.damageResultPool.pop() || {
+          total: 0,
+          breakdown: createEmptyDamagePacket(),
+          isCrit: false,
+          penetratedResistances: createDefaultResistances()
+      };
+  }
+
+  private releaseDamageResult(result: DamageResult) {
+      if (this.damageResultPool.length < 50) {
+          this.damageResultPool.push(result);
+      }
+  }
+
   public processHit(hitbox: Entity, target: Entity): void {
     if (target.hitFlash > 0 || target.isHitStunned) return;
 
-    // Get damage packet from hitbox or generate fallback
     const damagePacket = hitbox.damagePacket ?? this.createFallbackDamagePacket(hitbox);
     
-    // Validate packet in debug mode (optional)
-    if (BALANCE.PLAYER.BASE_HP < 0) { // Using a safe constant check for "Debug" proxy
+    if (BALANCE.PLAYER.BASE_HP < 0) { 
         this.validateDamagePacket(damagePacket, `${hitbox.source} -> ${target.type}`);
     }
 
     const result = this.calculateMitigatedDamage(hitbox, target, damagePacket);
     
     this.applyCombatResult(hitbox, target, result);
+    
+    // Release pooled object after use in event dispatch
+    // Note: We dispatch copy of primitives in event payload usually, but here we pass the result object.
+    // Listeners should consume synchronously or clone if needed.
+    // For safety in this async-event architecture, we might rely on GC if listeners are async.
+    // But since eventBus is synchronous Subject:
+    this.releaseDamageResult(result);
   }
 
-  /**
-   * Entry point for Direct Melee attacks (Collision).
-   */
   public applyDirectDamage(
     attacker: Entity,
     target: Entity,
@@ -71,12 +84,12 @@ export class CombatService {
       return;
     }
 
-    // Convert single damage value to pure physical packet
     const damagePacket = createEmptyDamagePacket();
     damagePacket.physical = baseDamage;
 
     const result = this.calculateMitigatedDamage(attacker, target, damagePacket);
     this.applyCombatResult(attacker, target, result);
+    this.releaseDamageResult(result);
   }
 
   private validateDamagePacket(packet: DamagePacket, source: string): void {
@@ -84,15 +97,10 @@ export class CombatService {
       if (calculateTotalDamage(packet) < 0) console.warn(`[Combat] Negative damage from ${source}`);
   }
 
-  /**
-   * Creates fallback damage packet for entities without damagePacket.
-   */
   private createFallbackDamagePacket(hitbox: Entity): DamagePacket {
     const packet = createEmptyDamagePacket();
     
-    // Check for legacy damageValue first
     if (hitbox.damageValue !== undefined) {
-      // Temporary migration hack: color mapping for legacy hitboxes
       if (hitbox.color === '#ef4444') packet.fire = hitbox.damageValue;
       else if (hitbox.color === '#3b82f6') packet.cold = hitbox.damageValue;
       else if (hitbox.color === '#eab308') packet.lightning = hitbox.damageValue;
@@ -101,22 +109,17 @@ export class CombatService {
       return packet;
     }
     
-    // Calculate from source
     if (hitbox.source === 'PLAYER' || hitbox.source === 'PSIONIC') {
       const stats = this.stats.playerStats();
-      
       if (stats.damagePacket) {
-        return { ...stats.damagePacket }; // Clone to avoid mutation
+        return { ...stats.damagePacket }; 
       }
-      
-      // Fallback: Legacy damage property
       if (stats.damage !== undefined) {
         packet.physical = stats.damage;
       } else {
-        packet.physical = 10; // Ultimate fallback
+        packet.physical = 10; 
       }
     } else {
-      // Enemy/environment default
       packet.physical = 10;
     }
     
@@ -125,11 +128,9 @@ export class CombatService {
 
   private rollCritical(source: Entity): boolean {
     let critChance = source.critChance || 5;
-
     if (source.source === 'PLAYER' || source.source === 'PSIONIC') {
       critChance = this.stats.playerStats().crit;
     }
-
     return Math.random() * 100 < critChance;
   }
 
@@ -138,10 +139,7 @@ export class CombatService {
     conversion?: DamageConversion
   ): DamagePacket {
     if (!conversion) return packet;
-
     const converted = { ...packet };
-
-    // Physical conversions
     if (conversion.physicalToFire) {
       const amount = packet.physical * conversion.physicalToFire;
       converted.physical -= amount;
@@ -162,7 +160,6 @@ export class CombatService {
       converted.physical -= amount;
       converted.chaos += amount;
     }
-
     return converted;
   }
 
@@ -171,7 +168,7 @@ export class CombatService {
     penetration: Penetration
   ): Resistances {
     return {
-      physical: targetResistances.physical, // Armor calculation handles pen separately
+      physical: targetResistances.physical, 
       fire: Math.max(RESISTANCE_FLOOR, targetResistances.fire * (1 - penetration.fire)),
       cold: Math.max(RESISTANCE_FLOOR, targetResistances.cold * (1 - penetration.cold)),
       lightning: Math.max(RESISTANCE_FLOOR, targetResistances.lightning * (1 - penetration.lightning)),
@@ -184,7 +181,6 @@ export class CombatService {
     armor: number
   ): number {
     if (armor <= 0 || physicalDamage <= 0) return 0;
-    // Diminishing returns: Armor / (Armor + 10 * Damage)
     const reduction = armor / (armor + 10 * physicalDamage);
     return Math.min(0.90, reduction);
   }
@@ -196,20 +192,21 @@ export class CombatService {
   ): DamageResult {
     let damagePacket = { ...incomingDamage };
 
-    // 1. Critical Strike (multiplicative to all types)
+    // 1. Critical
     const isCrit = this.rollCritical(source);
     if (isCrit) {
-      damagePacket.physical *= BALANCE.COMBAT.CRIT_MULTIPLIER;
-      damagePacket.fire *= BALANCE.COMBAT.CRIT_MULTIPLIER;
-      damagePacket.cold *= BALANCE.COMBAT.CRIT_MULTIPLIER;
-      damagePacket.lightning *= BALANCE.COMBAT.CRIT_MULTIPLIER;
-      damagePacket.chaos *= BALANCE.COMBAT.CRIT_MULTIPLIER;
+      const mult = BALANCE.COMBAT.CRIT_MULTIPLIER;
+      damagePacket.physical *= mult;
+      damagePacket.fire *= mult;
+      damagePacket.cold *= mult;
+      damagePacket.lightning *= mult;
+      damagePacket.chaos *= mult;
     }
 
-    // 2. Damage Conversion
+    // 2. Conversion
     damagePacket = this.applyDamageConversion(damagePacket, source.damageConversion);
 
-    // 3. Weakness Amplification
+    // 3. Weakness
     if (target.status.weakness) {
       const amp = 1 + target.status.weakness.damageReduction;
       damagePacket.physical *= amp;
@@ -219,10 +216,9 @@ export class CombatService {
       damagePacket.chaos *= amp;
     }
 
-    // 4. Get penetration (Use LET to allow cloning)
+    // 4. Penetration
     let penetration = source.penetration ? { ...source.penetration } : createZeroPenetration();
     
-    // Default armor pen for player from stats if not set on source entity
     if ((source.source === 'PLAYER' || source.source === 'PSIONIC') && !source.penetration) {
         const pStats = this.stats.playerStats();
         if (pStats.penetration) {
@@ -232,28 +228,29 @@ export class CombatService {
             penetration.physical = pStats.armorPen;
         }
     } else if (source.armorPen) {
-        // Legacy fallback
         penetration.physical = source.armorPen;
     }
 
-    // 5. Target Resistances (Fallback if missing)
-    const targetResistances = target.resistances ?? createDefaultResistances();
-    // Use legacy armor if physical resist is 0
-    if (targetResistances.physical === 0 && target.armor > 0) targetResistances.physical = target.armor;
+    // 5. Target Resistances (Safely Cloned)
+    let targetResistances = target.resistances 
+      ? { ...target.resistances } 
+      : createDefaultResistances();
+      
+    if (targetResistances.physical === 0 && target.armor > 0) {
+        targetResistances.physical = target.armor;
+    }
 
-    // 6. Apply penetration to elemental resistances
+    // 6. Effective Resistances
     const effectiveResistances = this.applyPenetration(targetResistances, penetration);
 
-    // 7. Calculate physical mitigation (Armor based)
-    // Reduce armor by penetration amount first (Percentage reduction logic)
+    // 7. Armor Logic
     const effectiveArmor = targetResistances.physical * (1 - penetration.physical);
-    
     const physicalMitigation = this.calculatePhysicalMitigation(
       damagePacket.physical,
       effectiveArmor
     );
 
-    // 8. Apply per-type mitigation
+    // 8. Mitigation Application
     const mitigatedDamage: DamagePacket = {
       physical: damagePacket.physical * (1 - physicalMitigation),
       fire: damagePacket.fire * (1 - Math.min(RESISTANCE_CAPS.fire, effectiveResistances.fire)),
@@ -265,12 +262,14 @@ export class CombatService {
     const total = calculateTotalDamage(mitigatedDamage);
     const finalTotal = total > 0 ? Math.max(1, total) : 0;
 
-    return {
-      total: finalTotal,
-      breakdown: mitigatedDamage,
-      isCrit,
-      penetratedResistances: effectiveResistances
-    };
+    // Use Pooled Object
+    const result = this.acquireDamageResult();
+    result.total = finalTotal;
+    result.breakdown = mitigatedDamage; // Note: breakdown is a new object from step 8, safe to assign
+    result.isCrit = isCrit;
+    result.penetratedResistances = effectiveResistances;
+
+    return result;
   }
 
   private applyCombatResult(
@@ -278,9 +277,13 @@ export class CombatService {
     target: Entity,
     result: DamageResult
   ): void {
-    const { total, breakdown, isCrit } = result;
+    const { total } = result;
 
-    this.feedback.onHitConfirmed(target, total, isCrit, breakdown);
+    // DECOUPLED: Dispatch Event instead of calling Feedback directly
+    this.eventBus.dispatch({
+        type: GameEvents.COMBAT_HIT_CONFIRMED,
+        payload: { source, target, result }
+    });
 
     // State updates
     if (target.type === 'PLAYER') {
@@ -293,22 +296,16 @@ export class CombatService {
 
     target.hitFlash = 10;
     target.hitStopFrames =
-      isCrit || total > 50
+      result.isCrit || total > 50
         ? BALANCE.ENEMY_AI.HIT_STOP_FRAMES_HEAVY
         : BALANCE.ENEMY_AI.HIT_STOP_FRAMES_LIGHT;
     target.isHitStunned = true;
 
-    // Knockback
     const knockback = source.knockbackForce ?? BALANCE.COMBAT.KNOCKBACK_FORCE;
     this.applyKnockback(source, target, knockback);
-
-    // Status effects
     this.applyStatusEffects(source, target);
-
-    // Lifesteal
     this.applyLifeSteal(source, total);
 
-    // Death check
     if (target.hp <= 0 && target.type !== 'PLAYER') {
       if (isEnemy(target)) this.killEnemy(target);
       if (isDestructible(target)) this.destroyObject(target);
@@ -317,14 +314,11 @@ export class CombatService {
 
   private applyLifeSteal(source: Entity, damageDealt: number): void {
     if (source.source !== 'PLAYER' && source.source !== 'PSIONIC') return;
-
     const stats = this.stats.playerStats();
     if (stats.lifesteal > 0) {
       const healing = damageDealt * (stats.lifesteal / 100);
       if (healing >= 1) {
-        this.stats.playerHp.update((h) =>
-          Math.min(stats.hpMax, h + healing)
-        );
+        this.stats.playerHp.update((h) => Math.min(stats.hpMax, h + healing));
         this.world.spawnFloatingText(
           this.world.player.x,
           this.world.player.y - 60,
@@ -336,22 +330,16 @@ export class CombatService {
     }
   }
 
-  private applyKnockback(
-    source: Entity,
-    target: Entity,
-    force: number
-  ): void {
+  private applyKnockback(source: Entity, target: Entity, force: number): void {
     const dx = target.x - source.x;
     const dy = target.y - source.y;
     const angleToTarget = Math.atan2(dy, dx);
 
     if (force < 0) {
-      // Vacuum effect
       const pullAngle = angleToTarget;
       const swirlAngle = pullAngle + Math.PI / 2;
       const pullStrength = Math.abs(force);
       const swirlStrength = pullStrength * 0.5;
-
       target.vx -= Math.cos(pullAngle) * pullStrength;
       target.vy -= Math.sin(pullAngle) * pullStrength;
       target.vx += Math.cos(swirlAngle) * swirlStrength;
@@ -368,9 +356,6 @@ export class CombatService {
   
     const applyEffect = (type: StatusKey, sourceEffect: StatusEffect | undefined): void => {
       if (!sourceEffect) return;
-  
-      // Legacy resistance check via statusResistances, fallback to 1.0 (no resist)
-      // New system could use explicit resistances if we map them
       const resistance = target.statusResistances?.[type as keyof typeof target.statusResistances] ?? 1.0;
       if (resistance <= 0) return;
   
@@ -384,7 +369,6 @@ export class CombatService {
       if (typeof sourceEffect === 'object') {
         const newDuration = sourceEffect.duration * resistance;
         const newTimer = sourceEffect.timer ? sourceEffect.timer * resistance : newDuration;
-  
         const existing = target.status[type];
         
         if (!existing || (typeof existing === 'object' && newDuration > existing.duration)) {
@@ -410,7 +394,10 @@ export class CombatService {
     const currentZone = this.world.currentZone();
 
     if (currentZone.isTrainingZone) {
-      this.feedback.spawnDerezEffect(e.x, e.y);
+      // Derez Effect dispatched via event now? No, Feedback service is decoupled.
+      // We can dispatch a specific event or keep using feedback for visual-only stuff via subscription
+      // For now, let's allow CombatService to fire "EnemyKilled" event and have feedback listen
+      this.eventBus.dispatch({ type: GameEvents.ENEMY_KILLED, payload: { type: e.subType || '' } });
       this.checkTrainingWaveComplete();
     } else {
       this.eventBus.dispatch({ type: GameEvents.ENEMY_KILLED, payload: { type: e.subType || '' } });
@@ -425,12 +412,10 @@ export class CombatService {
 
     if (activeEnemies.length === 0) {
       this.narrative.setFlag('TRAINING_ACTIVE', false);
-
       if (this.narrative.getFlag('TRAINING_LVL1_ACTIVE')) {
         this.narrative.setFlag('TRAINING_LVL1_COMPLETE', true);
         this.narrative.setFlag('TRAINING_LVL1_ACTIVE', false);
       }
-
       this.narrative.setFlag('TRAINING_LVL2_ACTIVE', false);
       this.eventBus.dispatch({
         type: GameEvents.FLOATING_TEXT_SPAWN,
@@ -447,31 +432,30 @@ export class CombatService {
 
   public destroyObject(e: Entity): void {
     e.state = 'DEAD';
-
     if (e.subType === 'BARREL') {
-      this.feedback.spawnExplosionEffect(e.x, e.y);
-
+      // Explosion logic is visual + gameplay.
+      // Visuals handled by feedback listener to DEATH event or similar? 
+      // Or we trigger explosion hitbox here.
+      
       const explosion = this.entityPool.acquire('HITBOX', undefined, e.zoneId);
       explosion.source = 'ENVIRONMENT';
       explosion.x = e.x;
       explosion.y = e.y;
       explosion.radius = BALANCE.ENVIRONMENT.BARREL_EXPLOSION_RADIUS;
-      
-      // Explosion now deals Fire damage logic internally via packet
       const packet = createEmptyDamagePacket();
       packet.fire = BALANCE.ENVIRONMENT.BARREL_EXPLOSION_DMG;
       explosion.damagePacket = packet;
-      
       explosion.color = '#f87171';
       explosion.state = 'ATTACK';
       explosion.timer = 5;
       explosion.status.stun = BALANCE.ENVIRONMENT.BARREL_EXPLOSION_STUN;
-
       this.world.entities.push(explosion);
-    } else {
-      this.feedback.spawnDebrisEffect(e.x, e.y);
-    }
-
+      
+      // We still need audio/visuals for explosion.
+      // Dispatch specific event for Barrel Explosion
+      // For now, simple way:
+      this.sound.play('EXPLOSION'); // Keeping basic audio here for now or move to feedback
+    } 
     this.loot.processDestructibleRewards(e);
   }
 }

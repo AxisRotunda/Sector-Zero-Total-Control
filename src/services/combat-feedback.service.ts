@@ -6,7 +6,7 @@ import { SoundService } from '../services/sound.service';
 import { ParticleService } from '../systems/particle.service';
 import { HapticService } from '../services/haptic.service';
 import { EventBusService } from '../core/events/event-bus.service';
-import { GameEvents } from '../core/events/game-events';
+import { GameEvents, CombatHitPayload } from '../core/events/game-events';
 import { TimeService } from '../game/time.service';
 import * as BALANCE from '../config/balance.config';
 import { DamagePacket, DAMAGE_TYPE_COLORS } from '../models/damage.model';
@@ -20,7 +20,20 @@ export class CombatFeedbackService {
   private eventBus = inject(EventBusService);
   private time = inject(TimeService);
 
-  public onHitConfirmed(
+  constructor() {
+      // Listen to Combat Events
+      this.eventBus.on(GameEvents.COMBAT_HIT_CONFIRMED).subscribe((payload: CombatHitPayload) => {
+          this.onHitConfirmed(payload.target, payload.result.total, payload.result.isCrit, payload.result.breakdown);
+      });
+      
+      // Could also listen to EnemyKilled for death effects
+      this.eventBus.on(GameEvents.ENEMY_KILLED).subscribe((payload: { type: string }) => {
+          // General death effect could be triggered here if we pass coordinates in payload
+          // For now kept simple
+      });
+  }
+
+  private onHitConfirmed(
     target: Entity, 
     damage: number, 
     isCrit: boolean,
@@ -52,6 +65,13 @@ export class CombatFeedbackService {
     const stopDuration = Math.min(10, Math.floor(BALANCE.COMBAT.HIT_STOP_FRAMES + damage / 10));
     this.time.triggerHitStop(stopDuration);
 
+    // Visual Effects based on target
+    if (target.state === 'DEAD') {
+        if (target.subType === 'BARREL') this.spawnExplosionEffect(target.x, target.y);
+        else if (this.world.currentZone().isTrainingZone) this.spawnDerezEffect(target.x, target.y);
+        else this.spawnDebrisEffect(target.x, target.y);
+    }
+
     // Damage Numbers
     this.spawnDamageNumbers(target, damage, isCrit, breakdown);
   }
@@ -63,29 +83,23 @@ export class CombatFeedbackService {
     breakdown?: DamagePacket
   ): void {
     if (!breakdown) {
-        // Fallback for single type
         this.spawnSingleDamageNumber(target, totalDamage, isCrit);
         return;
     }
 
-    // Filter significant damage types to avoid clutter
-    // A type is significant if it contributes > 0 to damage
     const significantTypes = [
         { type: 'physical', val: breakdown.physical, color: DAMAGE_TYPE_COLORS.physical },
         { type: 'fire', val: breakdown.fire, color: DAMAGE_TYPE_COLORS.fire },
         { type: 'cold', val: breakdown.cold, color: DAMAGE_TYPE_COLORS.cold },
         { type: 'lightning', val: breakdown.lightning, color: DAMAGE_TYPE_COLORS.lightning },
         { type: 'chaos', val: breakdown.chaos, color: DAMAGE_TYPE_COLORS.chaos }
-    ].filter(t => t.val > 0.5); // Threshold to hide tiny rounding errors
+    ].filter(t => t.val > 0.5);
 
     if (significantTypes.length === 0) {
         this.spawnSingleDamageNumber(target, totalDamage, isCrit);
         return;
     }
 
-    // If mostly one type, just show that one bigger. 
-    // If mixed, stack them.
-    // Limit to top 2 types to avoid UI spam.
     significantTypes.sort((a, b) => b.val - a.val);
     const topTypes = significantTypes.slice(0, 2);
 
@@ -98,7 +112,7 @@ export class CombatFeedbackService {
         const offset = i * 20;
 
         this.world.spawnFloatingText(
-            target.x + (i * 10), // Stagger X slightly
+            target.x + (i * 10),
             target.y + yOffset + offset,
             `${Math.ceil(t.val)}${prefix}`,
             t.color,
@@ -134,54 +148,22 @@ export class CombatFeedbackService {
 
   public spawnDerezEffect(x: number, y: number): void {
     this.particles.addParticles({
-      x, y, z: 20,
-      count: 30,
-      color: '#06b6d4',
-      speed: 4,
-      size: 3,
-      type: 'square',
-      life: 0.6,
-      composite: 'lighter',
-      emitsLight: true
+      x, y, z: 20, count: 30, color: '#06b6d4', speed: 4, size: 3, type: 'square', life: 0.6, composite: 'lighter', emitsLight: true
     });
-
     this.particles.addParticles({
-      x, y, z: 20,
-      count: 15,
-      color: '#a855f7',
-      speed: 2,
-      size: 4,
-      type: 'square',
-      life: 0.8
+      x, y, z: 20, count: 15, color: '#a855f7', speed: 2, size: 4, type: 'square', life: 0.8
     });
   }
 
   public spawnExplosionEffect(x: number, y: number): void {
-    this.sound.play('EXPLOSION');
-    this.eventBus.dispatch({
-      type: GameEvents.ADD_SCREEN_SHAKE,
-      payload: BALANCE.SHAKE.EXPLOSION
-    });
-
     this.particles.addParticles({
-      x, y, z: 10,
-      color: '#ef4444',
-      count: 30,
-      speed: 8,
-      size: 4,
-      type: 'square',
-      emitsLight: true
+      x, y, z: 10, color: '#ef4444', count: 30, speed: 8, size: 4, type: 'square', emitsLight: true
     });
   }
 
   public spawnDebrisEffect(x: number, y: number): void {
     this.particles.addParticles({
-      x, y, z: 10,
-      color: '#a16207',
-      count: 10,
-      speed: 4,
-      size: 2,
-      type: 'square'
+      x, y, z: 10, color: '#a16207', count: 10, speed: 4, size: 2, type: 'square'
     });
   }
 }

@@ -1,4 +1,7 @@
 
+import { Entity } from '../../models/game.models';
+import { DamagePacket, DamageResult } from '../../models/damage.model';
+
 export type FloatingTextPayload = { 
   text: string; 
   x?: number; 
@@ -25,6 +28,12 @@ export type LocationDiscoveryPayload = {
 export type EnemyKillPayload = { type: string };
 export type ItemCollectPayload = { itemId: string };
 
+export type CombatHitPayload = {
+    source: Entity;
+    target: Entity;
+    result: DamageResult;
+};
+
 export type GameEvent =
   | { type: 'FLOATING_TEXT_SPAWN'; payload: FloatingTextPayload }
   | { type: 'PLAYER_DEATH'; payload?: void }
@@ -32,7 +41,8 @@ export type GameEvent =
   | { type: 'ADD_SCREEN_SHAKE'; payload: ScreenShakePayload }
   | { type: 'LOCATION_DISCOVERED'; payload: LocationDiscoveryPayload }
   | { type: 'ENEMY_KILLED'; payload: EnemyKillPayload }
-  | { type: 'ITEM_COLLECTED'; payload: ItemCollectPayload };
+  | { type: 'ITEM_COLLECTED'; payload: ItemCollectPayload }
+  | { type: 'COMBAT_HIT_CONFIRMED'; payload: CombatHitPayload };
 
 export const GameEvents = {
   FLOATING_TEXT_SPAWN: 'FLOATING_TEXT_SPAWN' as const,
@@ -42,4 +52,5 @@ export const GameEvents = {
   LOCATION_DISCOVERED: 'LOCATION_DISCOVERED' as const,
   ENEMY_KILLED: 'ENEMY_KILLED' as const,
   ITEM_COLLECTED: 'ITEM_COLLECTED' as const,
+  COMBAT_HIT_CONFIRMED: 'COMBAT_HIT_CONFIRMED' as const,
 };

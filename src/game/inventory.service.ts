@@ -47,22 +47,21 @@ export class InventoryService {
   bagSize = CONFIG.INVENTORY.BAG_SIZE;
 
   equipmentStats = computed(() => {
-    const stats = { dmg: 0, hp: 0, speed: 0, cdr: 0, crit: 0, lifesteal: 0, armorPen: 0, psy: 0, tech: 0, armor: 0 };
+    const stats: Record<string, number> = { 
+        dmg: 0, hp: 0, speed: 0, cdr: 0, crit: 0, lifesteal: 0, 
+        armorPen: 0, psy: 0, tech: 0, armor: 0 
+    };
+    
     const items = Object.values(this.equipped()) as (Item | null)[];
+    
     items.forEach(item => {
       if (item) {
-        if (item.stats['dmg']) stats.dmg += item.stats['dmg'];
-        if (item.stats['hp']) stats.hp += item.stats['hp'];
-        if (item.stats['spd']) stats.speed += item.stats['spd'];
-        if (item.stats['cdr']) stats.cdr += item.stats['cdr'];
-        if (item.stats['crit']) stats.crit += item.stats['crit'];
-        if (item.stats['ls']) stats.lifesteal += item.stats['ls'];
-        if (item.stats['armorPen']) stats.armorPen += item.stats['armorPen'];
-        if (item.stats['psy']) stats.psy += item.stats['psy'];
-        if (item.stats['tech']) stats.tech += item.stats['tech'];
-        if (item.stats['armor']) stats.armor += item.stats['armor'];
+        Object.entries(item.stats).forEach(([key, value]) => {
+            stats[key] = (stats[key] || 0) + (value as number);
+        });
       }
     });
+    
     return stats;
   });
 
