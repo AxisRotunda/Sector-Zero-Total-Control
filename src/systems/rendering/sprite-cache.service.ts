@@ -1,14 +1,21 @@
+
 import { Injectable } from '@angular/core';
 import { RENDER_CONFIG } from './render.config';
 
+interface CacheEntry {
+  canvas: HTMLCanvasElement | OffscreenCanvas;
+  lastUsed: number;
+  sizeBytes: number;
+}
+
 @Injectable({ providedIn: 'root' })
 export class SpriteCacheService {
-  private cache = new Map<string, { canvas: HTMLCanvasElement | OffscreenCanvas, lastUsed: number }>();
+  private cache = new Map<string, CacheEntry>();
   
-  // Cache limits from config
-  private readonly MAX_CACHE_SIZE = RENDER_CONFIG.MAX_CACHE_SIZE || 500;
-  // Entries unused for this duration (ms) are preferred for eviction
-  private readonly STALE_THRESHOLD = 60000; 
+  // Cache limits
+  private readonly MAX_CACHE_SIZE_MB = 50; 
+  private readonly BYTES_PER_PIXEL = 4;
+  private currentSizeBytes = 0;
 
   getOrRender(
     key: string, 
@@ -20,35 +27,38 @@ export class SpriteCacheService {
     const entry = this.cache.get(key);
 
     if (entry) {
-      // Optimization: Update timestamp only. Avoids delete/set map mutation overhead on every frame.
       entry.lastUsed = now;
       return entry.canvas;
     }
 
-    // Cache Miss: Check capacity before allocation
-    if (this.cache.size >= this.MAX_CACHE_SIZE) {
-      this.prune(now);
+    // Estimate size of new sprite
+    const estimatedSize = width * height * this.BYTES_PER_PIXEL;
+
+    // Prune if we would exceed limit
+    if (this.currentSizeBytes + estimatedSize > (this.MAX_CACHE_SIZE_MB * 1024 * 1024)) {
+      this.prune(estimatedSize);
     }
 
     const canvas = this.createCanvas(width, height);
-    // Type assertion is safe here as context matches the created canvas type
     const ctx = canvas.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
     
     if (ctx) {
         renderFn(ctx);
+    } else {
+        console.warn('[SpriteCache] Failed to get context for sprite:', key);
     }
 
-    this.cache.set(key, { canvas, lastUsed: now });
+    this.cache.set(key, { canvas, lastUsed: now, sizeBytes: estimatedSize });
+    this.currentSizeBytes += estimatedSize;
+    
     return canvas;
   }
 
   clear() {
     this.cache.clear();
+    this.currentSizeBytes = 0;
   }
 
-  /**
-   * Abstraction for creating canvases, handling OffscreenCanvas support.
-   */
   private createCanvas(width: number, height: number): HTMLCanvasElement | OffscreenCanvas {
     if (typeof OffscreenCanvas !== 'undefined') {
       return new OffscreenCanvas(width, height);
@@ -59,31 +69,23 @@ export class SpriteCacheService {
     return canvas;
   }
 
-  /**
-   * Handles cache eviction when limit is reached.
-   */
-  private prune(now: number) {
-    // 1. First Pass: Remove stale entries (older than threshold)
-    // Iterating map entries is fast enough for <1000 items on rare prune events
-    for (const [key, entry] of this.cache.entries()) {
-      if (now - entry.lastUsed > this.STALE_THRESHOLD) {
-        this.cache.delete(key);
-      }
-    }
-
-    // 2. Second Pass: If still over limit, aggressive LRU eviction
-    if (this.cache.size >= this.MAX_CACHE_SIZE) {
-        // Sort by usage time to find oldest. 
-        // We must explicit sort since we stopped re-inserting on read to optimize the hot path.
-        const entries = Array.from(this.cache.entries());
-        // Sort ascending by lastUsed (oldest first)
-        entries.sort((a, b) => a[1].lastUsed - b[1].lastUsed);
-        
-        // Remove oldest 20% to free up substantial space
-        const removeCount = Math.ceil(this.MAX_CACHE_SIZE * 0.2);
-        for (let i = 0; i < removeCount; i++) {
-            this.cache.delete(entries[i][0]);
+  private prune(neededSpace: number) {
+    // Sort by LRU
+    const entries = Array.from(this.cache.entries()).sort((a, b) => a[1].lastUsed - b[1].lastUsed);
+    
+    for (const [key, entry] of entries) {
+        if (this.currentSizeBytes + neededSpace <= (this.MAX_CACHE_SIZE_MB * 1024 * 1024)) {
+            break; // Enough space freed
         }
+
+        // Release memory explicitly if possible (mostly for DOM nodes)
+        if (entry.canvas instanceof HTMLCanvasElement) {
+            entry.canvas.width = 0;
+            entry.canvas.height = 0;
+        }
+
+        this.currentSizeBytes -= entry.sizeBytes;
+        this.cache.delete(key);
     }
   }
 }
