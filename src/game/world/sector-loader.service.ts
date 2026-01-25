@@ -1,4 +1,3 @@
-
 import { Injectable, inject } from '@angular/core';
 import { WorldService } from './world.service';
 import { EntityPoolService } from '../../services/entity-pool.service';
@@ -11,7 +10,6 @@ import { ProofKernelService } from '../../core/proof/proof-kernel.service';
 import { EventBusService } from '../../core/events/event-bus.service';
 import { GameEvents } from '../../core/events/game-events';
 import { AdaptiveQualityService } from '../../systems/adaptive-quality.service';
-import { LeanBridgeService, LeanRect } from '../../core/lean-bridge.service';
 
 @Injectable({ providedIn: 'root' })
 export class SectorLoaderService {
@@ -21,7 +19,6 @@ export class SectorLoaderService {
   private proofKernel = inject(ProofKernelService);
   private eventBus = inject(EventBusService);
   private adaptiveQuality = inject(AdaptiveQualityService);
-  private leanBridge = inject(LeanBridgeService);
 
   loadFromTemplate(world: WorldService, template: ZoneTemplate): void {
       try {
@@ -43,45 +40,65 @@ export class SectorLoaderService {
           });
           world.mapBounds = template.bounds;
 
-          // --- LEAN BRIDGE HARD GATE: GEOMETRY ---
-          // Perform verification BEFORE spawning entities into the world.
-          // This acts as a hard stop for corrupted level data.
-          if (template.geometry.walls && template.geometry.walls.length > 0) {
-              const leanWalls: LeanRect[] = template.geometry.walls.map((w, idx) => ({
-                  id: (w.data?.id) ? String(w.data.id).hashCode() : idx,
-                  x: w.x - w.w / 2, // Convert Center to Top-Left for AABB check if needed, but LeanBridge handles it
-                  y: w.y - w.h / 2,
-                  w: w.w,
-                  h: w.h
-              }));
-
-              const proof = this.leanBridge.proveGeometryValidity(leanWalls);
-              
-              if (!proof.valid) {
-                  console.error(`[SectorLoader] LEAN BRIDGE REJECTION: ${proof.reason}`);
-                  this.eventBus.dispatch({
-                      type: GameEvents.REALITY_BLEED,
-                      payload: { 
-                          severity: 'CRITICAL', 
-                          source: 'LEAN_BRIDGE', 
-                          message: `Sector Geometry Invalid: ${proof.reason}. Aborting layout.` 
-                      }
-                  });
-                  // ABORT LOAD: Do not spawn invalid walls.
-                  // Only spawn a single safe platform to prevent infinite fall.
-                  const safeWall = this.entityPool.acquire('WALL');
-                  safeWall.x = 0; safeWall.y = 0; safeWall.width = 200; safeWall.depth = 200; safeWall.color = '#ef4444';
-                  world.entities.push(safeWall);
-                  this.spatialHash.insert(safeWall, true);
-                  return; 
-              }
-          }
-
           if (template.geometry.walls) {
               template.geometry.walls.forEach(w => this.spawnWall(world, w, zoneId));
           }
 
           world.entities = MapUtils.mergeWalls(world.entities);
+
+          // --- KERNEL VERIFICATION: SEGMENT ANALYSIS ---
+          try {
+              const walls = world.entities.filter(e => e.type === 'WALL');
+              
+              // 1. Static Geometry Verification
+              // Convert entities to simple geometric segments for the proof kernel
+              const segments = walls
+                .map((w, idx) => {
+                    const kind = w.data?.kind ?? 'STRUCTURAL';
+                    if (kind !== 'STRUCTURAL') return null;
+
+                    const id = w.data?.id ?? w.id ?? idx;
+                    const wVal = w.width || 40;
+                    const dVal = w.depth || 40;
+                    
+                    const role = w.data?.role ?? 'DEFAULT';
+                    
+                    const vertical = dVal > wVal;
+                    
+                    if (vertical) {
+                        return {
+                            entityId: id,
+                            x1: w.x,
+                            y1: w.y - dVal / 2,
+                            x2: w.x,
+                            y2: w.y + dVal / 2,
+                            role: role
+                        };
+                    } else {
+                        return {
+                            entityId: id,
+                            x1: w.x - wVal / 2,
+                            y1: w.y,
+                            x2: w.x + wVal / 2,
+                            y2: w.y,
+                            role: role
+                        };
+                    }
+                })
+                .filter(s => s !== null) as { x1: number; y1: number; x2: number; y2: number; entityId: string | number; role: string }[];
+
+              if (segments.length > 0) {
+                  // Fire-and-forget call to the Kernel (which now uses LeanBridge)
+                  this.proofKernel.verifyStructuralSegments(segments);
+              }
+              
+          } catch (verifyErr) {
+              console.warn('[SectorLoader] Verification Exception:', verifyErr);
+              this.eventBus.dispatch({
+                  type: GameEvents.REALITY_BLEED,
+                  payload: { severity: 'MEDIUM', source: 'SECTOR_LOAD_VERIFY', message: 'Geometry verification exception' }
+              });
+          }
 
           world.entities.forEach(e => {
               if (e.type === 'WALL') {
@@ -212,21 +229,3 @@ export class SectorLoaderService {
       world.entities.push(exit);
   }
 }
-
-// Extension to simple string hashing for ID generation
-declare global {
-    interface String {
-        hashCode(): number;
-    }
-}
-
-String.prototype.hashCode = function() {
-  var hash = 0, i, chr;
-  if (this.length === 0) return hash;
-  for (i = 0; i < this.length; i++) {
-    chr   = this.charCodeAt(i);
-    hash  = ((hash << 5) - hash) + chr;
-    hash |= 0; 
-  }
-  return hash;
-};

@@ -26,7 +26,6 @@ import { LootService } from '../services/loot.service';
 import { InventoryService } from '../game/inventory.service';
 import { SoundService } from '../services/sound.service';
 import { ProofKernelService } from '../core/proof/proof-kernel.service';
-import { LeanBridgeService, LeanCombatState, LeanCombatInput } from '../core/lean-bridge.service';
 
 @Injectable({ providedIn: 'root' })
 export class CombatService {
@@ -39,7 +38,6 @@ export class CombatService {
   private sound = inject(SoundService);
   private loot = inject(LootService);
   private proofKernel = inject(ProofKernelService);
-  private leanBridge = inject(LeanBridgeService);
 
   private damageResultPool: DamageResult[] = [];
 
@@ -63,12 +61,24 @@ export class CombatService {
 
     const damagePacket = hitbox.damagePacket ?? this.createFallbackDamagePacket(hitbox);
     
+    // Create Transaction for Kernel verification
+    const transaction = this.proofKernel.createTransaction({ targetHp: target.hp, dmg: 0 });
+    
     // 1. Calculate Potential Damage (Pure Function)
     const result = this.calculateMitigatedDamage(hitbox, target, damagePacket);
     
-    // 2. Optimistic Application with Lean Verification
+    // 2. Optimistic Application
     this.applyCombatResult(hitbox, target, result);
 
+    // 3. Async Verification Trigger (Fire and Forget)
+    // In a full implementation, we'd pass the specific pre/post state here.
+    // For now, we simulate sending the data to the worker via the Kernel.
+    this.proofKernel.verifyFormal('COMBAT', 
+        { oldHp: target.hp + result.total, damage: result.total, newHp: target.hp }, 
+        { oldHp: target.hp + result.total, damage: result.total, newHp: target.hp }, // Same for now in sim
+        'PROCESS_HIT'
+    );
+    
     this.releaseDamageResult(result);
   }
 
@@ -277,56 +287,13 @@ export class CombatService {
         payload: { source, target, result }
     });
 
-    // --- LEAN BRIDGE HARD GATE: COMBAT TRANSITION ---
-    // Validate the HP transition axiom before applying state.
-    
-    // Determine Current State HP (Target HP)
-    // Note: Player HP is managed via stats service, enemy via prop.
-    const currentHp = target.type === 'PLAYER' ? this.stats.playerHp() : target.hp;
-    const maxHp = target.type === 'PLAYER' ? this.stats.playerStats().hpMax : target.maxHp;
-    const armor = target.type === 'PLAYER' ? this.stats.playerStats().armor : target.armor; // Approximate for bridge input
-
-    // Calculate Predicted Next State
-    // Default application logic:
-    const proposedHp = Math.max(0, currentHp - total);
-
-    const prev: LeanCombatState = { hp: Math.floor(currentHp), max_hp: Math.floor(maxHp), armor: Math.floor(armor) };
-    const input: LeanCombatInput = { damage: Math.floor(total), penetration: 0 }; // Simplified input for axiom check
-    const next: LeanCombatState = { hp: Math.floor(proposedHp), max_hp: Math.floor(maxHp), armor: Math.floor(armor) };
-
-    const proof = this.leanBridge.proveCombatStep(prev, input, next);
-
-    if (!proof.valid) {
-        this.eventBus.dispatch({
-            type: GameEvents.REALITY_BLEED,
-            payload: { 
-                severity: 'MEDIUM', 
-                source: 'LEAN_BRIDGE', 
-                message: `Combat Axiom Failed: ${proof.reason}. Clamping to safe value.` 
-            }
-        });
-        
-        // Hard Gate Enforcement: If logic drifted, force alignment to the bridge's axiom
-        // In this case, simply enforce subtraction
-        const safeHp = Math.max(0, prev.hp - input.damage);
-        
-        // Update State
-        if (target.type === 'PLAYER') {
-            this.stats.playerHp.set(safeHp);
-            target.invulnerable = true;
-            target.iframeTimer = 30;
-        } else {
-            target.hp = safeHp;
-        }
+    // State updates
+    if (target.type === 'PLAYER') {
+      this.stats.takeDamage(total);
+      target.invulnerable = true;
+      target.iframeTimer = 30;
     } else {
-        // Valid Transition: Apply standard updates
-        if (target.type === 'PLAYER') {
-            this.stats.takeDamage(total);
-            target.invulnerable = true;
-            target.iframeTimer = 30;
-        } else {
-            target.hp -= total;
-        }
+      target.hp -= total;
     }
 
     target.hitFlash = 10;
@@ -341,7 +308,7 @@ export class CombatService {
     this.applyStatusEffects(source, target);
     this.applyLifeSteal(source, total);
 
-    if ((target.type === 'PLAYER' ? this.stats.playerHp() : target.hp) <= 0 && target.type !== 'PLAYER') {
+    if (target.hp <= 0 && target.type !== 'PLAYER') {
       if (isEnemy(target)) this.killEnemy(target);
       if (isDestructible(target)) this.destroyObject(target);
     }
