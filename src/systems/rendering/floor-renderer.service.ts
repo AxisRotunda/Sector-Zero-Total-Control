@@ -37,17 +37,17 @@ export class FloorRendererService {
           Math.abs(cam.x - this.lastViewX) > this.CACHE_PADDING / 3 ||
           Math.abs(cam.y - this.lastViewY) > this.CACHE_PADDING / 3;
 
-      const cacheKey = `FLOOR_${zone.id}_${Math.floor(cam.x / 500)}`; // Simple spatial key approximation
+      const cacheKey = `FLOOR_${zone.id}_${Math.floor(cam.x / 500)}`; 
 
       if (needsRedraw) {
           this.updateCache(cacheKey, cam, zone, mapBounds, canvasWidth, canvasHeight);
       }
 
-      // Render latest cache
-      // Note: In a real robust system we'd look up the *correct* key for the current position
-      // For this MVP fix, we just use the most recently generated one which is implicitly the "current" one
       if (this.floorCache.has(cacheKey)) {
           const canvas = this.floorCache.get(cacheKey)!;
+          // Recalculate draw pos based on current cam vs cached cam center
+          // Actually updateCache sets lastViewX/Y so the cache represents that center. 
+          // We need to draw it at the world position corresponding to lastViewX/Y.
           const cacheCenterIso = IsoUtils.toIso(this.lastViewX, this.lastViewY, 0, this._p1);
           ctx.drawImage(
               canvas, 
@@ -63,9 +63,13 @@ export class FloorRendererService {
           if (this.floorCache.size >= this.MAX_CACHE_SIZE) {
               const firstKey = this.floorCache.keys().next().value;
               const evicted = this.floorCache.get(firstKey)!;
-              // CRITICAL: Free canvas memory
+              
+              // CRITICAL: Free canvas memory context
+              const eCtx = evicted.getContext('2d');
+              if (eCtx) eCtx.clearRect(0, 0, evicted.width, evicted.height);
               evicted.width = 0; 
               evicted.height = 0;
+              
               this.floorCache.delete(firstKey);
           }
       }
@@ -85,10 +89,23 @@ export class FloorRendererService {
 
       // Calculate dimensions
       const maxDim = RENDER_CONFIG.MAX_CANVAS_DIMENSION;
-      const calcW = Math.ceil((viewW / cam.zoom) + (this.CACHE_PADDING * 2));
-      const calcH = Math.ceil((viewH / cam.zoom) + (this.CACHE_PADDING * 2));
-      const width = Math.min(maxDim, calcW);
-      const height = Math.min(maxDim, calcH);
+      // viewW is canvasWidth / zoom.
+      // We want cache to cover viewW + padding.
+      const worldW = (viewW) + (this.CACHE_PADDING * 2);
+      const worldH = (viewH) + (this.CACHE_PADDING * 2);
+      
+      // Since canvas is drawn in screen space (scaled by zoom is handled by drawImage? No.)
+      // The floor cache is drawn *after* ctx.scale(zoom). 
+      // So the cache pixels should map 1:1 to world units? 
+      // No, drawImage draws pixels. If we are zoomed in (scale 2), 1 pixel on cache = 2 pixels on screen.
+      // High quality caching usually requires drawing at resolution * zoom.
+      // But standard implementation here seems to draw in World Space units (width = worldWidth).
+      // Let's stick to existing logic pattern: Cache size corresponds to World Units coverage.
+      // Actually RENDER_CONFIG.MAX_CANVAS_DIMENSION is 4096. 
+      // Let's cap it safely.
+      
+      const width = Math.min(maxDim, Math.ceil(worldW));
+      const height = Math.min(maxDim, Math.ceil(worldH));
       
       if (canvas.width !== width || canvas.height !== height) {
           canvas.width = width;
@@ -115,7 +132,9 @@ export class FloorRendererService {
       }
 
       ctx.save();
+      // Center the context
       ctx.translate(width/2, height/2);
+      // Translate BACK by the ISO center of the view
       const centerIso = IsoUtils.toIso(this.lastViewX, this.lastViewY, 0, this._p1);
       ctx.translate(-centerIso.x, -centerIso.y);
 
@@ -127,7 +146,8 @@ export class FloorRendererService {
       }
 
       // Render Decorations
-      const range = Math.max(width, height) * 1.0; 
+      // Use query range based on world units
+      const range = Math.max(width, height) * 0.8; 
       const entities = this.spatialHash.queryRect(
           this.lastViewX - range, 
           this.lastViewY - range, 
@@ -136,6 +156,7 @@ export class FloorRendererService {
           zone.id
       );
 
+      // Sort floor decos by Y-ish for layering (simple sort)
       entities.sort((a, b) => (a.x + a.y) - (b.x + b.y));
 
       for (const d of entities) {
@@ -147,17 +168,16 @@ export class FloorRendererService {
       ctx.restore();
   }
 
-  // --- DRAWING HELPERS (Same as before, just kept for completeness) ---
+  // --- DRAWING HELPERS ---
   
   private drawGridFloorBatch(ctx: CanvasRenderingContext2D, zone: Zone, mapBounds: any, width: number, height: number) {
       const tileSize = RENDER_CONFIG.FLOOR_TILE_SIZE;
-      const rangeX = width * 1.0; 
-      const rangeY = height * 1.0;
+      const range = Math.max(width, height) * 0.6;
       
-      const startX = Math.max(mapBounds.minX, Math.floor((this.lastViewX - rangeX) / tileSize) * tileSize);
-      const endX = Math.min(mapBounds.maxX, this.lastViewX + rangeX);
-      const startY = Math.max(mapBounds.minY, Math.floor((this.lastViewY - rangeY) / tileSize) * tileSize);
-      const endY = Math.min(mapBounds.maxY, this.lastViewY + rangeY);
+      const startX = Math.max(mapBounds.minX, Math.floor((this.lastViewX - range) / tileSize) * tileSize);
+      const endX = Math.min(mapBounds.maxX, this.lastViewX + range);
+      const startY = Math.max(mapBounds.minY, Math.floor((this.lastViewY - range) / tileSize) * tileSize);
+      const endY = Math.min(mapBounds.maxY, this.lastViewY + range);
 
       ctx.beginPath();
       ctx.fillStyle = '#ffffff'; 

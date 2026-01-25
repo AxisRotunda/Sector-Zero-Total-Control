@@ -1,53 +1,32 @@
 
-import { Injectable, inject, Injector } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { Entity, Zone } from '../../models/game.models';
 import { IsoUtils } from '../../utils/iso-utils';
 import { SpriteCacheService } from './sprite-cache.service';
 import { TextureGeneratorService, ThemeVisuals } from './texture-generator.service';
 import { DECORATIONS } from '../../config/decoration.config';
-import { StructurePrimitivesService } from './structure-primitives.service';
-import { IStructureRenderer, GateRenderer, MonolithRenderer, DynamicGlowRenderer } from './structure-strategies';
 
 @Injectable({ providedIn: 'root' })
 export class StructureRendererService {
   private cache = inject(SpriteCacheService);
   private textureGen = inject(TextureGeneratorService);
-  private prims = inject(StructurePrimitivesService);
-  private injector = inject(Injector);
-
-  private strategies: IStructureRenderer[] = [];
-
-  constructor() {
-      // Register strategies
-      // Ideally these are multi-providers, but manual registry is fine for minimal complexity
-      this.strategies = [
-          this.injector.get(GateRenderer),
-          this.injector.get(MonolithRenderer),
-          this.injector.get(DynamicGlowRenderer)
-          // Add BannerRenderer etc. as needed
-      ];
-  }
 
   drawStructure(ctx: CanvasRenderingContext2D, e: Entity, zone: Zone) {
       const theme = zone ? zone.theme : 'INDUSTRIAL';
       const visuals = this.textureGen.getThemeVisuals(theme);
 
-      // 1. Try Strategy
-      for (const strategy of this.strategies) {
-          if (strategy.canHandle(e)) {
-              strategy.render(ctx, e, visuals);
-              return;
-          }
-      }
-
-      // 2. Specialized Non-Strategy Legacy Renderers (Gradually migrating these is best practice)
-      // For now, keeping inline to match "Minimal Functional" req without over-engineering 20 files
+      // Strategy Routing (Internal Methods)
+      if (e.subType === 'GATE_SEGMENT') { this.renderGate(ctx, e, visuals); return; }
+      if (e.subType === 'MONOLITH') { this.renderMonolith(ctx, e, visuals); return; }
+      if (e.subType === 'DYNAMIC_GLOW') { this.renderDynamicGlow(ctx, e, visuals); return; }
+      
+      // Legacy Specialized
       if (e.subType === 'CABLE') { this.drawCable(ctx, e); return; }
       if (e.subType === 'BANNER') { this.drawBanner(ctx, e); return; }
       if (e.subType === 'HOLO_SIGN') { this.drawHoloSign(ctx, e); return; }
       if (e.subType === 'BARRIER') { this.drawEnergyBarrier(ctx, e); return; }
 
-      // 3. Generic Cached Prism Renderer
+      // Standard Prism Renderer
       const structureType = e.subType || 'WALL';
       let w = e.width || 40;
       let d = e.depth || e.width || 40;
@@ -64,9 +43,9 @@ export class StructureRendererService {
           if (config.detailStyle) detailStyle = config.detailStyle;
       }
 
-      const cacheKey = `STRUCT_${structureType}_${w}_${d}_${h}_${e.color}_${theme}_${e.locked}_${detailStyle}_v11`;
+      const cacheKey = `STRUCT_${structureType}_${w}_${d}_${h}_${e.color}_${theme}_${e.locked}_${detailStyle}_v12`;
       
-      const isoBounds = this.prims.calculateIsoBounds(w, d, h);
+      const isoBounds = this.calculateIsoBounds(w, d, h);
       const padding = 120;
       const canvasW = Math.ceil(isoBounds.maxX - isoBounds.minX + padding * 2);
       const canvasH = Math.ceil(isoBounds.maxY - isoBounds.minY + padding * 2);
@@ -77,14 +56,381 @@ export class StructureRendererService {
       const anchorY = -isoBounds.minY + padding;
 
       const sprite = this.cache.getOrRender(cacheKey, canvasW, canvasH, (bufferCtx) => {
-          this.prims.renderPrism(bufferCtx, w, d, h, anchorX, anchorY, e.color, visuals, detailStyle);
+          this.renderPrism(bufferCtx, w, d, h, anchorX, anchorY, e.color, visuals, detailStyle);
       });
 
       const pos = IsoUtils.toIso(e.x, e.y, e.z || 0); 
       ctx.drawImage(sprite, Math.floor(pos.x - anchorX), Math.floor(pos.y - anchorY)); 
   }
 
-  // --- LEGACY HELPERS (To be migrated to Strategies later) ---
+  // --- FLOOR DECORATIONS ---
+  drawFloorDecoration(ctx: CanvasRenderingContext2D, e: Entity) {
+      const w = e.width || 40;
+      // Use depth for Y-dimension if available, otherwise height (legacy data), otherwise width
+      const d = e.depth || e.height || w; 
+      
+      const hw = w / 2;
+      const hd = d / 2;
+
+      // Project 4 corners relative to entity center
+      const p1 = IsoUtils.toIso(e.x - hw, e.y - hd, 0);
+      const p2 = IsoUtils.toIso(e.x + hw, e.y - hd, 0);
+      const p3 = IsoUtils.toIso(e.x + hw, e.y + hd, 0);
+      const p4 = IsoUtils.toIso(e.x - hw, e.y + hd, 0);
+
+      if (e.subType === 'GRAFFITI') {
+          const center = IsoUtils.toIso(e.x, e.y, 0);
+          ctx.save();
+          ctx.translate(center.x, center.y);
+          // Squash vertically to simulate perspective on floor
+          ctx.scale(1, 0.5); 
+          
+          // Rotate slightly for style
+          ctx.rotate(-Math.PI / 12);
+
+          ctx.font = '900 40px Arial, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          
+          // Spray paint effect
+          ctx.shadowColor = e.color;
+          ctx.shadowBlur = 10;
+          ctx.fillStyle = e.color;
+          ctx.globalAlpha = 0.8;
+          
+          ctx.fillText(e.data?.label || 'RESIST', 0, 0);
+          ctx.restore();
+          return;
+      }
+
+      ctx.fillStyle = e.color || '#333';
+      
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.lineTo(p3.x, p3.y);
+      ctx.lineTo(p4.x, p4.y);
+      ctx.closePath();
+      ctx.fill();
+
+      // Simple details
+      if (e.subType === 'FLOOR_CRACK') {
+          ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y); 
+          ctx.lineTo(p3.x, p3.y);
+          ctx.stroke();
+      }
+  }
+
+  // --- INTERNAL STRATEGIES (Consolidated) ---
+
+  private renderGate(ctx: CanvasRenderingContext2D, e: Entity, visuals: ThemeVisuals) {
+      const w = e.width || 200;
+      const d = e.depth || 40;
+      const h = e.height || 300;
+      
+      const openness = e.openness || 0; 
+      const maxSlide = w * 0.45;
+      const slideAmount = maxSlide * openness;
+      const leftOffset = -w/4 - slideAmount;
+      const rightOffset = w/4 + slideAmount;
+      
+      const panelW = w / 2;
+      const isoBounds = this.calculateIsoBounds(panelW, d, h);
+      const padding = 60;
+      const cW = Math.ceil(isoBounds.maxX - isoBounds.minX + padding * 2);
+      const cH = Math.ceil(isoBounds.maxY - isoBounds.minY + padding * 2);
+      const aX = -isoBounds.minX + padding;
+      const aY = -isoBounds.minY + padding;
+
+      const leftKey = `GATE_PANEL_L_${w}_${d}_${h}_${e.color}_${visuals.edgeColor}_v4`;
+      const rightKey = `GATE_PANEL_R_${w}_${d}_${h}_${e.color}_${visuals.edgeColor}_${e.locked}_v4`;
+
+      const leftSprite = this.cache.getOrRender(leftKey, cW, cH, (bCtx) => {
+          this.renderPrism(bCtx, panelW, d, h, aX, aY, e.color, visuals, 'PLATING');
+          bCtx.translate(aX, aY);
+          bCtx.strokeStyle = '#facc15'; bCtx.lineWidth = 4;
+          const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
+          const baseB = p(panelW/2, d/2, 0);
+          bCtx.beginPath(); bCtx.moveTo(baseB.x - 20, baseB.y - 20); bCtx.lineTo(baseB.x, baseB.y); bCtx.stroke();
+          bCtx.translate(-aX, -aY);
+      });
+
+      const rightSprite = this.cache.getOrRender(rightKey, cW, cH, (bCtx) => {
+          this.renderPrism(bCtx, panelW, d, h, aX, aY, e.color, visuals, 'PLATING');
+          bCtx.translate(aX, aY);
+          const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
+          const topB = p(-panelW/2, d/2, h - 40); 
+          bCtx.fillStyle = e.locked ? '#ef4444' : '#22c55e';
+          bCtx.shadowColor = bCtx.fillStyle; bCtx.shadowBlur = 10;
+          bCtx.beginPath(); bCtx.arc(topB.x, topB.y, 6, 0, Math.PI*2); bCtx.fill();
+          bCtx.shadowBlur = 0;
+          bCtx.translate(-aX, -aY);
+      });
+
+      const worldPos = IsoUtils.toIso(e.x, e.y, 0);
+      const lIso = IsoUtils.toIso(leftOffset, 0, 0);
+      ctx.drawImage(leftSprite, Math.floor(worldPos.x + lIso.x - aX), Math.floor(worldPos.y + lIso.y - aY));
+      const rIso = IsoUtils.toIso(rightOffset, 0, 0);
+      ctx.drawImage(rightSprite, Math.floor(worldPos.x + rIso.x - aX), Math.floor(worldPos.y + rIso.y - aY));
+  }
+
+  private renderMonolith(ctx: CanvasRenderingContext2D, e: Entity, visuals: ThemeVisuals) {
+      const w = e.width || 200;
+      const d = e.depth || 200;
+      const h = e.height || 600;
+      const pos = IsoUtils.toIso(e.x, e.y, e.z || 0); 
+      
+      ctx.save();
+      ctx.translate(pos.x, pos.y);
+      
+      const t = Date.now() * 0.0005;
+      const halfW = w / 2; const halfD = d / 2;
+      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
+
+      const height = h + Math.sin(t * 2) * 10;
+
+      const topT = p(-halfW, -halfD, height); const topR = p(halfW, -halfD, height); 
+      const topB = p(halfW, halfD, height); const topL = p(-halfW, halfD, height);
+      const baseB = p(halfW, halfD, 0); const baseR = p(halfW, -halfD, 0); const baseL = p(-halfW, halfD, 0);
+
+      const hue = (t * 20) % 360;
+      const baseColor = `hsla(${hue}, 60%, 20%, 0.8)`;
+      const highlightColor = `hsla(${(hue + 180) % 360}, 80%, 60%, 0.4)`;
+
+      const grad = ctx.createLinearGradient(0, topT.y, 0, baseB.y);
+      grad.addColorStop(0, '#000000'); grad.addColorStop(0.5, baseColor); grad.addColorStop(1, '#000000');
+      
+      ctx.fillStyle = grad;
+      ctx.shadowBlur = 30; ctx.shadowColor = `hsla(${hue}, 80%, 50%, 0.3)`;
+
+      ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(baseR.x, baseR.y); ctx.lineTo(topR.x, topR.y); ctx.lineTo(topB.x, topB.y); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(baseL.x, baseL.y); ctx.lineTo(topL.x, topL.y); ctx.lineTo(topB.x, topB.y); ctx.fill();
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      ctx.fillStyle = highlightColor;
+      
+      const sliceH = height / 5;
+      for (let i = 0; i < 5; i++) {
+          const sliceOffset = (t * 2 + i) % 5;
+          if (sliceOffset < 1) continue; 
+          
+          const zStart = sliceOffset * sliceH;
+          const zEnd = zStart + 20; 
+          if (zEnd > height) continue;
+
+          const b1 = p(halfW, halfD, zStart); const b2 = p(-halfW, halfD, zStart);
+          const t1 = p(halfW, halfD, zEnd); const t2 = p(-halfW, halfD, zEnd);
+          
+          ctx.beginPath(); ctx.moveTo(b1.x, b1.y); ctx.lineTo(b2.x, b2.y); ctx.lineTo(t2.x, t2.y); ctx.lineTo(t1.x, t1.y); ctx.fill();
+      }
+      ctx.restore();
+
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1; ctx.globalAlpha = 0.5;
+      ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(topB.x, topB.y); ctx.stroke();
+      ctx.shadowBlur = 0; ctx.globalAlpha = 1.0;
+      
+      ctx.restore();
+  }
+
+  private renderDynamicGlow(ctx: CanvasRenderingContext2D, e: Entity, visuals: ThemeVisuals) {
+      const w = e.width || 150; 
+      const d = e.depth || 150;
+      const z = e.height || 0;
+      const pos = IsoUtils.toIso(e.x, e.y, e.z || 0);
+      
+      const cacheKey = `GLOW_GRATE_${w}_${d}_${e.color}_v2`;
+      
+      const isoBounds = this.calculateIsoBounds(w, d, 20);
+      const padding = 20;
+      const cW = Math.ceil(isoBounds.maxX - isoBounds.minX + padding * 2);
+      const cH = Math.ceil(isoBounds.maxY - isoBounds.minY + padding * 2);
+      const aX = -isoBounds.minX + padding;
+      const aY = -isoBounds.minY + padding;
+      
+      const sprite = this.cache.getOrRender(cacheKey, cW, cH, (bCtx) => {
+          bCtx.translate(aX, aY);
+          const hw = w / 2; const hd = d / 2;
+          const p = (lx: number, ly: number) => IsoUtils.toIso(lx, ly, 0);
+          
+          const tl = p(-hw, -hd); const tr = p(hw, -hd);
+          const br = p(hw, hd); const bl = p(-hw, hd);
+          
+          bCtx.fillStyle = '#0f172a';
+          bCtx.beginPath(); bCtx.moveTo(tl.x, tl.y); bCtx.lineTo(tr.x, tr.y); bCtx.lineTo(br.x, br.y); bCtx.lineTo(bl.x, bl.y); bCtx.fill();
+          
+          bCtx.save(); bCtx.globalCompositeOperation = 'screen';
+          const center = p(0,0);
+          const glowGrad = bCtx.createRadialGradient(center.x, center.y, w*0.1, center.x, center.y, w*0.6);
+          const color = e.color || '#f59e0b';
+          glowGrad.addColorStop(0, color); glowGrad.addColorStop(1, 'rgba(0,0,0,0)');
+          bCtx.fillStyle = glowGrad; bCtx.globalAlpha = 0.6;
+          bCtx.beginPath(); bCtx.moveTo(tl.x, tl.y); bCtx.lineTo(tr.x, tr.y); bCtx.lineTo(br.x, br.y); bCtx.lineTo(bl.x, bl.y); bCtx.fill(); bCtx.restore();
+
+          bCtx.strokeStyle = '#334155'; bCtx.lineWidth = 4;
+          for (let i = 0; i <= 6; i++) {
+              const t = i / 6; const x = -hw + (w * t);
+              const p1 = p(x, -hd); const p2 = p(x, hd);
+              bCtx.beginPath(); bCtx.moveTo(p1.x, p1.y); bCtx.lineTo(p2.x, p2.y); bCtx.stroke();
+          }
+          
+          bCtx.lineWidth = 6; bCtx.strokeStyle = '#475569';
+          bCtx.beginPath(); bCtx.moveTo(tl.x, tl.y); bCtx.lineTo(tr.x, tr.y); bCtx.lineTo(br.x, br.y); bCtx.lineTo(bl.x, bl.y); bCtx.closePath(); bCtx.stroke();
+          bCtx.translate(-aX, -aY);
+      });
+      
+      ctx.drawImage(sprite, Math.floor(pos.x - aX), Math.floor(pos.y + z - aY));
+  }
+
+  // --- PRIMITIVES (Merged from StructurePrimitivesService) ---
+
+  private calculateIsoBounds(width: number, length: number, height: number) {
+      const hw = width / 2; const hl = length / 2;
+      const corners = [ 
+          {x: -hw, y: -hl, z: 0}, {x: hw, y: -hl, z: 0}, {x: hw, y: hl, z: 0}, {x: -hw, y: hl, z: 0}, 
+          {x: -hw, y: -hl, z: height}, {x: hw, y: -hl, z: height}, {x: hw, y: hl, z: height}, {x: -hw, y: hl, z: height} 
+      ];
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (const c of corners) {
+          const iso = IsoUtils.toIso(c.x, c.y, c.z);
+          if (iso.x < minX) minX = iso.x; if (iso.x > maxX) maxX = iso.x;
+          if (iso.y < minY) minY = iso.y; if (iso.y > maxY) maxY = iso.y;
+      }
+      return { minX, maxX, minY, maxY };
+  }
+
+  private renderPrism(ctx: any, w: number, d: number, h: number, anchorX: number, anchorY: number, color: string, visuals: ThemeVisuals, detailStyle: string = 'NONE') {
+      ctx.translate(anchorX, anchorY);
+      const halfW = w / 2; const halfD = d / 2;
+      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
+
+      const baseL = p(-halfW, halfD, 0); const baseR = p(halfW, -halfD, 0); const baseB = p(halfW, halfD, 0); 
+      const topL = p(-halfW, halfD, h); const topR = p(halfW, -halfD, h); const topB = p(halfW, halfD, h); const topT = p(-halfW, -halfD, h);
+
+      const applyShade = (baseHex: string, multiplier: number) => {
+          const shift = Math.floor((multiplier - 1.0) * 100);
+          return this.textureGen.adjustColor(baseHex, shift);
+      };
+
+      const drawFace = (p1: any, p2: any, p3: any, p4: any, faceType: 'TOP' | 'LEFT' | 'RIGHT') => {
+          let multiplier = 1.0;
+          if (faceType === 'TOP') multiplier = 1.15;
+          else if (faceType === 'LEFT') multiplier = 1.0;
+          else if (faceType === 'RIGHT') multiplier = 0.7;
+
+          ctx.fillStyle = applyShade(color, multiplier);
+          ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.fill();
+          
+          if (visuals.pattern) {
+              ctx.fillStyle = visuals.pattern;
+              ctx.globalAlpha = visuals.fillOpacity * 0.4;
+              ctx.fill();
+              ctx.globalAlpha = 1.0;
+          }
+
+          if (faceType !== 'TOP' && detailStyle !== 'NONE') {
+              this.drawFaceDetails(ctx, p1, p2, p3, p4, faceType, detailStyle, w, h);
+          }
+      };
+
+      drawFace(baseB, baseR, topR, topB, 'RIGHT');
+      drawFace(baseB, baseL, topL, topB, 'LEFT');
+      drawFace(topT, topR, topB, topL, 'TOP');
+
+      // Edges
+      ctx.lineWidth = visuals.rimLight ? 2 : 1; 
+      ctx.strokeStyle = visuals.rimLight ? visuals.edgeColor : this.textureGen.adjustColor(color, 40);
+      if (visuals.rimLight) { ctx.shadowColor = visuals.edgeColor; ctx.shadowBlur = 10; }
+      
+      ctx.beginPath(); ctx.moveTo(topL.x, topL.y); ctx.lineTo(topB.x, topB.y); ctx.lineTo(topR.x, topR.y); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(topB.x, topB.y); ctx.lineTo(baseB.x, baseB.y); ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // Base Shadow Gradient
+      const grad = ctx.createLinearGradient(0, baseB.y - 40, 0, baseB.y);
+      grad.addColorStop(0, 'rgba(0,0,0,0)'); grad.addColorStop(1, 'rgba(0,0,0,0.6)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(baseR.x, baseR.y); ctx.lineTo(topR.x, topR.y - h + 40); ctx.lineTo(topB.x, topB.y - h + 40);
+      ctx.lineTo(topL.x, topL.y - h + 40); ctx.lineTo(baseL.x, baseL.y);
+      ctx.fill();
+
+      // Erosion
+      if (visuals.erosionLevel > 0) {
+          ctx.globalCompositeOperation = 'destination-out';
+          const cuts = Math.floor(h * visuals.erosionLevel * 0.2);
+          for(let i=0; i<cuts; i++) {
+              const t = Math.random();
+              const ex = topB.x + (baseB.x - topB.x) * t;
+              const ey = topB.y + (baseB.y - topB.y) * t;
+              const size = Math.random() * 10 + 2;
+              ctx.beginPath(); ctx.arc(ex, ey, size, 0, Math.PI*2); ctx.fill();
+          }
+          ctx.globalCompositeOperation = 'source-over';
+      }
+
+      ctx.translate(-anchorX, -anchorY);
+  }
+
+  private drawFaceDetails(ctx: any, pBottom: any, pOuter: any, pTopOuter: any, pTopInner: any, side: 'LEFT' | 'RIGHT' | 'TOP', style: string, w: number, h: number) {
+      if (side === 'TOP') return;
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(pBottom.x, pBottom.y); ctx.lineTo(pOuter.x, pOuter.y); ctx.lineTo(pTopOuter.x, pTopOuter.y); ctx.lineTo(pTopInner.x, pTopInner.y);
+      ctx.clip();
+
+      if (style === 'RIVETS') {
+          ctx.fillStyle = 'rgba(0,0,0,0.3)';
+          const steps = Math.ceil(h / 60);
+          for(let i=1; i<steps; i++) {
+              const t = i/steps;
+              const x1 = pBottom.x + (pTopInner.x - pBottom.x) * t;
+              const y1 = pBottom.y + (pTopInner.y - pBottom.y) * t;
+              ctx.beginPath(); ctx.arc(x1, y1, 2, 0, Math.PI*2); ctx.fill();
+              const x2 = pOuter.x + (pTopOuter.x - pOuter.x) * t;
+              const y2 = pOuter.y + (pTopOuter.y - pOuter.y) * t;
+              ctx.beginPath(); ctx.arc(x2, y2, 2, 0, Math.PI*2); ctx.fill();
+          }
+      } 
+      else if (style === 'CIRCUITS') {
+          ctx.strokeStyle = 'rgba(6, 182, 212, 0.4)'; ctx.lineWidth = 2;
+          const steps = 3;
+          for(let i=1; i<steps; i++) {
+              const t = i/steps;
+              const sx = pBottom.x + (pTopInner.x - pBottom.x) * t;
+              const sy = pBottom.y + (pTopInner.y - pBottom.y) * t;
+              const ex = pOuter.x + (pTopOuter.x - pOuter.x) * t;
+              const ey = pOuter.y + (pTopOuter.y - pOuter.y) * t;
+              ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke();
+          }
+      }
+      else if (style === 'PLATING') {
+          ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 1;
+          const plates = Math.ceil(h / 100);
+          for(let i=1; i<plates; i++) {
+              const t = i/plates;
+              const sx = pBottom.x + (pTopInner.x - pBottom.x) * t;
+              const sy = pBottom.y + (pTopInner.y - pBottom.y) * t;
+              const ex = pOuter.x + (pTopOuter.x - pOuter.x) * t;
+              const ey = pOuter.y + (pTopOuter.y - pOuter.y) * t;
+              ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke();
+          }
+      }
+      else if (style === 'GLYPHS') {
+          ctx.fillStyle = 'rgba(168, 85, 247, 0.2)';
+          if (Math.random() > 0.5) {
+              const cx = (pBottom.x + pOuter.x + pTopOuter.x + pTopInner.x) / 4;
+              const cy = (pBottom.y + pOuter.y + pTopOuter.y + pTopInner.y) / 4;
+              ctx.font = '20px monospace'; ctx.textAlign = 'center'; ctx.fillText('◊', cx, cy);
+          }
+      }
+      ctx.restore();
+  }
+
+  // --- LEGACY HELPERS ---
 
   private drawBanner(ctx: CanvasRenderingContext2D, e: Entity) {
       const w = e.width || 60; const h = e.height || 180; const pos = IsoUtils.toIso(e.x, e.y, e.z || 200);
@@ -121,20 +467,6 @@ export class StructureRendererService {
       const grad = ctx.createLinearGradient(0, p1.y, 0, p3.y); 
       grad.addColorStop(0, `${e.color}00`); grad.addColorStop(0.5, `${e.color}40`); grad.addColorStop(1, `${e.color}00`); 
       ctx.fillStyle = grad; ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.fill();
-      ctx.restore();
-  }
-
-  drawFloorDecoration(ctx: CanvasRenderingContext2D, e: Entity) {
-      const config = DECORATIONS[e.subType || ''] || { width: 40, depth: 40, height: 40, baseColor: '#333' };
-      const w = e.width || config.width; const h = e.height || config.depth; const pos = IsoUtils.toIso(e.x, e.y, 0);
-      ctx.save(); ctx.translate(pos.x, pos.y);
-      const hw = w/2; const hh = h/2;
-      const p1 = IsoUtils.toIso(-hw, hh, 0); const p2 = IsoUtils.toIso(hw, hh, 0);  
-      const p3 = IsoUtils.toIso(hw, -hh, 0); const p4 = IsoUtils.toIso(-hw, -hh, 0);
-      if (e.subType === 'RUG') {
-          ctx.fillStyle = e.data?.color || e.color || config.baseColor;
-          ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.fill();
-      }
       ctx.restore();
   }
 }

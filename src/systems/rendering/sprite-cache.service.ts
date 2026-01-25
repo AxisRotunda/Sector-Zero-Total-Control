@@ -1,6 +1,5 @@
 
 import { Injectable } from '@angular/core';
-import { RENDER_CONFIG } from './render.config';
 
 interface CacheEntry {
   canvas: HTMLCanvasElement | OffscreenCanvas;
@@ -16,6 +15,7 @@ export class SpriteCacheService {
   private readonly MAX_CACHE_SIZE_MB = 50; 
   private readonly BYTES_PER_PIXEL = 4;
   private currentSizeBytes = 0;
+  private pruneThreshold = this.MAX_CACHE_SIZE_MB * 1024 * 1024 * 0.9; // Prune at 90% full
 
   getOrRender(
     key: string, 
@@ -34,8 +34,8 @@ export class SpriteCacheService {
     // Estimate size of new sprite
     const estimatedSize = width * height * this.BYTES_PER_PIXEL;
 
-    // Prune if we would exceed limit
-    if (this.currentSizeBytes + estimatedSize > (this.MAX_CACHE_SIZE_MB * 1024 * 1024)) {
+    // OPTIMIZED: Only prune when approaching limit, not every frame
+    if (this.currentSizeBytes + estimatedSize > this.pruneThreshold) {
       this.prune(estimatedSize);
     }
 
@@ -69,16 +69,19 @@ export class SpriteCacheService {
     return canvas;
   }
 
-  private prune(neededSpace: number) {
-    // Sort by LRU
+  private prune(requiredSize: number) {
+    // Only remove enough entries to fit new sprite + 10% buffer
+    const targetSize = (this.MAX_CACHE_SIZE_MB * 1024 * 1024) - requiredSize - (5 * 1024 * 1024);
+    
+    // Sort by LRU (Oldest first)
     const entries = Array.from(this.cache.entries()).sort((a, b) => a[1].lastUsed - b[1].lastUsed);
     
     for (const [key, entry] of entries) {
-        if (this.currentSizeBytes + neededSpace <= (this.MAX_CACHE_SIZE_MB * 1024 * 1024)) {
+        if (this.currentSizeBytes <= targetSize) {
             break; // Enough space freed
         }
 
-        // Release memory explicitly if possible (mostly for DOM nodes)
+        // CRITICAL: Release memory explicitly if possible (mostly for DOM nodes)
         if (entry.canvas instanceof HTMLCanvasElement) {
             entry.canvas.width = 0;
             entry.canvas.height = 0;
