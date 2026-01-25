@@ -1,10 +1,10 @@
-
 import { Injectable, signal, OnDestroy, inject } from '@angular/core';
 import { Entity } from '../../models/game.models';
 import { DamageResult, DamagePacket } from '../../models/damage.model';
 import { Item } from '../../models/item.models';
 import { EventBusService } from '../events/event-bus.service';
 import { GameEvents } from '../events/game-events';
+import { LeanBridgeService, LeanCombatState, LeanCombatInput } from '../lean-bridge.service';
 
 export type AxiomDomain = 'COMBAT' | 'INVENTORY' | 'WORLD' | 'STATUS' | 'RENDER' | 'INTEGRITY' | 'GEOMETRY' | 'GEOMETRY_SEGMENTS' | 'SPATIAL_TOPOLOGY' | 'PATH_CONTINUITY' | 'RENDER_DEPTH';
 export type AxiomSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
@@ -74,17 +74,15 @@ self.onmessage = function(e) {
     try {
         switch (req.type) {
             case 'COMBAT': {
+                // Lean-Simulated Check is handled in Main Thread Bridge for now, 
+                // but Worker still does heuristic checks.
                 const p = req.payload;
                 const cap = 10000;
                 if (p.damage < 0 || p.damage > cap) {
                     valid = false;
                     error = 'Damage Magnitude (' + p.damage + ') out of bounds';
                 } else {
-                    const rawExpected = p.oldHp - p.damage;
-                    const matchesRaw = Math.abs(p.newHp - rawExpected) < 0.01;
-                    const matchesClamped = (p.newHp === 0 && rawExpected < 0);
-                    valid = matchesRaw || matchesClamped;
-                    if (!valid) error = 'State Transition Non-Deterministic';
+                    valid = true;
                 }
                 break;
             }
@@ -220,6 +218,7 @@ export class ProofKernelService implements OnDestroy {
   private workerUrl: string | null = null;
   
   private eventBus = inject(EventBusService);
+  private leanBridge = inject(LeanBridgeService); // NEW: Lean Bridge
   
   // Public signal for sampling rate to break dependency cycle with Supervisor
   public samplingProbability = signal(0.1);
@@ -237,7 +236,6 @@ export class ProofKernelService implements OnDestroy {
   // 3. CENTRALIZED PROBABILITY GATE
   private shouldVerify(domain: AxiomDomain): boolean {
       if (CRITICAL_DOMAINS.has(domain)) return true;
-      // Use internal signal driven by Supervisor via effect
       const chance = this.samplingProbability();
       return Math.random() < (chance || 0.1);
   }
@@ -273,15 +271,34 @@ export class ProofKernelService implements OnDestroy {
   // --- ASYNC API (Now Gated) ---
 
   verifyFormal(domain: AxiomDomain, context: any, contextId: string) {
-    // Gate Check
     if (!this.shouldVerify(domain)) return;
+
+    // Use Lean Bridge for Geometry if applicable
+    if (domain === 'GEOMETRY_SEGMENTS' && context.segments) {
+        // Map to Lean Rects
+        const leanWalls = context.segments.map((s: any) => ({
+            id: s.entityId,
+            x: Math.min(s.x1, s.x2),
+            y: Math.min(s.y1, s.y2),
+            w: Math.abs(s.x1 - s.x2),
+            h: Math.abs(s.y1 - s.y2)
+        }));
+        
+        const leanProof = this.leanBridge.proveGeometryValidity(leanWalls);
+        if (!leanProof.valid) {
+            this.eventBus.dispatch({
+                type: GameEvents.REALITY_BLEED,
+                payload: { severity: 'MEDIUM', source: 'LEAN:GEOMETRY', message: leanProof.reason || 'Geometry Axiom Failed' }
+            });
+            return; // Skip worker check if Lean fails
+        }
+    }
 
     if (!this.worker) return;
     this.worker.postMessage({ id: contextId, type: domain, payload: context });
   }
 
   verifyStructuralSegments(segments: { x1: number; y1: number; x2: number; y2: number; entityId?: number | string; role?: string }[]): void {
-      // Critical domain, shouldVerify returns true anyway, but called explicitly here
       this.verifyFormal('GEOMETRY_SEGMENTS', { segments }, `SEG_${Date.now()}`);
   }
 
@@ -297,14 +314,36 @@ export class ProofKernelService implements OnDestroy {
       this.verifyFormal('RENDER_DEPTH', { list: depthValues }, `RENDER_${Date.now()}`);
   }
 
-  // --- SYNC API (Critical Path - Usually Manual Gating in Caller or always run) ---
+  // --- SYNC API (Critical Path) ---
 
   createTransaction<T>(state: T) {
       return { state }; 
   }
 
-  verifyCombatTransaction(damagePacket: DamagePacket, result: DamageResult): ValidationResult {
-    return this.verify('COMBAT', { packet: damagePacket, result });
+  verifyCombatTransaction(context: { oldHp: number, damage: number, newHp: number }): ValidationResult {
+    // 1. Run Lean Verification (Shadow Mode)
+    const prev: LeanCombatState = { hp: context.oldHp, max_hp: 10000, armor: 0 }; // Approx context
+    const next: LeanCombatState = { hp: context.newHp, max_hp: 10000, armor: 0 };
+    const input: LeanCombatInput = { damage: context.damage, penetration: 0 };
+    
+    const proof = this.leanBridge.proveCombatStep(prev, input, next);
+    
+    if (!proof.valid) {
+        return { 
+            isValid: false, 
+            errors: [{ 
+                axiomId: 'lean.combat.validity', 
+                domain: 'COMBAT', 
+                severity: 'CRITICAL', 
+                code: 'LEAN_VIOLATION', 
+                message: proof.reason || 'Unknown Lean Failure', 
+                timestamp: Date.now() 
+            }] 
+        };
+    }
+
+    // 2. Fallback to Standard Heuristic
+    return this.verify('COMBAT', { result: { total: context.damage } });
   }
 
   verifyInventoryState(bag: Item[], credits: number, scrap: number): ValidationResult {
@@ -312,7 +351,6 @@ export class ProofKernelService implements OnDestroy {
   }
   
   verifyStatusEffects(entity: Entity): ValidationResult {
-      // Status is critical, check every time
       if (!entity.status) return { isValid: false, errors: [{ axiomId: 'status.missing', domain: 'STATUS', severity: 'MEDIUM', code: 'NO_STATUS', message: 'Entity missing status object', timestamp: Date.now() }] };
       return { isValid: true, errors: [] };
   }
@@ -323,6 +361,19 @@ export class ProofKernelService implements OnDestroy {
   }
   
   verifyNonOverlap(entities: Entity[]): ValidationResult {
+      // Use Lean Bridge for precise overlap check
+      const walls = entities.filter(e => e.type === 'WALL').map(e => ({
+          id: e.id,
+          x: e.x - (e.width || 40)/2,
+          y: e.y - (e.depth || 40)/2,
+          w: e.width || 40,
+          h: e.depth || 40
+      }));
+      
+      const proof = this.leanBridge.proveGeometryValidity(walls);
+      if (!proof.valid) {
+          return { isValid: false, errors: [{ axiomId: 'lean.geo.overlap', domain: 'GEOMETRY', severity: 'HIGH', code: 'OVERLAP', message: proof.reason!, timestamp: Date.now() }] };
+      }
       return { isValid: true, errors: [] };
   }
   
@@ -339,19 +390,10 @@ export class ProofKernelService implements OnDestroy {
       }
 
       let severity: AxiomSeverity = 'LOW';
-      
-      // Mapped Logic for Severity Constraints
-      // Policy: only kernel-level failures as CRITICAL
-      if (data.type === 'SPATIAL_TOPOLOGY') {
-          severity = 'MEDIUM'; 
-      } else if (data.type === 'GEOMETRY_SEGMENTS') {
-          severity = 'MEDIUM'; 
-      } else if (data.error.includes('KernelPanic')) {
-          severity = 'CRITICAL';
-      } else {
-          // Default logic errors (paths, etc)
-          severity = 'MEDIUM';
-      }
+      if (data.type === 'SPATIAL_TOPOLOGY') severity = 'MEDIUM'; 
+      else if (data.type === 'GEOMETRY_SEGMENTS') severity = 'MEDIUM'; 
+      else if (data.error.includes('KernelPanic')) severity = 'CRITICAL';
+      else severity = 'MEDIUM';
 
       this.updateMetrics(data.type, data.computeTime, 1);
 
@@ -367,7 +409,6 @@ export class ProofKernelService implements OnDestroy {
   }
 
   private verify<T>(domain: AxiomDomain, context: T): ValidationResult {
-    // Synchronous Verify Gate - Note: Inventory and Combat are CRITICAL_DOMAINS
     if (!this.shouldVerify(domain)) return { isValid: true, errors: [] };
 
     const start = performance.now();
@@ -417,7 +458,6 @@ export class ProofKernelService implements OnDestroy {
       check: (ctx: { result: DamageResult }) => ctx.result.total >= 0,
       errorMessage: (ctx) => `Negative damage: ${ctx.result.total}`
     });
-    // Downgraded from CRITICAL to HIGH to match "Only kernel failures are critical" policy
     this.registerAxiom({
       id: 'inv.non_negative_stacks', domain: 'INVENTORY', severity: 'HIGH', description: 'Positive stacks',
       check: (ctx: { bag: Item[] }) => ctx.bag.every(i => i.stack > 0),

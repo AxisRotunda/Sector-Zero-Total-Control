@@ -1,4 +1,3 @@
-
 import { Injectable, inject } from '@angular/core';
 import { WorldService } from './world.service';
 import { EntityPoolService } from '../../services/entity-pool.service';
@@ -51,6 +50,8 @@ export class SectorLoaderService {
           try {
               const walls = world.entities.filter(e => e.type === 'WALL');
               
+              // 1. Static Geometry Verification
+              // Convert entities to simple geometric segments for the proof kernel
               const segments = walls
                 .map((w, idx) => {
                     const kind = w.data?.kind ?? 'STRUCTURAL';
@@ -60,11 +61,8 @@ export class SectorLoaderService {
                     const wVal = w.width || 40;
                     const dVal = w.depth || 40;
                     
-                    // Extract Role for Intentional Overlap Logic
-                    // Default to 'DEFAULT' if not specified
                     const role = w.data?.role ?? 'DEFAULT';
                     
-                    // Determine primary axis
                     const vertical = dVal > wVal;
                     
                     if (vertical) {
@@ -89,8 +87,8 @@ export class SectorLoaderService {
                 })
                 .filter(s => s !== null) as { x1: number; y1: number; x2: number; y2: number; entityId: string | number; role: string }[];
 
-              // Dispatch to Kernel Worker - Fire and Forget
               if (segments.length > 0) {
+                  // Fire-and-forget call to the Kernel (which now uses LeanBridge)
                   this.proofKernel.verifyStructuralSegments(segments);
               }
               
