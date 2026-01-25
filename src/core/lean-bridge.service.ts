@@ -29,7 +29,7 @@ export interface GeometryDetails {
   bId?: number | string;
   i?: number;
   j?: number;
-  source: "SELFTEST" | "SECTOR_LOAD" | "WORLD_GEN";
+  source: "SELFTEST" | "SECTOR_LOAD" | "WORLD_GEN" | "CI_SCAN";
 }
 
 export interface LeanProofResult {
@@ -135,51 +135,52 @@ export class LeanBridgeService {
   }
 
   /**
-   * Deterministic validity check with minimal allocations.
-   * Complexity: O(n^2 / 2)
+   * Canonical geometry function: pure, deterministic, boolean.
+   * "Implement one canonical function validLevel(rects: LeanRect[]): boolean"
    */
-  private validLevel(rects: readonly LeanRect[]): { ok: boolean; pair?: [number, number] } {
+  public validLevel(rects: readonly LeanRect[]): boolean {
     const n = rects.length;
     for (let i = 0; i < n; i++) {
       const ri = rects[i];
       // Symmetry is exploited by iterating j = i + 1
       for (let j = i + 1; j < n; j++) { 
-        const rj = rects[j];
-        if (this.rectOverlap(ri, rj)) {
-          return { ok: false, pair: [i, j] };
+        if (this.rectOverlap(ri, rects[j])) {
+          return false;
         }
       }
     }
-    return { ok: true };
+    return true;
   }
 
   /**
-   * Simulates: `ValidLevel : List Rect -> Bool`
-   * Executable Boolean version: validLevelBool(walls) returns true iff no pair of distinct rectangles overlaps.
+   * Generates detailed proof result.
+   * Used when we need to know *why* it failed (the Pair).
    */
-  proveGeometryValidity(rects: readonly LeanRect[], sectorId?: string, source: GeometryDetails["source"] = "WORLD_GEN"): LeanProofResult {
-    const { ok, pair } = this.validLevel(rects);
+  public proveGeometryValidity(rects: readonly LeanRect[], sectorId?: string, source: GeometryDetails["source"] = "WORLD_GEN"): LeanProofResult {
+    const n = rects.length;
     
-    if (ok) {
-      return { valid: true };
-    }
-
-    if (!pair) {
-      return { valid: false, reason: "GEOMETRY_OVERLAP_UNKNOWN_PAIR" };
-    }
-
-    const [i, j] = pair;
-    return {
-      valid: false,
-      reason: "GEOMETRY_OVERLAP",
-      details: { 
-          i, j, 
-          aId: rects[i]?.id, 
-          bId: rects[j]?.id,
-          sectorId,
-          source
+    // We duplicate the loop here to extract the offending pair efficiently without allocating a closure/object in the boolean check
+    for (let i = 0; i < n; i++) {
+      const ri = rects[i];
+      for (let j = i + 1; j < n; j++) {
+        const rj = rects[j];
+        if (this.rectOverlap(ri, rj)) {
+           return {
+              valid: false,
+              reason: "GEOMETRY_OVERLAP",
+              details: { 
+                  i, j, 
+                  aId: ri.id, 
+                  bId: rj.id, 
+                  sectorId, 
+                  source 
+              }
+           };
+        }
       }
-    };
+    }
+    
+    return { valid: true };
   }
 
   // --- 4. Mechanistic verification and automation ---
@@ -246,26 +247,21 @@ export class LeanBridgeService {
   }
 
   public runGeometrySelfTest() {
-     // Deterministic edge cases & random small sets
-     // Fuzz block: small number, deterministic seed
      const fuzzCases = this.generateFuzzCases(32, 0xC0FFEE);
-
      let passed = 0;
      const allCases = [...GEOMETRY_CORPUS, ...fuzzCases];
 
      for (const c of allCases) {
-       const r = this.validLevel(c.rects);
-       if (r.ok !== c.expectOk) {
-         console.error(`[LeanBridge] SELF-TEST FAILED: ${c.name} (${c.reason})`, r);
-         // Call back to Kernel logic not handled here to avoid circular dep, 
-         // but ideally this service is leaf.
+       // Use canonical function for self-test
+       const ok = this.validLevel(c.rects);
+       if (ok !== c.expectOk) {
+         console.error(`[LeanBridge] SELF-TEST FAILED: ${c.name} (${c.reason}). Expected ${c.expectOk} got ${ok}`);
        } else {
          passed++;
        }
      }
      
      if (passed === allCases.length) {
-        // Silent success to avoid console noise, or debug log if needed
         // console.log(`[LeanBridge] Kernel Integrity Verified (${passed}/${allCases.length} axioms held)`);
      }
   }
@@ -273,30 +269,17 @@ export class LeanBridgeService {
   // --- 2. COMBAT DOMAIN ---
   // Reference: src/lean/combat.lean :: next_state
 
-  /**
-   * Simulates: `next_state : State -> Input -> State`
-   * Verifies that the transition from prev to next state respects the combat axioms.
-   */
   proveCombatStep(prev: LeanCombatState, input: LeanCombatInput, next: LeanCombatState): LeanProofResult {
     // Theorem 1: HP Consistency (Entropy Monotonicity)
-    // HP should never exceed MaxHP
     if (next.hp > next.max_hp) {
       return { valid: false, reason: 'Combat Axiom Violation: HP exceeds MaxHP' };
     }
 
     // Axiom 1: Damage Calculation (Nat Subtraction Saturation)
-    // effective_armor := defense.armor - input.penetration
     const effectiveArmor = Math.max(0, prev.armor - input.penetration);
-    
-    // damage := input.damage - effective_armor
     const expectedDamage = Math.max(0, input.damage - effectiveArmor);
-    
-    // new_hp := current.hp - damage
     const expectedHp = Math.max(0, prev.hp - expectedDamage);
 
-    // Strict equality check.
-    // We allow a minimal epsilon (0.1) solely for JS floating point drift,
-    // but semantically this enforces integer-like determinism.
     if (Math.abs(next.hp - expectedHp) > 0.1) {
       return { 
         valid: false, 

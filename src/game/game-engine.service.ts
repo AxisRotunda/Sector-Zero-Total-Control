@@ -20,6 +20,9 @@ import { SpatialGridService } from '../systems/spatial-grid.service';
 import { RealityCorrectorService } from '../core/reality-corrector.service';
 import { PerformanceTelemetryService } from '../systems/performance-telemetry.service';
 import { AdaptiveQualityService } from '../systems/adaptive-quality.service';
+import { ProofKernelService } from '../core/proof/proof-kernel.service';
+import { WORLD_GRAPH } from '../data/world/world-graph.config';
+import { LeanRect } from '../core/lean-bridge.service';
 
 @Injectable({
   providedIn: 'root'
@@ -45,10 +48,9 @@ export class GameEngineService {
   private gameState = inject(GameStateService);
   private spatialGrid = inject(SpatialGridService);
   private realityCorrector = inject(RealityCorrectorService);
-  
-  // New Adaptive System Injections
   private telemetry = inject(PerformanceTelemetryService);
   private adaptiveQuality = inject(AdaptiveQualityService);
+  private proofKernel = inject(ProofKernelService);
 
   isInMenu = this.gameState.isInMenu;
   private frameCount = 0;
@@ -56,7 +58,66 @@ export class GameEngineService {
   init(canvas: HTMLCanvasElement) {
     this.renderer.init(canvas);
     if (this.animationFrameId) cancelAnimationFrame(this.animationFrameId);
+    
+    // Expose headless test to window for automated runners
+    (window as any).runHeadlessGeometryTest = () => this.debugRunHeadlessTest();
+    
     this.loop();
+  }
+
+  /**
+   * 4. Automation and CI for “practical certainty”
+   * Simulates a boot-up scan of all geometry.
+   */
+  async debugRunHeadlessTest() {
+      console.log('%c[CI] STARTING GEOMETRY VERIFICATION', 'color: #06b6d4; font-weight: bold;');
+      
+      // 1. Boot Kernel in STRICT_DEV
+      this.proofKernel.setGeometryGateMode('STRICT_DEV');
+      
+      // 2. Run Self Test
+      console.log('[CI] Running Bridge Self-Test...');
+      this.proofKernel.debugRunGeometrySelfTest();
+      
+      // 3. Iterate Sector Templates
+      let failures = 0;
+      const zones = Object.values(WORLD_GRAPH.zones);
+      
+      console.log(`[CI] Scanning ${zones.length} Sectors...`);
+      
+      for (const config of zones) {
+          const tmpl = config.template;
+          if (!tmpl.geometry.walls || tmpl.geometry.walls.length === 0) continue;
+          
+          // Map to Canonical Model
+          const rects: LeanRect[] = tmpl.geometry.walls.map(w => ({
+              id: `static_wall_${w.x}_${w.y}`,
+              x: w.x - (w.w / 2),
+              y: w.y - (w.h || w.w / 2),
+              w: w.w,
+              h: w.depth || w.h // Use depth for height in top-down rect logic
+          }));
+          
+          try {
+              const proof = this.proofKernel.verifyGeometry(rects, tmpl.id, "CI_SCAN");
+              if (!proof.valid) {
+                  console.error(`[CI] FAILURE in ${tmpl.id}: ${proof.reason}`, proof.details);
+                  failures++;
+              }
+          } catch (e) {
+              console.error(`[CI] CRITICAL ERROR in ${tmpl.id}:`, e);
+              failures++;
+          }
+      }
+      
+      if (failures === 0) {
+          console.log('%c[CI] ALL SECTORS VERIFIED. ZERO VIOLATIONS.', 'color: #22c55e; font-weight: bold;');
+      } else {
+          console.error(`%c[CI] VERIFICATION FAILED. ${failures} Sectors tainted.`, 'color: #ef4444; font-weight: bold;');
+      }
+      
+      // Reset to SOFT_PROD for gameplay
+      this.proofKernel.setGeometryGateMode('SOFT_PROD');
   }
 
   destroy() {
@@ -96,11 +157,9 @@ export class GameEngineService {
   }
 
   private loop = () => {
-    // Start measuring frame duration
     const frameStart = performance.now();
 
     try {
-        // Run Adaptive Logic
         this.adaptiveQuality.evaluateAndAdjust();
 
         if (this.isInMenu()) {
@@ -127,7 +186,6 @@ export class GameEngineService {
 
     } catch (e) { console.error(e); }
 
-    // End measuring and record telemetry
     const frameDuration = performance.now() - frameStart;
     this.telemetry.recordFrame(frameDuration);
 
@@ -139,22 +197,15 @@ export class GameEngineService {
 
     this.frameCount++;
 
-    // 1. Grid Lifecycle Management
-    // Rebuild every 30 frames to clean up ghost entries/drift
     if (this.frameCount % 30 === 0) {
         this.spatialGrid.rebuildGrid(this.world.entities);
-        // Also ensure player is in grid
         this.spatialGrid.updateEntity(this.world.player, this.world.player.x, this.world.player.y);
     } else {
-        // Incremental updates for active movers
-        // Optimization: Only update entities that actually moved significantly
-        // For minimal implementation, we update moving entities
         this.world.entities.forEach(e => {
             if ((e.type === 'ENEMY' || e.type === 'PLAYER') && (e.vx !== 0 || e.vy !== 0)) {
                 this.spatialGrid.updateEntity(e, e.x, e.y);
             }
         });
-        // Always update player
         this.spatialGrid.updateEntity(this.world.player, this.world.player.x, this.world.player.y);
     }
 

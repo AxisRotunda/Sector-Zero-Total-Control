@@ -60,12 +60,6 @@ export interface AxiomStats {
   failures: number;
 }
 
-export interface GeometryLedgerEntry {
-    t: number;
-    aId: number | string;
-    bId: number | string;
-}
-
 export interface KernelDiagnostics {
   domains: { domain: string; checks: number; failures: number; avgMs: number; lastFailure: number }[];
   failingAxioms: AxiomStats[];
@@ -166,7 +160,7 @@ export class ProofKernelService implements OnDestroy {
   public samplingProbability = signal(0.1);
   
   // Observability Ledger
-  // Changed to SOFT_PROD to allow HUB loading despite geometry overlaps
+  // 2. Simple, explicit gate
   private geometryGateMode: GeometryGateMode = "SOFT_PROD";
   private geometryLedger: GeometryDetails[] = [];
   private geometryViolationCount = 0;
@@ -175,10 +169,6 @@ export class ProofKernelService implements OnDestroy {
   private axioms = new Map<string, Axiom>();
   private axiomStats = new Map<string, AxiomStats>();
 
-  // Mode Configuration
-  // In a real app, this might come from environment.ts
-  public isDevMode = false;
-
   constructor() {
     this.initMetrics();
     this.registerCoreAxioms();
@@ -186,8 +176,12 @@ export class ProofKernelService implements OnDestroy {
   }
 
   getGeometryGateMode(): GeometryGateMode { return this.geometryGateMode; }
+  
+  setGeometryGateMode(mode: GeometryGateMode) {
+      this.geometryGateMode = mode;
+      console.log(`[ProofKernel] Geometry Gate Mode set to: ${mode}`);
+  }
 
-  // 3. CENTRALIZED PROBABILITY GATE
   private shouldVerify(domain: AxiomDomain): boolean {
       if (CRITICAL_DOMAINS.has(domain)) return true;
       const chance = this.samplingProbability();
@@ -222,20 +216,19 @@ export class ProofKernelService implements OnDestroy {
     if (this.workerUrl) URL.revokeObjectURL(this.workerUrl);
   }
 
-  // --- ASYNC API (Now Gated) ---
-
   verifyFormal(domain: AxiomDomain, context: any, contextId: string) {
     if (!this.shouldVerify(domain)) return;
-
     if (!this.worker) return;
     this.worker.postMessage({ id: contextId, type: domain, payload: context });
   }
 
   // Refactored to use LeanBridge canonical geometry
-  // Now returns the proof result for gating logic
   verifyGeometry(rects: readonly LeanRect[], sectorId?: string, source: GeometryDetails["source"] = "SECTOR_LOAD"): LeanProofResult {
       const start = performance.now();
+      
+      // Use Canonical Interface
       const proof = this.leanBridge.proveGeometryValidity(rects, sectorId, source);
+      
       const time = performance.now() - start;
 
       if (!proof.valid) {
@@ -245,7 +238,6 @@ export class ProofKernelService implements OnDestroy {
           if (proof.details) {
               this.pushGeometryLedger(proof.details);
               
-              // Targeted logging for HUB remediation
               if (sectorId === "HUB") {
                   console.warn("[Geometry/HUB] Overlap details:", proof.details);
               }
@@ -264,8 +256,10 @@ export class ProofKernelService implements OnDestroy {
           this.updateMetrics('GEOMETRY', time, 0);
       }
 
+      // Gate Logic
       const mode = this.getGeometryGateMode();
       if (!proof.valid && mode === "STRICT_DEV" && source !== "SELFTEST") {
+         // Throw only when mode is STRICT_DEV and valid === false
          throw new Error(`[HardGate] Sector ${sectorId ?? "UNKNOWN"} failed geometry: ${proof.reason}`);
       }
       
@@ -291,28 +285,14 @@ export class ProofKernelService implements OnDestroy {
       this.verifyFormal('RENDER_DEPTH', { list: depthValues }, `RENDER_${Date.now()}`);
   }
 
-  // --- OBSERVABILITY API ---
-  getGeometryViolationCount(): number {
-      return this.geometryViolationCount;
-  }
+  getGeometryViolationCount(): number { return this.geometryViolationCount; }
+  getLastGeometryViolations(k: number): GeometryDetails[] { return this.geometryLedger.slice(-k); }
+  debugRunGeometrySelfTest(): void { this.leanBridge.runGeometrySelfTest(); }
 
-  getLastGeometryViolations(k: number): GeometryDetails[] {
-      return this.geometryLedger.slice(-k);
-  }
-
-  debugRunGeometrySelfTest(): void {
-      this.leanBridge.runGeometrySelfTest();
-  }
-
-  // --- SYNC API (Critical Path) ---
-
-  createTransaction<T>(state: T) {
-      return { state }; 
-  }
+  createTransaction<T>(state: T) { return { state }; }
 
   verifyCombatTransaction(context: { oldHp: number, damage: number, newHp: number }): ValidationResult {
-    // 1. Run Lean Verification (Shadow Mode)
-    const prev: LeanCombatState = { hp: context.oldHp, max_hp: 10000, armor: 0 }; // Approx context
+    const prev: LeanCombatState = { hp: context.oldHp, max_hp: 10000, armor: 0 }; 
     const next: LeanCombatState = { hp: context.newHp, max_hp: 10000, armor: 0 };
     const input: LeanCombatInput = { damage: context.damage, penetration: 0 };
     
@@ -331,7 +311,6 @@ export class ProofKernelService implements OnDestroy {
             }] 
         };
     }
-
     return this.verify('COMBAT', { result: { total: context.damage } });
   }
 
@@ -350,7 +329,6 @@ export class ProofKernelService implements OnDestroy {
   }
   
   verifyNonOverlap(entities: Entity[]): ValidationResult {
-      // Map entities to LeanRects for verification
       const rects: LeanRect[] = entities
         .filter(e => e.type === 'WALL' && e.width && e.depth)
         .map(e => ({
@@ -361,7 +339,7 @@ export class ProofKernelService implements OnDestroy {
             h: e.depth || 40
         }));
       
-      const proof = this.leanBridge.proveGeometryValidity(rects);
+      const proof = this.verifyGeometry(rects, "AD_HOC", "WORLD_GEN");
       
       if (!proof.valid) {
           return { 
@@ -384,8 +362,6 @@ export class ProofKernelService implements OnDestroy {
       return { isValid: true, errors: [] };
   }
 
-  // --- INTERNAL ---
-
   private handleProofResult(data: any) {
       if (data.valid) {
           this.updateMetrics(data.type, data.computeTime, 0);
@@ -397,7 +373,6 @@ export class ProofKernelService implements OnDestroy {
       else if (data.error && data.error.includes('KernelPanic')) severity = 'CRITICAL';
       else severity = 'MEDIUM';
 
-      // SAFETY: Explicitly downgrade severity if it defaulted to CRITICAL in worker but isn't a Panic
       if (severity === 'CRITICAL' && !data.error.includes('KernelPanic')) {
           severity = 'HIGH';
       }
