@@ -120,12 +120,12 @@ import { KernelSupervisorService } from '../core/kernel-supervisor.service';
                       <span class="text-cyan-400">{{ (supervisor.samplingMod() * 100).toFixed(0) }}%</span>
                   </div>
                   <div class="flex justify-between text-zinc-400">
-                      <span>Geo Ledger:</span>
-                      <span class="text-white">{{ kernelDiagnostics().geometry.ledgerSize }}</span>
+                      <span>Geo Checks:</span>
+                      <span class="text-white">{{ kernelDiagnostics().domains.GEOMETRY.checks }}</span>
                   </div>
                   <div class="flex justify-between text-zinc-400">
-                      <span>Cmb Ledger:</span>
-                      <span class="text-white">{{ kernelDiagnostics().combat.ledgerSize }}</span>
+                      <span>Cmb Checks:</span>
+                      <span class="text-white">{{ kernelDiagnostics().domains.COMBAT.checks }}</span>
                   </div>
                   <div class="mt-2 text-zinc-500 uppercase tracking-widest font-bold">Recent Violations</div>
                   <div class="flex flex-col gap-1 mt-1">
@@ -269,8 +269,11 @@ export class HudComponent {
           return this.proofKernel.getDiagnostics();
       }
       return { 
-          geometry: { checks: 0, violations: 0, avgMs: 0, ledgerSize: 0 },
-          combat: { checks: 0, violations: 0, avgMs: 0, ledgerSize: 0 },
+          domains: {
+              GEOMETRY: { checks: 0, violations: 0, avgMs: 0 },
+              COMBAT: { checks: 0, violations: 0, avgMs: 0 },
+              INVENTORY: { checks: 0, violations: 0, avgMs: 0 }
+          },
           gateMode: 'SOFT_PROD'
       };
   });

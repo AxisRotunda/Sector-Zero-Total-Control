@@ -1,23 +1,36 @@
 
-import { Injectable, signal, inject } from '@angular/core';
-import { LeanBridgeService, LeanRect, LeanProofResult, GeometryDetails, CombatDetails, LeanCombatState, LeanCombatInput } from '../lean-bridge.service';
+import { Injectable, inject } from '@angular/core';
+import { LeanBridgeService, LeanRect, LeanProofResult, GeometryDetails, CombatDetails, LeanCombatState, LeanCombatInput, LeanInventoryState, InventoryDetails } from '../lean-bridge.service';
 import { EventBusService } from '../events/event-bus.service';
 import { GameEvents } from '../events/game-events';
 
 export type GeometryGateMode = "STRICT_DEV" | "SOFT_PROD";
+export type ProofDomain = 'GEOMETRY' | 'COMBAT' | 'INVENTORY';
+
+export interface DomainStats {
+    checks: number;
+    violations: number;
+    totalMs: number;
+    ledgerSize: number;
+}
 
 export interface KernelDiagnostics {
-  geometry: { checks: number; violations: number; avgMs: number; ledgerSize: number };
-  combat: { checks: number; violations: number; avgMs: number; ledgerSize: number };
+  domains: Record<ProofDomain, { checks: number; violations: number; avgMs: number }>;
   gateMode: GeometryGateMode;
 }
 
-interface GateConfig<T> {
-    domain: 'GEOMETRY' | 'COMBAT';
+interface GateRequest<T> {
+    domain: ProofDomain;
     source: string;
     kernelCall: () => LeanProofResult<T>;
-    toDetails?: (result: LeanProofResult<T>) => any;
 }
+
+// Compact per-domain config table
+const DOMAIN_CONFIG: Record<ProofDomain, { severity: 'LOW'|'MEDIUM'|'HIGH'|'CRITICAL', throwStrict: boolean }> = {
+    GEOMETRY: { severity: 'HIGH', throwStrict: true },
+    COMBAT: { severity: 'MEDIUM', throwStrict: false },
+    INVENTORY: { severity: 'MEDIUM', throwStrict: false } // Inventory is recoverable via rollback
+};
 
 @Injectable({
   providedIn: 'root'
@@ -28,15 +41,16 @@ export class ProofKernelService {
 
   private gateMode: GeometryGateMode = "SOFT_PROD";
   
-  // Ledgers
+  // Ledgers & Metrics
   private readonly LEDGER_CAP = 50;
-  private geometryLedger: { timestamp: number, details: GeometryDetails }[] = [];
-  private combatLedger: { timestamp: number, details: CombatDetails }[] = [];
-
-  // Metrics
-  private metrics = {
-      geometry: { checks: 0, violations: 0, totalMs: 0 },
-      combat: { checks: 0, violations: 0, totalMs: 0 }
+  private ledgers: Record<ProofDomain, { timestamp: number, details: any }[]> = {
+      GEOMETRY: [], COMBAT: [], INVENTORY: []
+  };
+  
+  private metrics: Record<ProofDomain, { checks: number, violations: number, totalMs: number }> = {
+      GEOMETRY: { checks: 0, violations: 0, totalMs: 0 },
+      COMBAT: { checks: 0, violations: 0, totalMs: 0 },
+      INVENTORY: { checks: 0, violations: 0, totalMs: 0 }
   };
 
   constructor() {}
@@ -48,56 +62,52 @@ export class ProofKernelService {
 
   getGeometryGateMode() { return this.gateMode; }
 
-  // --- GENERIC GATE TEMPLATE ---
+  // --- GENERIC GATE PIPELINE ---
   
-  private runGate<T>(config: GateConfig<T>): boolean {
+  private runGate<T>(req: GateRequest<T>): boolean {
       const start = performance.now();
+      const config = DOMAIN_CONFIG[req.domain];
       
-      // 1. Call Kernel
-      const result = config.kernelCall();
+      // 1. Kernel Call (Delegated to LeanBridge)
+      const result = req.kernelCall();
       
       const duration = performance.now() - start;
-      const metricObj = config.domain === 'GEOMETRY' ? this.metrics.geometry : this.metrics.combat;
+      const metric = this.metrics[req.domain];
       
-      metricObj.checks++;
-      metricObj.totalMs += duration;
+      metric.checks++;
+      metric.totalMs += duration;
 
-      // 2. Interpret Result
+      // 2. Interpret Ok/Details
       if (result.valid) {
           return true;
       }
 
-      // 3. Update Ledger & Metrics on Failure
-      metricObj.violations++;
-      
-      if (config.domain === 'GEOMETRY' && result.details) {
-          this.geometryLedger.unshift({ timestamp: Date.now(), details: result.details as any });
-          if (this.geometryLedger.length > this.LEDGER_CAP) this.geometryLedger.pop();
-      } else if (config.domain === 'COMBAT' && result.details) {
-          this.combatLedger.unshift({ timestamp: Date.now(), details: result.details as any });
-          if (this.combatLedger.length > this.LEDGER_CAP) this.combatLedger.pop();
-      }
+      // 3. Update Metrics & Ledger
+      metric.violations++;
+      const ledger = this.ledgers[req.domain];
+      ledger.unshift({ timestamp: Date.now(), details: result.details || { reason: result.reason } });
+      if (ledger.length > this.LEDGER_CAP) ledger.pop();
 
-      // 4. Emit Event
+      // 4. Emit REALITY_BLEED (Event Bus)
       this.eventBus.dispatch({
           type: GameEvents.REALITY_BLEED,
           payload: { 
-              severity: 'HIGH', 
-              source: `KERNEL:${config.domain}:${config.source}`, 
-              message: result.reason || 'Kernel Validation Failed',
+              severity: config.severity, 
+              source: `LEAN:${req.domain}:${req.source}`, 
+              message: result.reason || 'Validation Failed',
               meta: result.details 
           }
       });
 
-      // 5. Conditional Throw
-      if (this.gateMode === "STRICT_DEV") {
-          throw new Error(`[KernelGate] STRICT VIOLATION in ${config.domain}: ${result.reason}`);
+      // 5. Strict Mode Enforcement
+      if (this.gateMode === "STRICT_DEV" && config.throwStrict) {
+          throw new Error(`[ProofKernel] STRICT VIOLATION in ${req.domain}: ${result.reason}`);
       }
 
       return false;
   }
 
-  // --- CONCRETE WRAPPERS ---
+  // --- DOMAIN EXPOSURE ---
 
   verifyGeometry(rects: readonly LeanRect[], sectorId: string = "UNKNOWN", source: string = "RUNTIME"): boolean {
       return this.runGate<GeometryDetails>({
@@ -115,46 +125,48 @@ export class ProofKernelService {
       });
   }
 
-  // --- DIAGNOSTICS & HELPERS ---
+  verifyInventoryState(state: LeanInventoryState, source: string = "TRANSACTION"): boolean {
+      return this.runGate<InventoryDetails>({
+          domain: 'INVENTORY',
+          source,
+          kernelCall: () => this.leanBridge.proveInventoryState(state)
+      });
+  }
+
+  // --- DIAGNOSTICS ---
 
   debugRunGeometrySelfTest() {
       this.leanBridge.runGeometrySelfTest();
   }
 
   getDiagnostics(): KernelDiagnostics {
-      const g = this.metrics.geometry;
-      const c = this.metrics.combat;
+      const d: any = {};
+      for (const key of ['GEOMETRY', 'COMBAT', 'INVENTORY'] as ProofDomain[]) {
+          const m = this.metrics[key];
+          d[key] = {
+              checks: m.checks,
+              violations: m.violations,
+              avgMs: m.checks > 0 ? m.totalMs / m.checks : 0
+          };
+      }
       return {
-          geometry: { 
-              checks: g.checks, 
-              violations: g.violations, 
-              avgMs: g.checks > 0 ? g.totalMs / g.checks : 0,
-              ledgerSize: this.geometryLedger.length 
-          },
-          combat: { 
-              checks: c.checks, 
-              violations: c.violations, 
-              avgMs: c.checks > 0 ? c.totalMs / c.checks : 0,
-              ledgerSize: this.combatLedger.length 
-          },
+          domains: d,
           gateMode: this.gateMode
       };
   }
   
-  getGeometryViolationCount() { return this.metrics.geometry.violations; }
-  getCombatViolationCount() { return this.metrics.combat.violations; }
-  getLastGeometryViolations(k: number) { return this.geometryLedger.slice(0, k).map(x => x.details); }
+  getGeometryViolationCount() { return this.metrics.GEOMETRY.violations; }
+  getCombatViolationCount() { return this.metrics.COMBAT.violations; }
   
-  // Legacy facade methods if needed
+  // Helpers / Facades
   createTransaction<T>(state: T) { return { state }; }
   
-  // Compatibility with old supervisor calls until fully migrated
+  // Legacy stubs
   verifySpatialGridTopology(cellCount: number, entityCount: number, cellSize: number) {}
   verifyPathContinuity(path: any[], gridSize: number) {}
   verifyRenderDepth(samples: any[]) {}
   verifyStatusEffects(e: any): any { return { isValid: true, errors: [] }; }
   verifyDialogueState(node: any, check: any): any { return { isValid: true, errors: [] }; }
-  verifyInventoryState(bag: any, c: any, s: any): any { return { isValid: true, errors: [] }; }
   computeChecksum(entities: any): string { return "CHECK"; }
   verifyNonOverlap(entities: any): any { return { isValid: true, errors: [] }; }
   verifyConnectivity(entities: any, bounds: any, start: any): any { return { isValid: true, errors: [] }; }

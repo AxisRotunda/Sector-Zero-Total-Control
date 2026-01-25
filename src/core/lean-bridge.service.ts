@@ -22,6 +22,12 @@ export interface LeanRect {
   h: number; // height (Nat, > 0)
 }
 
+export interface LeanInventoryState {
+  items: Array<{ id: string; count: number; maxStack: number }>;
+  credits: number;
+  scrap: number;
+}
+
 export interface CombatDetails {
     reason: string;
     expectedHp: number;
@@ -33,6 +39,11 @@ export interface GeometryDetails {
   aId?: number | string;
   bId?: number | string;
   source: string;
+}
+
+export interface InventoryDetails {
+  reason: string;
+  itemId?: string;
 }
 
 export interface LeanProofResult<T = any> {
@@ -93,9 +104,10 @@ export class LeanBridgeService {
 
   /**
    * KERNEL SURFACE: Explainer.
-   * Reuses internal predicate to extract failure details.
+   * Reuses internal predicate logic to extract failure details.
    */
   public proveGeometryValidity(rects: readonly LeanRect[], sectorId?: string, source: string = "UNKNOWN"): LeanProofResult<GeometryDetails> {
+    // We iterate exactly like the predicate to ensure 1:1 mapping
     const n = rects.length;
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
@@ -114,10 +126,6 @@ export class LeanBridgeService {
       }
     }
     
-    // Dev Sanity Check
-    // In a real build step, this would be stripped, but useful for now.
-    // console.assert(this.validLevel(rects) === true, "Kernel Divergence Detected!");
-    
     return { valid: true };
   }
 
@@ -127,12 +135,8 @@ export class LeanBridgeService {
    * Internal shared implementation for combat math.
    */
   private computeNextHp(prev: LeanCombatState, input: LeanCombatInput): number {
-      const effectiveArmor = Math.max(0, prev.armor - input.penetration);
-      // Simple linear mitigation model for kernel check
-      // Note: This must match the GAME logic exactly or allow tolerance
-      // For this kernel, we verify strict monotonicity and bounds
-      const damage = Math.max(0, input.damage - effectiveArmor); // Simplified
-      return Math.max(0, prev.hp - input.damage); // We verify against RAW damage mostly for safety
+      // Note: This logic must match the predicate's implicit expectations
+      return Math.max(0, prev.hp - input.damage);
   }
 
   /**
@@ -154,12 +158,17 @@ export class LeanBridgeService {
    * KERNEL SURFACE: Explainer.
    */
   public proveCombatStep(prev: LeanCombatState, input: LeanCombatInput, next: LeanCombatState): LeanProofResult<CombatDetails> {
+      // Directly check the predicate conditions
       if (next.hp > next.max_hp) {
           return { valid: false, reason: "HP_EXCEEDS_MAX", details: { reason: "HP > MaxHP", expectedHp: next.max_hp, actualHp: next.hp } };
       }
 
-      // Check approx consistency
       const expectedHp = Math.max(0, prev.hp - input.damage);
+      // We check consistency, wrapping the logic of validCombatStep
+      if (Math.abs(next.hp - expectedHp) > 1.0 && next.hp > prev.hp) {
+           return { valid: false, reason: "INVALID_HEALING", details: { reason: "HP increased during damage step", expectedHp, actualHp: next.hp } };
+      }
+      
       if (Math.abs(next.hp - expectedHp) > 1.0) {
           return {
               valid: false,
@@ -172,6 +181,32 @@ export class LeanBridgeService {
           };
       }
 
+      return { valid: true };
+  }
+
+  // --- 3. INVENTORY KERNEL ---
+
+  public validInventoryState(state: LeanInventoryState): boolean {
+      if (state.credits < 0 || state.scrap < 0) return false;
+      for (const item of state.items) {
+          if (item.count <= 0) return false; // Vacancy violation
+          if (item.count > item.maxStack) return false; // Overflow
+      }
+      return true;
+  }
+
+  public proveInventoryState(state: LeanInventoryState): LeanProofResult<InventoryDetails> {
+      if (state.credits < 0) return { valid: false, reason: "NEGATIVE_CREDITS", details: { reason: "Credits < 0" } };
+      if (state.scrap < 0) return { valid: false, reason: "NEGATIVE_SCRAP", details: { reason: "Scrap < 0" } };
+      
+      for (const item of state.items) {
+          if (item.count <= 0) {
+              return { valid: false, reason: "VACANT_ITEM", details: { reason: "Item count <= 0", itemId: item.id } };
+          }
+          if (item.count > item.maxStack) {
+              return { valid: false, reason: "STACK_OVERFLOW", details: { reason: "Item count > maxStack", itemId: item.id } };
+          }
+      }
       return { valid: true };
   }
 
@@ -199,7 +234,5 @@ export class LeanBridgeService {
          console.error("[LeanBridge] CRITICAL: Self-test failed valid input.");
          throw new Error("Kernel Integrity Failure");
      }
-     
-     // console.log("[LeanBridge] Kernel Self-Test OK.");
   }
 }

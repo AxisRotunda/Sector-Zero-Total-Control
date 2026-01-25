@@ -1,5 +1,5 @@
 
-import { Injectable, inject, signal, computed, effect } from '@angular/core';
+import { Injectable, inject, signal, computed } from '@angular/core';
 import { EventBusService } from './events/event-bus.service';
 import { GameEvents, RealityBleedPayload } from './events/game-events';
 import { RealityCorrectorService } from './reality-corrector.service';
@@ -71,7 +71,6 @@ export class KernelSupervisorService {
 
   getGeometryViolationCount() { return this.proofKernel.getGeometryViolationCount(); }
   getCombatViolationCount() { return this.proofKernel.getCombatViolationCount(); }
-  getLastGeometryViolations(k: number) { return this.proofKernel.getLastGeometryViolations(k); }
 
   private subscribeToBleeds() {
       this.eventBus.on(GameEvents.REALITY_BLEED)
@@ -90,15 +89,20 @@ export class KernelSupervisorService {
           ...v
       ].slice(0, 8)); 
 
-      const msg = `[Supervisor] ${payload.source}: ${payload.message} (Sev: ${payload.severity}, Pen: -${weight})`;
-      if (payload.severity === 'CRITICAL') {
-          console.error(msg);
-      } else {
-          console.warn(msg);
+      const msg = `[Supervisor] ${payload.source}: ${payload.message}`;
+      if (payload.severity === 'CRITICAL') console.error(msg);
+      else console.warn(msg);
+
+      // Immune Loop: Trigger Corrections based on Source Pattern
+      if (payload.source.startsWith('LEAN:GEOMETRY')) {
+          this.corrector.triggerCorrection('SPATIAL');
+      } else if (payload.source.startsWith('LEAN:COMBAT')) {
+          this.corrector.triggerCorrection('COMBAT');
+      } else if (payload.source.startsWith('LEAN:INVENTORY')) {
+          this.corrector.triggerCorrection('INVENTORY');
       }
 
       if (payload.severity === 'CRITICAL' && !this.emergencyCapActive()) {
-          console.warn('[Supervisor] Stability Critical. Engaging Emergency Caps.');
           this.adaptiveQuality.setSafetyCap('MEDIUM');
           this.emergencyCapActive.set(true);
       }
@@ -109,7 +113,6 @@ export class KernelSupervisorService {
           this.stabilityScore.update(s => Math.min(100, s + KERNEL_CONFIG.RECOVERY_RATE));
           
           if (this.stabilityScore() > KERNEL_CONFIG.THRESHOLDS.STABLE && this.emergencyCapActive()) {
-              console.log('[Supervisor] Stability recovered. Disengaging Emergency Locks.');
               this.emergencyCapActive.set(false);
           }
       }, 1000);

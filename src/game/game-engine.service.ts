@@ -23,6 +23,7 @@ import { AdaptiveQualityService } from '../systems/adaptive-quality.service';
 import { ProofKernelService } from '../core/proof/proof-kernel.service';
 import { WORLD_GRAPH } from '../data/world/world-graph.config';
 import { GeometryMapping } from '../utils/geometry-mapping.util';
+import { LeanInventoryState } from '../core/lean-bridge.service';
 
 @Injectable({
   providedIn: 'root'
@@ -59,57 +60,78 @@ export class GameEngineService {
     this.renderer.init(canvas);
     if (this.animationFrameId) cancelAnimationFrame(this.animationFrameId);
     
-    // Expose headless test to window for automated runners
+    // Expose headless tests
     (window as any).runHeadlessGeometryTest = () => this.runHeadlessGeometryTest();
+    (window as any).runHeadlessInventoryTest = () => this.runHeadlessInventoryTest();
     
     this.loop();
   }
 
   /**
-   * 4. Automation and CI for “practical certainty”
-   * Sets STRICT_DEV mode and verifies all static geometry in the graph.
+   * 4. Automation: CI geometry check.
    */
   async runHeadlessGeometryTest() {
       console.group('%c[CI] HEADLESS GEOMETRY VERIFICATION', 'color: #a855f7; font-weight: bold; font-size: 14px;');
-      
-      // 1. Boot Kernel in STRICT_DEV (This ensures any failure THROWS)
       this.proofKernel.setGeometryGateMode('STRICT_DEV');
-      
       try {
-          // 2. Run Self Test
           console.log('[CI] Running Bridge Self-Test...');
           this.proofKernel.debugRunGeometrySelfTest();
           
-          // 3. Iterate Sector Templates
           let totalZones = 0;
           const zones = Object.values(WORLD_GRAPH.zones);
           console.log(`[CI] Scanning ${zones.length} Zones in Graph...`);
           
           for (const config of zones) {
               const tmpl = config.template;
-              
-              // Skip zones with no static walls
               if (!tmpl.geometry.walls || tmpl.geometry.walls.length === 0) continue;
-              
               totalZones++;
-              
-              // Map to Canonical Model using shared mapping module
               const rects = tmpl.geometry.walls.map((w, index) => 
                   GeometryMapping.fromWallTemplate(w, index, tmpl.id)
               );
-              
-              // This CALL will throw if invalid because we are in STRICT_DEV
               this.proofKernel.verifyGeometry(rects, tmpl.id, "CI_SCAN");
           }
-          
-          console.log(`%c[CI] SUCCESS. Verified ${totalZones} Zones. No Overlaps.`, 'color: #22c55e; font-weight: bold;');
-          
+          console.log(`%c[CI] SUCCESS. Verified ${totalZones} Zones.`, 'color: #22c55e; font-weight: bold;');
       } catch (e: any) {
           console.error(`%c[CI] CRITICAL FAILURE: ${e.message}`, 'color: #ef4444; font-weight: bold;');
           throw e;
       } finally {
-          // Always reset to SOFT_PROD so the game doesn't crash if played after test
           this.proofKernel.setGeometryGateMode('SOFT_PROD');
+          console.groupEnd();
+      }
+  }
+
+  /**
+   * 5. Automation: Inventory regression test.
+   */
+  async runHeadlessInventoryTest() {
+      console.group('%c[CI] INVENTORY VERIFICATION', 'color: #06b6d4; font-weight: bold;');
+      try {
+          // Scenario 1: Valid State
+          const validState: LeanInventoryState = {
+              items: [{ id: '1', count: 5, maxStack: 10 }],
+              credits: 100,
+              scrap: 50
+          };
+          if (!this.proofKernel.verifyInventoryState(validState, "CI_TEST_VALID")) {
+              throw new Error("Failed valid inventory check");
+          }
+
+          // Scenario 2: Invalid State (Negative count)
+          const invalidState: LeanInventoryState = {
+              items: [{ id: '2', count: -1, maxStack: 10 }],
+              credits: 100,
+              scrap: 50
+          };
+          
+          // We expect this to return false (fail validation)
+          if (this.proofKernel.verifyInventoryState(invalidState, "CI_TEST_INVALID")) {
+              throw new Error("Failed to catch invalid inventory state");
+          }
+
+          console.log(`%c[CI] SUCCESS. Inventory Logic Verified.`, 'color: #22c55e; font-weight: bold;');
+      } catch (e: any) {
+          console.error(`%c[CI] INVENTORY FAILURE: ${e.message}`, 'color: #ef4444;');
+      } finally {
           console.groupEnd();
       }
   }
