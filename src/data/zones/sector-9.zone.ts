@@ -15,7 +15,9 @@ export const SECTOR_9_ZONE: ZoneTemplate = {
       { x: 300, y: -2800, w: 60, h: 400, height: 250, color: '#27272a' },
       
       // Broken Gate debris
-      { x: -150, y: -2600, w: 100, h: 40, height: 50, color: '#3f3f46' },
+      // Adjusted Y from -2600 to -2580 to prevent overlap with the funnel wall at y:-2800 (height 400, ends at -2600)
+      // Debris height 40, half-height 20. -2580 - 20 = -2600. Perfect flush contact.
+      { x: -150, y: -2580, w: 100, h: 40, height: 50, color: '#3f3f46', data: { id: 'debris_gate', kind: 'DECORATIVE' } },
       
       // --- Main Highway (The Spine) ---
       { x: -500, y: -1000, w: 40, h: 2000, height: 180, color: '#44403c' },

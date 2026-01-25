@@ -98,9 +98,10 @@ self.onmessage = function(e) {
             case 'GEOMETRY_OVERLAP':
                 // Theorem: Disjoint Rectangles (Separating Axis)
                 // Forall A, B in Entities: Intersect(A, B) -> Area(Intersection) < Epsilon
-                // Input: list of {x, y, w, h, entityId?}
+                // Input: list of {x, y, w, h, entityId?, kind?}
                 const entities = req.payload.entities;
                 valid = true;
+                const EPS = 1.0; // Tolerance for flush contact
                 
                 // O(N^2) check - typically optimized via Quadtree in C++, brute force here for Proof concept
                 outer: for (let i = 0; i < entities.length; i++) {
@@ -111,8 +112,14 @@ self.onmessage = function(e) {
                         const x_overlap = overlap(a.x - a.w/2, a.x + a.w/2, b.x - b.w/2, b.x + b.w/2);
                         const y_overlap = overlap(a.y - a.h/2, a.y + a.h/2, b.y - b.h/2, b.y + b.h/2);
                         
-                        // Tolerance of 1 unit to allow flush contacts
-                        if (x_overlap > 1.0 && y_overlap > 1.0) { 
+                        if (x_overlap > EPS && y_overlap > EPS) { 
+                            // Semantic Filter: Only enforce strict Euclidean separation for STRUCTURAL hulls
+                            const kindA = a.kind || 'STRUCTURAL';
+                            const kindB = b.kind || 'STRUCTURAL';
+                            
+                            // If either is decorative/phantom, allow overlap
+                            if (kindA !== 'STRUCTURAL' || kindB !== 'STRUCTURAL') continue;
+
                             valid = false;
                             const idA = a.entityId !== undefined ? a.entityId : i;
                             const idB = b.entityId !== undefined ? b.entityId : j;
@@ -346,7 +353,7 @@ export class ProofKernelService implements OnDestroy {
       this.verifyFormal('PATH_CONTINUITY', { path, gridSize }, `PATH_${Date.now()}`);
   }
 
-  verifyGeometryOverlap(entities: {x: number, y: number, w: number, h: number, entityId?: string | number}[]): void {
+  verifyGeometryOverlap(entities: {x: number, y: number, w: number, h: number, entityId?: string | number, kind?: string}[]): void {
       this.verifyFormal('GEOMETRY_OVERLAP', { entities }, `GEO_${Date.now()}`);
   }
 

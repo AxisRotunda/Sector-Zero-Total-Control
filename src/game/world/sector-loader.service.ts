@@ -46,10 +46,11 @@ export class SectorLoaderService {
           // Check for illegal overlaps in static geometry that might trap players or cause z-fighting
           const walls = world.entities.filter(e => e.type === 'WALL');
           
-          // Enhanced Snapshot with Identity Metadata
+          // Enhanced Snapshot with Identity Metadata and Semantic Kind
           const geometrySnapshots = walls.map((w, idx) => ({
               kernelId: idx,
               entityId: w.data?.id ?? w.id, // Prefer authored ID if available, else runtime ID
+              kind: w.data?.kind ?? 'STRUCTURAL', // Default to STRUCTURAL if not tagged
               x: w.x, 
               y: w.y, 
               w: w.width || 40, 
@@ -106,7 +107,7 @@ export class SectorLoaderService {
           if (!wall.locked) wall.color = '#22c55e';
       }
       
-      // Preserve template data (ID, etc)
+      // Preserve template data (ID, kind, etc)
       if (def.data) {
           wall.data = { ...def.data };
       }
