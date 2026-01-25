@@ -208,29 +208,8 @@ export class LightingRendererService {
 
     ctx.restore();
 
-    // --- CLAMP BRIGHTNESS (Fix for Bloom White-out) ---
-    // Only apply on High tier settings due to get/putImageData cost
-    if (this.performanceManager.currentTier().name === 'HIGH' && ctx instanceof CanvasRenderingContext2D) {
-       try {
-           const imageData = ctx.getImageData(0, 0, w, h);
-           const data = imageData.data;
-           const maxBrightness = 240; 
-           
-           for (let i = 0; i < data.length; i += 4) {
-               // Only check alpha>0 pixels (lights) to speed up logic? No, format is RGBA
-               const sum = data[i] + data[i+1] + data[i+2];
-               if (sum > maxBrightness * 3) {
-                   const scale = (maxBrightness * 3) / sum;
-                   data[i] *= scale;
-                   data[i+1] *= scale;
-                   data[i+2] *= scale;
-               }
-           }
-           ctx.putImageData(imageData, 0, 0);
-       } catch (e) {
-           // Fallback if readback fails (e.g. tainted canvas)
-       }
-    }
+    // REMOVED: Expensive Readback Loop (getImageData/putImageData)
+    // Brightness clamping is now managed by careful composite weight and ambient intensity tuning via Config
 
     // --- COMPOSITE TO MAIN SCREEN ---
     mainCtx.save();

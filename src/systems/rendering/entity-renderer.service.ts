@@ -13,7 +13,14 @@ export class EntityRendererService {
   private structureRenderer = inject(StructureRendererService);
   private unitRenderer = inject(UnitRendererService);
   private effectRenderer = inject(EffectRendererService);
-  private world = inject(WorldService); // Inject world to get current zone context if needed
+  private world = inject(WorldService); 
+
+  // Pooled Vectors for Zero-Alloc Rendering
+  private _iso = { x: 0, y: 0 };
+  private _p1 = { x: 0, y: 0 };
+  private _p2 = { x: 0, y: 0 };
+  private _p3 = { x: 0, y: 0 };
+  private _p4 = { x: 0, y: 0 };
 
   drawDecoration(ctx: CanvasRenderingContext2D, e: Entity) {
       if (['RUG', 'FLOOR_CRACK', 'GRAFFITI', 'TRASH'].includes(e.subType || '')) {
@@ -70,7 +77,7 @@ export class EntityRendererService {
 
   drawPickup(ctx: CanvasRenderingContext2D, e: Entity) {
     if (!e.itemData) return;
-    const pos = IsoUtils.toIso(e.x, e.y, e.z); 
+    const pos = IsoUtils.toIso(e.x, e.y, e.z, this._iso); 
     ctx.save(); ctx.translate(pos.x, pos.y);
     const scale = 1 + Math.sin(Date.now() * 0.005) * 0.1;
     ctx.scale(scale, scale);
@@ -79,56 +86,26 @@ export class EntityRendererService {
   }
 
   drawExit(ctx: CanvasRenderingContext2D, e: Entity) {
-      const pos = IsoUtils.toIso(e.x, e.y, e.z);
+      const pos = IsoUtils.toIso(e.x, e.y, e.z, this._iso);
       ctx.save(); 
       ctx.translate(pos.x, pos.y);
       
-      // Determine if this is a "Gate" type exit (rectangular) or standard (circular)
       const isGate = e.color === '#ef4444' || e.locked || e.color === '#991b1b'; 
       
       if (isGate) {
-          // Render as a holographic floor threshold
           ctx.scale(1, 0.5); 
-          const pulse = (Math.sin(Date.now() * 0.005) + 1) * 0.5; // 0 to 1
-          
-          // Background Glow
+          const pulse = (Math.sin(Date.now() * 0.005) + 1) * 0.5; 
           ctx.fillStyle = e.color; 
           ctx.globalAlpha = 0.2 + pulse * 0.1;
-          
-          const w = 140;
-          const h = 60;
-          
-          // Draw dashed border rectangle
-          ctx.strokeStyle = e.color;
-          ctx.lineWidth = 2;
-          ctx.setLineDash([10, 5]);
-          ctx.strokeRect(-w/2, -h/2, w, h);
-          ctx.setLineDash([]);
-          
-          // Fill
+          const w = 140; const h = 60;
+          ctx.strokeStyle = e.color; ctx.lineWidth = 2; ctx.setLineDash([10, 5]); ctx.strokeRect(-w/2, -h/2, w, h); ctx.setLineDash([]);
           ctx.fillRect(-w/2, -h/2, w, h);
-          
-          // Status Text
-          ctx.globalAlpha = 0.8;
-          ctx.fillStyle = '#fff';
-          ctx.font = 'bold 12px monospace';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
+          ctx.globalAlpha = 0.8; ctx.fillStyle = '#fff'; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           ctx.fillText(e.locked ? 'LOCKED' : 'ACCESS GRANTED', 0, 0);
-          
       } else {
-          // Standard Circular Exit
-          ctx.scale(1, 0.5);
-          ctx.fillStyle = e.color; 
-          ctx.globalAlpha = 0.4;
-          ctx.beginPath(); ctx.arc(0, 0, e.radius, 0, Math.PI*2); ctx.fill();
-          
-          // Inner ring
-          ctx.strokeStyle = '#fff';
-          ctx.lineWidth = 2;
-          ctx.beginPath(); ctx.arc(0, 0, e.radius * 0.7, 0, Math.PI*2); ctx.stroke();
+          ctx.scale(1, 0.5); ctx.fillStyle = e.color; ctx.globalAlpha = 0.4; ctx.beginPath(); ctx.arc(0, 0, e.radius, 0, Math.PI*2); ctx.fill();
+          ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, e.radius * 0.7, 0, Math.PI*2); ctx.stroke();
       }
-      
       ctx.restore();
   }
   
@@ -142,104 +119,60 @@ export class EntityRendererService {
 
   // Draw Riftgate / Personal Rift
   private drawRiftgate(ctx: CanvasRenderingContext2D, e: Entity) {
-      const pos = IsoUtils.toIso(e.x, e.y, 40);
+      const pos = IsoUtils.toIso(e.x, e.y, 40, this._iso);
       const t = Date.now() * 0.002;
       const isPersonal = e.subType === 'PORTAL';
-      const color = isPersonal ? '#a855f7' : '#06b6d4'; // Purple vs Cyan
+      const color = isPersonal ? '#a855f7' : '#06b6d4'; 
 
       ctx.save();
       ctx.translate(pos.x, pos.y);
-      
-      // Floating motion
       ctx.translate(0, Math.sin(t) * 5);
 
-      // Core Energy
       ctx.globalCompositeOperation = 'screen';
-      ctx.shadowBlur = 20;
-      ctx.shadowColor = color;
+      ctx.shadowBlur = 20; ctx.shadowColor = color;
+      ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.beginPath();
       
-      // Pulsing Ring
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      
-      // Wobbly circle
       for(let i=0; i <= Math.PI*2; i+=0.1) {
           const r = 20 + Math.sin(i * 5 + t*3) * 5;
           const x = Math.cos(i) * r;
-          const y = Math.sin(i) * r * 0.5; // Flatten
+          const y = Math.sin(i) * r * 0.5; 
           if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
       }
-      ctx.closePath();
-      ctx.stroke();
+      ctx.closePath(); ctx.stroke();
 
-      // Inner Core
-      ctx.fillStyle = '#fff';
-      ctx.globalAlpha = 0.8;
-      ctx.beginPath();
-      ctx.ellipse(0, 0, 10, 5, 0, 0, Math.PI*2);
-      ctx.fill();
-
-      // Vertical Beam
-      ctx.globalAlpha = 0.3;
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.moveTo(-10, 0);
-      ctx.lineTo(10, 0);
-      ctx.lineTo(0, -80 - Math.random() * 20);
-      ctx.fill();
-
+      ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.8; ctx.beginPath(); ctx.ellipse(0, 0, 10, 5, 0, 0, Math.PI*2); ctx.fill();
+      ctx.globalAlpha = 0.3; ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(10, 0); ctx.lineTo(0, -80 - Math.random() * 20); ctx.fill();
       ctx.restore();
   }
 
-  // NEW: Render holographic interaction points (Doors, Keypads)
   private drawInteractable(ctx: CanvasRenderingContext2D, e: Entity) {
-      const pos = IsoUtils.toIso(e.x, e.y, e.z || 30);
+      const pos = IsoUtils.toIso(e.x, e.y, e.z || 30, this._iso);
       ctx.save();
       ctx.translate(pos.x, pos.y);
-      
-      // Floating motion
       const float = Math.sin(Date.now() * 0.003) * 5;
       ctx.translate(0, float);
 
-      // Holographic Panel Look
-      ctx.shadowBlur = 10;
-      ctx.shadowColor = '#06b6d4';
-      ctx.fillStyle = 'rgba(6, 182, 212, 0.2)';
-      ctx.strokeStyle = '#06b6d4';
-      ctx.lineWidth = 2;
+      ctx.shadowBlur = 10; ctx.shadowColor = '#06b6d4';
+      ctx.fillStyle = 'rgba(6, 182, 212, 0.2)'; ctx.strokeStyle = '#06b6d4'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.rect(-20, -30, 40, 60); ctx.fill(); ctx.stroke();
 
-      // Draw Keypad Rect
-      ctx.beginPath();
-      ctx.rect(-20, -30, 40, 60);
-      ctx.fill();
-      ctx.stroke();
-
-      // Inner details
-      ctx.fillStyle = '#06b6d4';
-      ctx.globalAlpha = 0.8;
-      ctx.fillRect(-12, -20, 24, 15); // Screen
-      
-      // Buttons
-      ctx.globalAlpha = 0.5;
-      ctx.fillRect(-12, 0, 10, 8);
-      ctx.fillRect(2, 0, 10, 8);
-      ctx.fillRect(-12, 12, 10, 8);
-      ctx.fillRect(2, 12, 10, 8);
-
+      ctx.fillStyle = '#06b6d4'; ctx.globalAlpha = 0.8; ctx.fillRect(-12, -20, 24, 15); 
+      ctx.globalAlpha = 0.5; ctx.fillRect(-12, 0, 10, 8); ctx.fillRect(2, 0, 10, 8); ctx.fillRect(-12, 12, 10, 8); ctx.fillRect(2, 12, 10, 8);
       ctx.restore();
   }
 
   // --- SUB-STRUCTURE RENDERERS ---
   
   drawEnergyBarrier(ctx: CanvasRenderingContext2D, e: Entity) {
-      const h = e.height || 80; const w = e.width || 100; const pos = IsoUtils.toIso(e.x, e.y, 0);
+      const h = e.height || 80; const w = e.width || 100; const pos = IsoUtils.toIso(e.x, e.y, 0, this._iso);
       ctx.save(); ctx.translate(pos.x, pos.y);
-      
-      // Normalize color for gradient to avoid crash
       const color = this.normalizeHex(e.color || '#ef4444');
       
-      const p1 = IsoUtils.toIso(-w/2, 0, 0); const p2 = IsoUtils.toIso(w/2, 0, 0); const p3 = IsoUtils.toIso(w/2, 0, h); const p4 = IsoUtils.toIso(-w/2, 0, h);
+      const p1 = IsoUtils.toIso(-w/2, 0, 0, this._p1); 
+      const p2 = IsoUtils.toIso(w/2, 0, 0, this._p2); 
+      const p3 = IsoUtils.toIso(w/2, 0, h, this._p3); 
+      const p4 = IsoUtils.toIso(-w/2, 0, h, this._p4);
+      
       ctx.fillStyle = '#18181b'; ctx.fillRect(p1.x - 5, p1.y - 10, 10, 10); ctx.fillRect(p2.x - 5, p2.y - 10, 10, 10);
       ctx.globalCompositeOperation = 'screen';
       const pulse = Math.sin(Date.now() * 0.005) * 0.2 + 0.5; 
@@ -251,12 +184,11 @@ export class EntityRendererService {
       
       ctx.fillStyle = grad; ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.fill();
       ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.globalAlpha = 0.3;
-      const lines = 5; for(let i=1; i<lines; i++) { const t = i/lines; const yOffset = (Date.now() * 0.02) % (h/lines); const lh = h * t + yOffset; if (lh > h) continue; const l1 = IsoUtils.toIso(-w/2, 0, lh); const l2 = IsoUtils.toIso(w/2, 0, lh); ctx.beginPath(); ctx.moveTo(l1.x, l1.y); ctx.lineTo(l2.x, l2.y); ctx.stroke(); }
+      const lines = 5; for(let i=1; i<lines; i++) { const t = i/lines; const yOffset = (Date.now() * 0.02) % (h/lines); const lh = h * t + yOffset; if (lh > h) continue; const l1 = IsoUtils.toIso(-w/2, 0, lh, this._p1); const l2 = IsoUtils.toIso(w/2, 0, lh, this._p2); ctx.beginPath(); ctx.moveTo(l1.x, l1.y); ctx.lineTo(l2.x, l2.y); ctx.stroke(); }
       ctx.restore();
   }
 
   private normalizeHex(hex: string): string {
-      // Expand 3-digit hex to 6-digit
       if (hex.length === 4) {
           return '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
       }

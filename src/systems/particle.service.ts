@@ -117,14 +117,42 @@ export class ParticleService {
   }
 
   update() {
-    for(let i=this.particles.length-1; i>=0; i--) {
+    // O(N) Compaction Loop: Moves alive particles to front, avoids splice() thrashing
+    let writeIdx = 0;
+    const count = this.particles.length;
+
+    for(let i=0; i < count; i++) {
         const p = this.particles[i];
-        p.x += p.vx; p.y += p.vy; p.z += p.vz;
+        
+        p.x += p.vx; 
+        p.y += p.vy; 
+        p.z += p.vz;
         p.vz -= BALANCE.PARTICLE.GRAVITY; 
-        if (p.z < 0) { p.z = 0; p.vx *= 0.5; p.vy *= 0.5; }
+        
+        if (p.z < 0) { 
+            p.z = 0; 
+            p.vx *= 0.5; 
+            p.vy *= 0.5; 
+        }
+        
         p.life -= BALANCE.PARTICLE.LIFESPAN_DECAY;
         p.rotation += p.rotSpeed;
-        if (p.life <= 0) { this.particlePool.release(p); this.particles.splice(i, 1); }
+
+        if (p.life > 0) {
+            // Keep particle
+            if (writeIdx !== i) {
+                this.particles[writeIdx] = p;
+            }
+            writeIdx++;
+        } else {
+            // Kill particle
+            this.particlePool.release(p);
+        }
+    }
+
+    // Trim array length to match alive count
+    if (writeIdx < count) {
+        this.particles.length = writeIdx;
     }
   }
 }

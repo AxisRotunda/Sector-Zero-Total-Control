@@ -5,11 +5,23 @@ import { IsoUtils } from '../../utils/iso-utils';
 import { SpriteCacheService } from './sprite-cache.service';
 import { TextureGeneratorService, ThemeVisuals } from './texture-generator.service';
 import { DECORATIONS } from '../../config/decoration.config';
+import { NarrativeService } from '../../game/narrative.service';
 
 @Injectable({ providedIn: 'root' })
 export class StructureRendererService {
   private cache = inject(SpriteCacheService);
   private textureGen = inject(TextureGeneratorService);
+  private narrative = inject(NarrativeService);
+
+  private gateStateCache = new Map<string, number>();
+
+  // Vector Pools to prevent GC allocation in hot paths
+  private _isoMinMax = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+  private _p1 = { x: 0, y: 0 };
+  private _p2 = { x: 0, y: 0 };
+  private _p3 = { x: 0, y: 0 };
+  private _p4 = { x: 0, y: 0 };
+  private _isoTemp = { x: 0, y: 0 };
 
   drawStructure(ctx: CanvasRenderingContext2D, e: Entity, zone: Zone) {
       const theme = zone ? zone.theme : 'INDUSTRIAL';
@@ -45,6 +57,7 @@ export class StructureRendererService {
 
       const cacheKey = `STRUCT_${structureType}_${w}_${d}_${h}_${e.color}_${theme}_${e.locked}_${detailStyle}_v12`;
       
+      // Use zero-alloc bounds calculation
       const isoBounds = this.calculateIsoBounds(w, d, h);
       const padding = 120;
       const canvasW = Math.ceil(isoBounds.maxX - isoBounds.minX + padding * 2);
@@ -59,7 +72,7 @@ export class StructureRendererService {
           this.renderPrism(bufferCtx, w, d, h, anchorX, anchorY, e.color, visuals, detailStyle);
       });
 
-      const pos = IsoUtils.toIso(e.x, e.y, e.z || 0); 
+      const pos = IsoUtils.toIso(e.x, e.y, e.z || 0, this._isoTemp); 
       ctx.drawImage(sprite, Math.floor(pos.x - anchorX), Math.floor(pos.y - anchorY)); 
   }
 
@@ -70,33 +83,28 @@ export class StructureRendererService {
       };
 
       const w = e.width || config.width;
-      // Use depth for Y-dimension if available, otherwise height (legacy data), otherwise width
       const d = e.depth || e.height || w; 
       
       const hw = w / 2;
       const hd = d / 2;
 
-      // Project 4 corners relative to entity center
-      const p1 = IsoUtils.toIso(e.x - hw, e.y - hd, 0);
-      const p2 = IsoUtils.toIso(e.x + hw, e.y - hd, 0);
-      const p3 = IsoUtils.toIso(e.x + hw, e.y + hd, 0);
-      const p4 = IsoUtils.toIso(e.x - hw, e.y + hd, 0);
+      // Use reused vectors for projection
+      const p1 = IsoUtils.toIso(e.x - hw, e.y - hd, 0, this._p1);
+      const p2 = IsoUtils.toIso(e.x + hw, e.y - hd, 0, this._p2);
+      const p3 = IsoUtils.toIso(e.x + hw, e.y + hd, 0, this._p3);
+      const p4 = IsoUtils.toIso(e.x - hw, e.y + hd, 0, this._p4);
 
       if (e.subType === 'GRAFFITI') {
-          const center = IsoUtils.toIso(e.x, e.y, 0);
+          const center = IsoUtils.toIso(e.x, e.y, 0, this._isoTemp);
           ctx.save();
           ctx.translate(center.x, center.y);
-          // Squash vertically to simulate perspective on floor
           ctx.scale(1, 0.5); 
-          
-          // Rotate slightly for style
           ctx.rotate(-Math.PI / 12);
 
           ctx.font = '900 40px Arial, sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           
-          // Spray paint effect
           ctx.shadowColor = e.color || config.baseColor;
           ctx.shadowBlur = 10;
           ctx.fillStyle = e.color || config.baseColor;
@@ -116,10 +124,11 @@ export class StructureRendererService {
               { dx: -8, dy: -8, w: 3, h: 3 }
           ];
           
-          debris.forEach(bit => {
-              const dp = IsoUtils.toIso(e.x + bit.dx, e.y + bit.dy, 0);
-              ctx.fillRect(Math.floor(dp.x), Math.floor(dp.y), bit.w, bit.h);
-          });
+          // Optimization: No map allocation
+          for(const bit of debris) {
+              const pos = IsoUtils.toIso(e.x + bit.dx, e.y + bit.dy, 0, this._isoTemp);
+              ctx.fillRect(Math.floor(pos.x), Math.floor(pos.y), bit.w, bit.h);
+          }
           return;
       }
 
@@ -160,12 +169,50 @@ export class StructureRendererService {
       const h = e.height || 300;
       
       const openness = e.openness || 0; 
+      const lastOpenness = this.gateStateCache.get(String(e.id)) ?? -1;
+
+      // OPTIMIZATION: If gate is fully closed and hasn't moved, draw cached composite
+      if (openness === 0 && openness === lastOpenness) {
+          const compositeKey = `GATE_COMPOSITE_${e.id}_CLOSED_v1`;
+          const isoBounds = this.calculateIsoBounds(w, d, h);
+          const padding = 60;
+          const cW = Math.ceil(isoBounds.maxX - isoBounds.minX + padding * 2);
+          const cH = Math.ceil(isoBounds.maxY - isoBounds.minY + padding * 2);
+          const aX = -isoBounds.minX + padding;
+          const aY = -isoBounds.minY + padding;
+
+          const composite = this.cache.getOrRender(compositeKey, cW, cH, (bCtx) => {
+              this.drawGatePanels(bCtx, e, visuals, w, d, h, 0, aX, aY);
+          });
+
+          const pos = IsoUtils.toIso(e.x, e.y, 0, this._isoTemp);
+          ctx.drawImage(composite, Math.floor(pos.x - aX), Math.floor(pos.y - aY));
+          return;
+      }
+
+      this.gateStateCache.set(String(e.id), openness);
+
       const maxSlide = w * 0.45;
       const slideAmount = maxSlide * openness;
-      const leftOffset = -w/4 - slideAmount;
-      const rightOffset = w/4 + slideAmount;
       
       const panelW = w / 2;
+      const isoBounds = this.calculateIsoBounds(panelW, d, h);
+      const padding = 60;
+      const cW = Math.ceil(isoBounds.maxX - isoBounds.minX + padding * 2);
+      const cH = Math.ceil(isoBounds.maxY - isoBounds.minY + padding * 2);
+      const aX = -isoBounds.minX + padding;
+      const aY = -isoBounds.minY + padding;
+
+      // Draw dynamic state using individual cached panels
+      this.drawGatePanels(ctx, e, visuals, w, d, h, slideAmount, 0, 0);
+  }
+
+  private drawGatePanels(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, e: Entity, visuals: ThemeVisuals, w: number, d: number, h: number, slideAmount: number, anchorX: number, anchorY: number) {
+      const panelW = w / 2;
+      const leftOffset = -w/4 - slideAmount;
+      const rightOffset = w/4 + slideAmount;
+
+      // Re-calc bounds for sprite generation
       const isoBounds = this.calculateIsoBounds(panelW, d, h);
       const padding = 60;
       const cW = Math.ceil(isoBounds.maxX - isoBounds.minX + padding * 2);
@@ -176,11 +223,13 @@ export class StructureRendererService {
       const leftKey = `GATE_PANEL_L_${w}_${d}_${h}_${e.color}_${visuals.edgeColor}_v4`;
       const rightKey = `GATE_PANEL_R_${w}_${d}_${h}_${e.color}_${visuals.edgeColor}_${e.locked}_v4`;
 
+      // Helper to avoid allocation in closure
+      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz, this._isoTemp);
+
       const leftSprite = this.cache.getOrRender(leftKey, cW, cH, (bCtx) => {
           this.renderPrism(bCtx, panelW, d, h, aX, aY, e.color, visuals, 'PLATING');
           bCtx.translate(aX, aY);
           bCtx.strokeStyle = '#facc15'; bCtx.lineWidth = 4;
-          const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
           const baseB = p(panelW/2, d/2, 0);
           bCtx.beginPath(); bCtx.moveTo(baseB.x - 20, baseB.y - 20); bCtx.lineTo(baseB.x, baseB.y); bCtx.stroke();
           bCtx.translate(-aX, -aY);
@@ -189,7 +238,6 @@ export class StructureRendererService {
       const rightSprite = this.cache.getOrRender(rightKey, cW, cH, (bCtx) => {
           this.renderPrism(bCtx, panelW, d, h, aX, aY, e.color, visuals, 'PLATING');
           bCtx.translate(aX, aY);
-          const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
           const topB = p(-panelW/2, d/2, h - 40); 
           bCtx.fillStyle = e.locked ? '#ef4444' : '#22c55e';
           bCtx.shadowColor = bCtx.fillStyle; bCtx.shadowBlur = 10;
@@ -198,10 +246,16 @@ export class StructureRendererService {
           bCtx.translate(-aX, -aY);
       });
 
-      const worldPos = IsoUtils.toIso(e.x, e.y, 0);
-      const lIso = IsoUtils.toIso(leftOffset, 0, 0);
+      const baseX = anchorX > 0 ? anchorX : e.x;
+      const baseY = anchorY > 0 ? anchorY : e.y;
+      
+      const worldPos = anchorX > 0 ? {x: baseX, y: baseY} : IsoUtils.toIso(baseX, baseY, 0, this._isoTemp);
+
+      // Reuse vectors for offset calculation
+      const lIso = IsoUtils.toIso(leftOffset, 0, 0, this._p1);
       ctx.drawImage(leftSprite, Math.floor(worldPos.x + lIso.x - aX), Math.floor(worldPos.y + lIso.y - aY));
-      const rIso = IsoUtils.toIso(rightOffset, 0, 0);
+      
+      const rIso = IsoUtils.toIso(rightOffset, 0, 0, this._p2);
       ctx.drawImage(rightSprite, Math.floor(worldPos.x + rIso.x - aX), Math.floor(worldPos.y + rIso.y - aY));
   }
 
@@ -209,14 +263,76 @@ export class StructureRendererService {
       const w = e.width || 200;
       const d = e.depth || 200;
       const h = e.height || 600;
-      const pos = IsoUtils.toIso(e.x, e.y, e.z || 0); 
       
-      ctx.save();
-      ctx.translate(pos.x, pos.y);
+      const isTransparent = this.narrative.getFlag('MONOLITH_TRANSPARENT');
+
+      if (!isTransparent) {
+          const cacheKey = `MONOLITH_VOID_${w}_${d}_${h}_v4`;
+          const isoBounds = this.calculateIsoBounds(w, d, h);
+          const padding = 120;
+          const canvasW = Math.ceil(isoBounds.maxX - isoBounds.minX + padding * 2);
+          const canvasH = Math.ceil(isoBounds.maxY - isoBounds.minY + padding * 2);
+          const aX = -isoBounds.minX + padding;
+          const aY = -isoBounds.minY + padding;
+          
+          const sprite = this.cache.getOrRender(cacheKey, canvasW, canvasH, (bCtx) => {
+              bCtx.translate(aX, aY);
+              this.renderMonolithVoid(bCtx, w, d, h);
+              bCtx.translate(-aX, -aY);
+          });
+          
+          const pos = IsoUtils.toIso(e.x, e.y, e.z || 0, this._isoTemp);
+          ctx.drawImage(sprite, Math.floor(pos.x - aX), Math.floor(pos.y - aY));
+      } else {
+          const pos = IsoUtils.toIso(e.x, e.y, e.z || 0, this._isoTemp); 
+          ctx.save();
+          ctx.translate(pos.x, pos.y);
+          this.renderMonolithDynamic(ctx, w, d, h);
+          ctx.restore();
+      }
+  }
+
+  private renderMonolithVoid(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, w: number, d: number, h: number) {
+      const halfW = w / 2; const halfD = d / 2;
+      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz, this._isoTemp);
+
+      // Use temp vars to avoid alloc, but need multiple points. Use local scope copies since p overwrites.
+      // Actually we need distinct points. 
+      // For one-time render calls, a few allocs are fine. Hot path is `calculateIsoBounds`.
+      // But let's use the pool if possible or clones.
+      // Since this is inside a cache generation, alloc is acceptable.
       
+      // ... implementation similar to original but using toIso return value immediately ...
+      // Optimization: Manually calc to avoid overwrite issues with single temp
+      
+      const pClone = (lx: number, ly: number, lz: number) => ({...IsoUtils.toIso(lx, ly, lz)});
+
+      const topT = pClone(-halfW, -halfD, h); const topR = pClone(halfW, -halfD, h); 
+      const topB = pClone(halfW, halfD, h); const topL = pClone(-halfW, halfD, h);
+      const baseB = pClone(halfW, halfD, 0); const baseR = pClone(halfW, -halfD, 0); const baseL = pClone(-halfW, halfD, 0);
+
+      const grad = ctx.createLinearGradient(0, topT.y, 0, baseB.y);
+      grad.addColorStop(0, '#000000'); 
+      grad.addColorStop(0.5, '#0f172a'); 
+      grad.addColorStop(1, '#000000');
+      
+      ctx.fillStyle = grad;
+      ctx.shadowBlur = 20; ctx.shadowColor = '#000';
+
+      ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(baseR.x, baseR.y); ctx.lineTo(topR.x, topR.y); ctx.lineTo(topB.x, topB.y); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(baseL.x, baseL.y); ctx.lineTo(topL.x, topL.y); ctx.lineTo(topB.x, topB.y); ctx.fill();
+      
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1; ctx.globalAlpha = 0.3;
+      ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(topB.x, topB.y); ctx.stroke();
+      ctx.globalAlpha = 1.0; ctx.shadowBlur = 0;
+  }
+
+  private renderMonolithDynamic(ctx: CanvasRenderingContext2D, w: number, d: number, h: number) {
+      // Dynamic rendering - allocs are unavoidable without massive refactor, 
+      // but this is rare (only when transparent).
       const t = Date.now() * 0.0005;
       const halfW = w / 2; const halfD = d / 2;
-      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
+      const p = (lx: number, ly: number, lz: number) => ({...IsoUtils.toIso(lx, ly, lz)}); // Clone
 
       const height = h + Math.sin(t * 2) * 10;
 
@@ -260,15 +376,13 @@ export class StructureRendererService {
       ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1; ctx.globalAlpha = 0.5;
       ctx.beginPath(); ctx.moveTo(baseB.x, baseB.y); ctx.lineTo(topB.x, topB.y); ctx.stroke();
       ctx.shadowBlur = 0; ctx.globalAlpha = 1.0;
-      
-      ctx.restore();
   }
 
   private renderDynamicGlow(ctx: CanvasRenderingContext2D, e: Entity, visuals: ThemeVisuals) {
       const w = e.width || 150; 
       const d = e.depth || 150;
       const z = e.height || 0;
-      const pos = IsoUtils.toIso(e.x, e.y, e.z || 0);
+      const pos = IsoUtils.toIso(e.x, e.y, e.z || 0, this._isoTemp);
       
       const cacheKey = `GLOW_GRATE_${w}_${d}_${e.color}_v2`;
       
@@ -282,10 +396,11 @@ export class StructureRendererService {
       const sprite = this.cache.getOrRender(cacheKey, cW, cH, (bCtx) => {
           bCtx.translate(aX, aY);
           const hw = w / 2; const hd = d / 2;
-          const p = (lx: number, ly: number) => IsoUtils.toIso(lx, ly, 0);
+          const p = (lx: number, ly: number) => IsoUtils.toIso(lx, ly, 0, this._isoTemp);
           
-          const tl = p(-hw, -hd); const tr = p(hw, -hd);
-          const br = p(hw, hd); const bl = p(-hw, hd);
+          // Must clone for separate points inside this generation function
+          const tl = {...p(-hw, -hd)}; const tr = {...p(hw, -hd)};
+          const br = {...p(hw, hd)}; const bl = {...p(-hw, hd)};
           
           bCtx.fillStyle = '#0f172a';
           bCtx.beginPath(); bCtx.moveTo(tl.x, tl.y); bCtx.lineTo(tr.x, tr.y); bCtx.lineTo(br.x, br.y); bCtx.lineTo(bl.x, bl.y); bCtx.fill();
@@ -301,7 +416,7 @@ export class StructureRendererService {
           bCtx.strokeStyle = '#334155'; bCtx.lineWidth = 4;
           for (let i = 0; i <= 6; i++) {
               const t = i / 6; const x = -hw + (w * t);
-              const p1 = p(x, -hd); const p2 = p(x, hd);
+              const p1 = {...p(x, -hd)}; const p2 = {...p(x, hd)};
               bCtx.beginPath(); bCtx.moveTo(p1.x, p1.y); bCtx.lineTo(p2.x, p2.y); bCtx.stroke();
           }
           
@@ -313,27 +428,45 @@ export class StructureRendererService {
       ctx.drawImage(sprite, Math.floor(pos.x - aX), Math.floor(pos.y + z - aY));
   }
 
-  // --- PRIMITIVES (Merged from StructurePrimitivesService) ---
+  // --- PRIMITIVES (Zero Allocation Version) ---
 
   private calculateIsoBounds(width: number, length: number, height: number) {
       const hw = width / 2; const hl = length / 2;
-      const corners = [ 
-          {x: -hw, y: -hl, z: 0}, {x: hw, y: -hl, z: 0}, {x: hw, y: hl, z: 0}, {x: -hw, y: hl, z: 0}, 
-          {x: -hw, y: -hl, z: height}, {x: hw, y: -hl, z: height}, {x: hw, y: hl, z: height}, {x: -hw, y: hl, z: height} 
-      ];
-      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-      for (const c of corners) {
-          const iso = IsoUtils.toIso(c.x, c.y, c.z);
-          if (iso.x < minX) minX = iso.x; if (iso.x > maxX) maxX = iso.x;
-          if (iso.y < minY) minY = iso.y; if (iso.y > maxY) maxY = iso.y;
-      }
-      return { minX, maxX, minY, maxY };
+      
+      // Reset MinMax
+      this._isoMinMax.minX = Infinity; this._isoMinMax.maxX = -Infinity;
+      this._isoMinMax.minY = Infinity; this._isoMinMax.maxY = -Infinity;
+
+      const update = (x: number, y: number, z: number) => {
+          IsoUtils.toIso(x, y, z, this._isoTemp);
+          if (this._isoTemp.x < this._isoMinMax.minX) this._isoMinMax.minX = this._isoTemp.x;
+          if (this._isoTemp.x > this._isoMinMax.maxX) this._isoMinMax.maxX = this._isoTemp.x;
+          if (this._isoTemp.y < this._isoMinMax.minY) this._isoMinMax.minY = this._isoTemp.y;
+          if (this._isoTemp.y > this._isoMinMax.maxY) this._isoMinMax.maxY = this._isoTemp.y;
+      };
+
+      // Unrolled corner projection
+      update(-hw, -hl, 0); update(hw, -hl, 0); update(hw, hl, 0); update(-hw, hl, 0);
+      update(-hw, -hl, height); update(hw, -hl, height); update(hw, hl, height); update(-hw, hl, height);
+
+      return this._isoMinMax;
   }
 
   private renderPrism(ctx: any, w: number, d: number, h: number, anchorX: number, anchorY: number, color: string, visuals: ThemeVisuals, detailStyle: string = 'NONE') {
       ctx.translate(anchorX, anchorY);
       const halfW = w / 2; const halfD = d / 2;
-      const p = (lx: number, ly: number, lz: number) => IsoUtils.toIso(lx, ly, lz);
+      
+      // Use local variables to hold points to prevent overwrite if reusing globals, 
+      // but since we draw sequentially, we can reuse a small set of pooled vectors if careful.
+      // However, for path drawing, we need all 8 points available.
+      // We will clone into local objects just for this render step (cached), or use 8 specialized pools.
+      // Using 8 pools is safer for zero-alloc.
+      // But `_isoTemp` is already used. 
+      // Let's alloc locally here because this runs ONCE per unique structure type (Cached Sprite).
+      // The optimization was for `calculateIsoBounds` which runs EVERY frame.
+      // `renderPrism` is infrequent.
+      
+      const p = (lx: number, ly: number, lz: number) => ({...IsoUtils.toIso(lx, ly, lz)});
 
       const baseL = p(-halfW, halfD, 0); const baseR = p(halfW, -halfD, 0); const baseB = p(halfW, halfD, 0); 
       const topL = p(-halfW, halfD, h); const topR = p(halfW, -halfD, h); const topB = p(halfW, halfD, h); const topT = p(-halfW, -halfD, h);
@@ -386,7 +519,6 @@ export class StructureRendererService {
       ctx.lineTo(topL.x, topL.y - h + 40); ctx.lineTo(baseL.x, baseL.y);
       ctx.fill();
 
-      // Erosion
       if (visuals.erosionLevel > 0) {
           ctx.globalCompositeOperation = 'destination-out';
           const cuts = Math.floor(h * visuals.erosionLevel * 0.2);
@@ -461,7 +593,7 @@ export class StructureRendererService {
   // --- LEGACY HELPERS ---
 
   private drawBanner(ctx: CanvasRenderingContext2D, e: Entity) {
-      const w = e.width || 60; const h = e.height || 180; const pos = IsoUtils.toIso(e.x, e.y, e.z || 200);
+      const w = e.width || 60; const h = e.height || 180; const pos = IsoUtils.toIso(e.x, e.y, e.z || 200, this._isoTemp);
       ctx.save(); ctx.translate(pos.x, pos.y);
       const wind = Math.sin(Date.now() * 0.002 + e.id) * 5;
       ctx.fillStyle = e.color || '#06b6d4';
@@ -470,7 +602,7 @@ export class StructureRendererService {
   }
 
   private drawHoloSign(ctx: CanvasRenderingContext2D, e: Entity) {
-      const w = e.width || 120; const h = e.height || 60; const pos = IsoUtils.toIso(e.x, e.y, e.z || 150);
+      const w = e.width || 120; const h = e.height || 60; const pos = IsoUtils.toIso(e.x, e.y, e.z || 150, this._isoTemp);
       ctx.save(); ctx.translate(pos.x, pos.y);
       ctx.globalCompositeOperation = 'screen';
       ctx.fillStyle = e.color || '#ef4444'; ctx.shadowColor = e.color || '#ef4444'; ctx.shadowBlur = 15;
@@ -480,16 +612,22 @@ export class StructureRendererService {
 
   private drawCable(ctx: CanvasRenderingContext2D, e: Entity) {
       if (!e.targetX || !e.targetY) return;
-      const start = IsoUtils.toIso(e.x, e.y, e.z); const endZ = 120; const end = IsoUtils.toIso(e.targetX, e.targetY, endZ);
+      const start = IsoUtils.toIso(e.x, e.y, e.z, this._p1); 
+      const end = IsoUtils.toIso(e.targetX, e.targetY, 120, this._p2);
       ctx.strokeStyle = '#18181b'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(start.x, start.y);
       const midX = (start.x + end.x) / 2; const midY = (start.y + end.y) / 2; ctx.quadraticCurveTo(midX, midY + 50, end.x, end.y); ctx.stroke();
   }
 
   private drawEnergyBarrier(ctx: CanvasRenderingContext2D, e: Entity) {
-      const h = e.height || 150; const w = e.width || 100; const d = e.depth || 20; const pos = IsoUtils.toIso(e.x, e.y, 0);
+      const h = e.height || 150; const w = e.width || 100; const d = e.depth || 20; 
+      const pos = IsoUtils.toIso(e.x, e.y, 0, this._isoTemp);
       ctx.save(); ctx.translate(pos.x, pos.y);
       const hw = w/2; const hd = d/2;
-      const p1 = IsoUtils.toIso(-hw, hd, 0); const p2 = IsoUtils.toIso(hw, hd, 0); const p3 = IsoUtils.toIso(hw, hd, h); const p4 = IsoUtils.toIso(-hw, hd, h);
+      const p1 = IsoUtils.toIso(-hw, hd, 0, this._p1); 
+      const p2 = IsoUtils.toIso(hw, hd, 0, this._p2); 
+      const p3 = IsoUtils.toIso(hw, hd, h, this._p3); 
+      const p4 = IsoUtils.toIso(-hw, hd, h, this._p4);
+      
       ctx.fillStyle = '#18181b'; ctx.fillRect(p1.x - 5, p1.y - 5, 10, 10); ctx.fillRect(p2.x - 5, p2.y - 5, 10, 10);
       ctx.globalCompositeOperation = 'screen';
       const grad = ctx.createLinearGradient(0, p1.y, 0, p3.y); 
