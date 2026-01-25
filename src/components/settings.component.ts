@@ -78,6 +78,19 @@ import { InputService, Action, DEFAULT_BINDINGS } from '../services/input.servic
                              }
                          </div>
                      </div>
+                     
+                     <!-- DEBUG SECTION -->
+                     <h3 class="text-[10px] font-bold text-red-500 uppercase tracking-widest mt-8 mb-4 border-b border-zinc-800 pb-1">Developer Tools</h3>
+                     <div class="flex items-center justify-between p-3 bg-red-900/10 border border-red-900/30 rounded-sm">
+                         <span class="text-xs text-red-300 font-bold">Kernel Debug Overlay</span>
+                         <button (click)="toggleSetting('debugKernel')" 
+                                 class="w-10 h-5 rounded-full transition-colors relative"
+                                 [class]="map.settings().debugKernel ? 'bg-red-600' : 'bg-zinc-700'">
+                             <div class="absolute top-1 bottom-1 w-3 h-3 bg-white rounded-full transition-all shadow-sm"
+                                  [class.left-1]="!map.settings().debugKernel"
+                                  [class.right-1]="map.settings().debugKernel"></div>
+                         </button>
+                     </div>
                  </div>
              }
 

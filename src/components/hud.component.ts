@@ -65,7 +65,7 @@ import { KernelSupervisorService } from '../core/kernel-supervisor.service';
                </div>
             </div>
             
-            <!-- KERNEL SUPERVISOR STATUS -->
+            <!-- KERNEL STATUS (Standard) -->
             <div class="mt-2 pt-2 border-t border-zinc-800">
               <div class="flex justify-between text-[11px] uppercase tracking-widest font-bold mb-1">
                 <span class="text-cyan-600 drop-shadow-[0_0_4px_rgba(6,182,212,0.8)]">KERNEL INTEGRITY</span>
@@ -84,17 +84,6 @@ import { KernelSupervisorService } from '../core/kernel-supervisor.service';
                   </div>
               }
 
-              <!-- Kernel Domain Monitors -->
-              <div class="flex gap-1 mt-1">
-                  @for (domain of ['GEOMETRY', 'SPATIAL', 'RENDER', 'NAV']; track domain) {
-                      <div class="w-2 h-2 rounded-full border border-zinc-700 transition-colors duration-300"
-                           [class.bg-red-500]="isDomainFailing(domain)"
-                           [class.bg-green-900]="!isDomainFailing(domain)"
-                           [class.animate-pulse]="isDomainFailing(domain)"
-                           [title]="domain"></div>
-                  }
-              </div>
-
               <!-- Performance Telemetry Overlay -->
               <div class="mt-2 pt-2 border-t border-zinc-800">
                   <div class="flex justify-between text-[10px]">
@@ -106,10 +95,6 @@ import { KernelSupervisorService } from '../core/kernel-supervisor.service';
                       {{ getPerformanceStats().fps.toFixed(0) }}
                     </span>
                   </div>
-                  <div class="flex justify-between text-[10px]">
-                    <span class="text-zinc-500">Qual</span>
-                    <span class="text-cyan-500">{{ getCurrentQuality() }}</span>
-                  </div>
               </div>
 
               @if (lastBleedMessage()) {
@@ -119,6 +104,37 @@ import { KernelSupervisorService } from '../core/kernel-supervisor.service';
               }
             </div>
           </div>
+
+          <!-- KERNEL DEBUG OVERLAY (Enabled in Settings) -->
+          @if (mapService.settings().debugKernel) {
+              <div class="absolute top-2 left-[240px] w-64 bg-black/90 border border-red-900 p-2 font-mono text-[9px] shadow-lg pointer-events-none z-50">
+                  <div class="text-red-500 font-bold uppercase border-b border-red-900 mb-1">Kernel Debug Probe</div>
+                  <div class="flex justify-between text-zinc-400">
+                      <span>Emergency Cap:</span>
+                      <span [class.text-red-500]="supervisor.emergencyCapActive()" [class.text-green-500]="!supervisor.emergencyCapActive()">
+                          {{ supervisor.emergencyCapActive() ? 'ACTIVE' : 'OFF' }}
+                      </span>
+                  </div>
+                  <div class="flex justify-between text-zinc-400">
+                      <span>Ledger Size:</span>
+                      <span class="text-white">{{ kernelDiagnostics().ledgerSize }}</span>
+                  </div>
+                  <div class="mt-2 text-zinc-500 uppercase tracking-widest font-bold">Recent Violations</div>
+                  <div class="flex flex-col gap-1 mt-1">
+                      @for (v of supervisor.recentViolations(); track v.time) {
+                          <div class="flex justify-between text-zinc-400">
+                              <span class="truncate w-32" [title]="v.source">{{v.source}}</span>
+                              <span [class.text-yellow-500]="v.severity === 'MEDIUM'" [class.text-red-500]="v.severity === 'HIGH' || v.severity === 'CRITICAL'">
+                                  {{v.severity}} (-{{v.weight}})
+                              </span>
+                          </div>
+                      }
+                      @if (supervisor.recentViolations().length === 0) {
+                          <div class="text-zinc-600 italic">No recent faults.</div>
+                      }
+                  </div>
+              </div>
+          }
 
           <!-- RIGHT: MAP & MENU -->
           <div class="flex flex-col items-end gap-2">

@@ -34,18 +34,15 @@ const POLICIES: Record<string, SupervisionPolicy> = {
         action: 'SPATIAL', 
         capQuality: 'MEDIUM', 
         // Condition: severity in {MEDIUM, CRITICAL}
-        // Action logic: trigger SPATIAL; only apply MEDIUM cap if systemStatus is CRITICAL (handled in handleViolation)
         condition: (s) => s === 'MEDIUM' || s === 'CRITICAL' 
     },
     'RENDER_DEPTH': { 
         logLevel: 'WARN', 
         action: 'RENDER',
-        // Condition: any severity
         condition: () => true
     },
     'PATH_CONTINUITY': { 
         logLevel: 'WARN'
-        // Condition: any severity, log-only
     },
     'INVENTORY': { 
         logLevel: 'ERROR', 
@@ -57,6 +54,13 @@ const POLICIES: Record<string, SupervisionPolicy> = {
     }
 };
 
+export interface ViolationRecord {
+    source: string;
+    severity: string;
+    weight: number;
+    time: number;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -66,7 +70,8 @@ export class KernelSupervisorService {
   private adaptiveQuality = inject(AdaptiveQualityService);
 
   stabilityScore = signal(100);
-  private emergencyCapApplied = false;
+  emergencyCapActive = signal(false); // Exposed as signal for HUD
+  recentViolations = signal<ViolationRecord[]>([]); // Debug history
   
   // Recovery rate r (per second)
   private readonly RECOVERY_RATE = 1;
@@ -81,6 +86,8 @@ export class KernelSupervisorService {
   constructor() {
       this.subscribeToBleeds();
       this.startRecoveryLoop();
+      // Expose for console debugging
+      (window as any).kernelSim = this.simulateStability.bind(this);
   }
 
   private subscribeToBleeds() {
@@ -97,13 +104,19 @@ export class KernelSupervisorService {
       const weight = WEIGHTS[payload.severity as keyof typeof WEIGHTS] || 1;
       this.stabilityScore.update(s => Math.max(0, s - weight));
 
-      // 2. Extract Domain (Format: "KERNEL:{DOMAIN}" or just "{DOMAIN}")
+      // 2. Track Violation for Debug HUD
+      this.recentViolations.update(v => [
+          { source: payload.source, severity: payload.severity, weight, time: Date.now() },
+          ...v
+      ].slice(0, 8)); // Keep last 8
+
+      // 3. Extract Domain (Format: "KERNEL:{DOMAIN}" or just "{DOMAIN}")
       const rawSource = payload.source;
       const domainKey = Object.keys(POLICIES).find(k => rawSource.includes(k));
       
       const policy = domainKey ? POLICIES[domainKey] : null;
 
-      // 3. Log
+      // 4. Log
       const msg = `[Supervisor] ${payload.source}: ${payload.message} (Sev: ${payload.severity}, Pen: -${weight})`;
       if (policy?.logLevel === 'ERROR' || payload.severity === 'CRITICAL') {
           console.error(msg);
@@ -111,7 +124,7 @@ export class KernelSupervisorService {
           console.warn(msg);
       }
 
-      // 4. Execute Policy
+      // 5. Execute Policy
       if (policy) {
           // Check condition predicate
           if (policy.condition && !policy.condition(payload.severity)) {
@@ -129,10 +142,10 @@ export class KernelSupervisorService {
 
               // Emergency MEDIUM cap: Only applied if system is globally CRITICAL
               if (policy.capQuality === 'MEDIUM') {
-                  if (status === 'CRITICAL' && !this.emergencyCapApplied) {
+                  if (status === 'CRITICAL' && !this.emergencyCapActive()) {
                       console.warn('[Supervisor] Stability Critical. Engaging Emergency Caps.');
                       this.adaptiveQuality.setSafetyCap('MEDIUM');
-                      this.emergencyCapApplied = true;
+                      this.emergencyCapActive.set(true);
                   }
                   return;
               }
@@ -152,10 +165,39 @@ export class KernelSupervisorService {
           
           // Reset emergency latch if stability recovers significantly
           // Hysteresis: Wait until > 80 (STABLE) to ensure we don't oscillate
-          if (this.stabilityScore() > 80 && this.emergencyCapApplied) {
+          if (this.stabilityScore() > 80 && this.emergencyCapActive()) {
               console.log('[Supervisor] Stability recovered. Disengaging Emergency Locks.');
-              this.emergencyCapApplied = false;
+              this.emergencyCapActive.set(false);
           }
       }, 1000);
+  }
+
+  /**
+   * Debug Helper: Simulates stability impact of hypothetical violations.
+   * Usage: kernelSim(5, 'MEDIUM', 3) -> 5 Medium errors over 3 seconds
+   */
+  simulateStability(count: number, severity: 'LOW'|'MEDIUM'|'HIGH'|'CRITICAL', durationSec: number = 1) {
+      console.log(`%c[KERNEL SIMULATION] ${count}x ${severity} over ${durationSec}s`, 'color: #06b6d4; font-weight: bold');
+      
+      const weight = WEIGHTS[severity];
+      const totalPenalty = count * weight;
+      const ratePerSec = totalPenalty / durationSec;
+      
+      let s = this.stabilityScore();
+      console.log(`T=0s | Stability: ${s.toFixed(1)}%`);
+
+      for (let t = 1; t <= durationSec; t++) {
+          s = Math.max(0, s - ratePerSec); // Apply damage
+          s = Math.min(100, s + this.RECOVERY_RATE); // Apply recovery
+          
+          let status = 'STABLE';
+          if (s < 40) status = 'CRITICAL';
+          else if (s < 80) status = 'UNSTABLE';
+          
+          const color = s < 40 ? 'color:red' : (s < 80 ? 'color:orange' : 'color:green');
+          console.log(`%cT=${t}s | Stability: ${s.toFixed(1)}% [${status}]`, color);
+      }
+      
+      console.log(`Net Impact: ${(this.stabilityScore() - s).toFixed(1)} stability lost.`);
   }
 }

@@ -11,6 +11,7 @@ export interface MapSettings {
   rotateMiniMap: boolean;
   fullMapOpacity: number;
   gridOpacity: number;
+  debugKernel: boolean; // New Debug Flag
 }
 
 export interface MapMarker {
@@ -23,7 +24,8 @@ export interface MapMarker {
 export class MapService {
   settings = signal<MapSettings>({
     miniMapOpacity: 0.9, miniMapZoom: 0.2, showEnemyRadar: true, showTrail: true,
-    showMarkers: true, rotateMiniMap: true, fullMapOpacity: 0.95, gridOpacity: 0.1
+    showMarkers: true, rotateMiniMap: true, fullMapOpacity: 0.95, gridOpacity: 0.1,
+    debugKernel: false
   });
 
   // Map<SectorId, Set<ChunkKey>>
