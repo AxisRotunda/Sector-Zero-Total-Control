@@ -48,8 +48,7 @@ export class SectorLoaderService {
           world.entities = MapUtils.mergeWalls(world.entities);
 
           // --- FORMAL VERIFICATION ---
-          // Check for illegal overlaps in static geometry using new Segment-based Logic
-          // This allows corners/T-junctions but still bans collinear stacking (double walls)
+          // Use Segment Logic (1D) to allow T-junctions/Corners, banning only collinear overlap
           try {
               const walls = world.entities.filter(e => e.type === 'WALL');
               
