@@ -5,6 +5,7 @@ import { IsoUtils } from '../../utils/iso-utils';
 import { RENDER_CONFIG } from './render.config';
 import { LightingService } from './lighting.service';
 import { PerformanceManagerService } from '../../game/performance-manager.service';
+import { LightSource } from '../../models/rendering.models';
 
 @Injectable({ providedIn: 'root' })
 export class LightingRendererService {
@@ -151,7 +152,8 @@ export class LightingRendererService {
     cam: Camera, 
     zone: Zone,
     screenWidth: number, 
-    screenHeight: number
+    screenHeight: number,
+    bakedLights?: { canvas: HTMLCanvasElement | OffscreenCanvas, x: number, y: number } | null
   ) {
     if (!RENDER_CONFIG.LIGHTING.ENABLED || !this.ctx || !this.canvas) return;
 
@@ -185,13 +187,22 @@ export class LightingRendererService {
     // Player cutout
     this.drawLightSprite(ctx, player.x, player.y, player.z, 350, 1.0);
 
+    // Dynamic Lights
     const visibleLights = this.lightingService.visibleLights;
     const len = visibleLights.length;
     
-    // Draw "Holes" for all lights
     for (let i = 0; i < len; i++) {
         const light = visibleLights[i];
-        this.drawLightSprite(ctx, light.x, light.y, light.z || 0, light.radius, light.intensity);
+        // Only draw DYNAMIC/PULSE lights in the dynamic pass if we have baked lights
+        // If no bake, draw all visible
+        if (!bakedLights || light.type !== 'STATIC') {
+            this.drawLightSprite(ctx, light.x, light.y, light.z || 0, light.radius, light.intensity);
+        }
+    }
+
+    // Apply Baked Lights (Holes)
+    if (bakedLights) {
+        ctx.drawImage(bakedLights.canvas, bakedLights.x, bakedLights.y);
     }
 
     // --- PASS 2: EMISSIVE LIGHTS (Color Additive) ---
@@ -199,17 +210,19 @@ export class LightingRendererService {
 
     for (let i = 0; i < len; i++) {
         const light = visibleLights[i];
-        // Skip white/black lights in emissive pass to avoid blowing out the scene
-        // White lights just cut holes (above), colored lights add tint (here)
-        if (light.color === '#ffffff' || light.color === '#000000') continue; 
+        if (light.color === '#ffffff' || light.color === '#000000') continue;
+        
+        // Skip static emissives if we decided to bake them (current light baker only bakes the mask/holes, not color)
+        // Light Baker currently DOES handle the additive look if we updated it to do so,
+        // BUT the provided LightBaker implementation only draws the white mask for destination-out.
+        // So we still need to draw colored lights dynamically unless we enhance the baker.
+        // For now, let's keep drawing colored lights dynamically to ensure visual quality.
+        // Optimization: Usually static lights are white/yellow ambient.
         
         this.drawColoredLight(ctx, light.x, light.y, light.z || 0, light.radius * 0.8, light.intensity * 0.6, light.color);
     }
 
     ctx.restore();
-
-    // REMOVED: Expensive Readback Loop (getImageData/putImageData)
-    // Brightness clamping is now managed by careful composite weight and ambient intensity tuning via Config
 
     // --- COMPOSITE TO MAIN SCREEN ---
     mainCtx.save();

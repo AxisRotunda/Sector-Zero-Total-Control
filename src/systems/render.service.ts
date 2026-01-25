@@ -22,6 +22,8 @@ import { TimeService } from '../game/time.service';
 import { MissionService } from '../game/mission.service';
 import { PerformanceManagerService } from '../game/performance-manager.service';
 import { isParticle } from '../utils/type-guards';
+import { StaticBatchRendererService, BakedTile } from './rendering/static-batch-renderer.service';
+import { LightmapBakerService } from './rendering/lightmap-baker.service';
 
 @Injectable({
   providedIn: 'root'
@@ -51,6 +53,10 @@ export class RenderService {
   private entityRenderer = inject(EntityRendererService);
   private lightingRenderer = inject(LightingRendererService);
   
+  // Optimizers
+  private staticBatcher = inject(StaticBatchRendererService);
+  private lightBaker = inject(LightmapBakerService);
+  
   private player = inject(PlayerService);
   
   debugMode = signal(false);
@@ -68,6 +74,7 @@ export class RenderService {
   // Performance Monitoring
   private lastFrameTime = 0;
   private currentRenderScale = 1.0;
+  private lastZoneId = '';
   
   // Cached Resources
   private vignetteGradient: CanvasGradient | null = null;
@@ -140,6 +147,13 @@ export class RenderService {
     this.lastFrameTime = now;
     this.performanceManager.monitorFrame(delta);
 
+    // Zone Change cleanup
+    if (zone.id !== this.lastZoneId) {
+        this.staticBatcher.clearCache();
+        this.lightBaker.clearCache();
+        this.lastZoneId = zone.id;
+    }
+
     this.lightingRenderer.setResolutionScale(this.performanceManager.lightingScale());
     
     const targetScale = this.performanceManager.renderScale();
@@ -156,8 +170,12 @@ export class RenderService {
     // Calculate View Frustum
     this.calculateFrustum(cam, window.innerWidth, window.innerHeight);
 
-    // 1. Prepare Scene
-    this.prepareRenderList(cam, zone, entities, player, particles, window.innerWidth, window.innerHeight, this._frustum);
+    // 1. Prepare Scene & Bake Check
+    // Returns array of tiles now
+    const bakedTiles = this.staticBatcher.bakeStaticGeometry(zone, entities, cam.rotation);
+    const bakedLights = this.lightBaker.bakeStaticLights(this.lighting.allLights, cam.rotation);
+
+    this.prepareRenderList(cam, zone, entities, player, particles, window.innerWidth, window.innerHeight, this._frustum, !!bakedTiles);
     
     // Prepare Lights
     this.prepareLighting(player, this.renderList, cam, window.innerWidth, window.innerHeight, this._frustum);
@@ -174,30 +192,42 @@ export class RenderService {
     // 3. Background Pass
     this.floorRenderer.drawFloor(this.ctx, cam, zone, this.world.mapBounds, w, h);
 
-    // 4. Shadow Pass
+    // 4. Baked Static Geometry Pass (Tiles)
+    if (bakedTiles) {
+        for (const tile of bakedTiles) {
+            // Simple culling for tiles
+            // Tile is in Iso coords. View is centered on Camera Iso.
+            // Check if tile intersects viewport?
+            // For now just draw, canvas handles out-of-bounds fairly well
+            this.ctx.drawImage(tile.canvas, tile.x, tile.y);
+        }
+    }
+
+    // 5. Shadow Pass (Dynamic Only if baked)
     if (this.performanceManager.shadowsEnabled()) {
         this.drawShadows(this.renderList);
     }
 
-    // 5. Main Geometry Pass (Sorted & Occlusion)
+    // 6. Main Geometry Pass (Sorted & Occlusion)
     // Note: Render list is already sorted by Layer then Depth
     this.drawGeometry(this.renderList, zone, player);
 
-    // 6. Visual Effects
+    // 7. Visual Effects
     this.effectRenderer.drawGlobalEffects(this.ctx, this.renderList as Entity[], player, zone, rainDrops);
     
-    // 7. World UI
+    // 8. World UI
     this.drawWorldUI(texts, cam);
 
     this.ctx.restore();
     
-    // 8. Lighting & Atmosphere Pass
-    this.lightingRenderer.drawLighting(this.ctx, this.renderList as Entity[], player, cam, zone, w, h);
+    // 9. Lighting & Atmosphere Pass
+    // We pass the baked lightmap to the renderer if available
+    this.lightingRenderer.drawLighting(this.ctx, this.renderList as Entity[], player, cam, zone, w, h, bakedLights);
 
-    // 9. Post-Processing
+    // 10. Post-Processing
     this.applyPostEffects(w, h);
     
-    // 10. Guidance Overlay
+    // 11. Guidance Overlay
     this.effectRenderer.drawGuidanceOverlay(
         this.ctx, 
         this.mission.activeObjective(), 
@@ -244,16 +274,19 @@ export class RenderService {
           }
 
           const ent = obj as Entity;
+          // IMPORTANT: Static lights (Street Lights, Neon) are handled by LightBaker now.
+          // Only register dynamic lights here.
+          
           if (ent.type === 'DECORATION') {
               if (ent.subType === 'STREET_LIGHT') {
+                  // Register as STATIC for baking
                   const lightColor = ent.color && ent.color !== '#ffffff' ? ent.color : presets.STREET_LIGHT.color;
                   this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, type: 'STATIC', ...presets.STREET_LIGHT, color: lightColor });
               } else if (ent.subType === 'NEON') {
                   this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, color: ent.color, type: 'STATIC', ...presets.NEON });
               } else if (ent.subType === 'DYNAMIC_GLOW') {
-                  // SAFE FALLBACK: Check data first, then default to 1.0 if unspecified
+                  // Pulse is dynamic
                   const intensity = ent.data?.glowIntensity !== undefined ? ent.data.glowIntensity : 1.0;
-                  
                   this.lighting.registerLight({ 
                       id: `L_${ent.id}`, 
                       x: ent.x, 
@@ -270,6 +303,7 @@ export class RenderService {
               this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, color: ent.color, type: 'DYNAMIC', radius: ent.radius * presets.PROJECTILE.radiusMultiplier, intensity: presets.PROJECTILE.intensity, z: presets.PROJECTILE.z });
           }
           else if (ent.type === 'EXIT' && !ent.locked) {
+              // Exits are static
               this.lighting.registerLight({ id: `L_${ent.id}`, x: ent.x, y: ent.y, color: ent.color, type: 'STATIC', ...presets.EXIT });
           }
           else if (ent.type === 'ENEMY' && ent.subType === 'BOSS') {
@@ -294,20 +328,32 @@ export class RenderService {
       this.ctx.translate(-this.camCenter.x, -this.camCenter.y);
   }
 
-  private prepareRenderList(cam: Camera, zone: Zone, dynamicEntities: Entity[], player: Entity, particles: Particle[], w: number, h: number, frustum: any) {
+  private prepareRenderList(cam: Camera, zone: Zone, entities: Entity[], player: Entity, particles: Particle[], w: number, h: number, frustum: any, hasBakedLayer: boolean) {
       let renderIndex = 0;
       
+      // Get Visible Entities
       const { buffer: staticBuffer, count: staticCount } = this.chunkManager.getVisibleStaticEntities(cam, w, h);
+      
+      // Process Static (Walls)
       for (let i = 0; i < staticCount; i++) {
-          this.renderList[renderIndex++] = staticBuffer[i];
+          const e = staticBuffer[i];
+          if (hasBakedLayer) {
+              // Only skip floor decos that were baked. Walls are NOT baked anymore.
+              if (e.type === 'DECORATION' && ['RUG', 'FLOOR_CRACK', 'GRAFFITI', 'TRASH'].includes(e.subType || '')) continue;
+          }
+          this.renderList[renderIndex++] = e;
       }
       
       const { buffer: dynamicBuffer, count: dynamicCount } = this.spatialHash.queryRectFast(frustum.minX, frustum.minY, frustum.maxX, frustum.maxY, zone.id);
       for (let i = 0; i < dynamicCount; i++) {
           const e = dynamicBuffer[i];
-          if (e.state === 'DEAD' || e.data?.isDead) continue; // FILTER: Don't render dead entities
-          if (e.type === 'WALL' && e.subType !== 'GATE_SEGMENT') continue;
-          if (e.type === 'DECORATION' && (e.subType === 'RUG' || e.subType === 'FLOOR_CRACK' || e.subType === 'GRAFFITI')) continue;
+          if (e.state === 'DEAD' || e.data?.isDead) continue; 
+          
+          if (hasBakedLayer) {
+              // Same check for dynamic floor decos (rare)
+              if (e.type === 'DECORATION' && ['RUG', 'FLOOR_CRACK', 'GRAFFITI', 'TRASH'].includes(e.subType || '')) continue;
+          }
+          
           this.renderList[renderIndex++] = e;
       }
       
@@ -352,11 +398,13 @@ export class RenderService {
 
   // --- SCREEN-SPACE OCCLUSION ---
   private checkScreenSpaceOcclusion(wall: Entity, target: Entity): boolean {
-      // 1. World Depth Check (Topological Sort Hint)
-      // If the Wall is logically "Behind" the target, it can't occlude it.
-      if ((wall.isoDepth || 0) < (target.isoDepth || 0)) return false;
+      // World Depth Check (Iso Depth Sort)
+      // If wall is logically "behind" target, it can't occlude
+      const wallDepth = wall._depthKey || 0;
+      const targetDepth = target._depthKey || 0;
+      if (wallDepth < targetDepth) return false;
 
-      // 2. Screen Space Overlap
+      // Simple Bounding Box in Screen Space
       // Get Wall Bounds
       const wWidth = wall.width || 40;
       const wDepth = wall.depth || 40;
@@ -369,10 +417,7 @@ export class RenderService {
       IsoUtils.toIso(wall.x, wall.y, 0, wallBaseIso);
       IsoUtils.toIso(target.x, target.y, 0, targetBaseIso);
       
-      // Simple Bounding Box in Screen Space
       // Wall Bounding Rect (Approximate)
-      // Iso width roughly Width + Depth. 
-      // Height is Height + (Width+Depth)*0.5
       const wallScreenW = (wWidth + wDepth) * 1.2;
       const wallScreenH = wHeight + (wWidth + wDepth) * 0.5;
       
@@ -402,6 +447,7 @@ export class RenderService {
 
       // Check Nearby Enemies
       const searchRadius = Math.max(wall.width || 100, wall.depth || 100);
+      // OPTIMIZATION: Only check nearby dynamic entities, not full world
       const { buffer, count } = this.spatialHash.queryFast(wall.x, wall.y, searchRadius, zoneId);
       
       for (let i = 0; i < count; i++) {

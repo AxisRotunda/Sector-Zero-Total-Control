@@ -13,6 +13,10 @@ export class LightingService {
   // Optimization: Pre-allocated array for render pass
   visibleLights: LightSource[] = [];
 
+  get allLights(): LightSource[] {
+      return Array.from(this.lights.values());
+  }
+
   registerLight(light: LightSource) {
       this.lights.set(light.id, light);
   }

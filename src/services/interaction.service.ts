@@ -40,8 +40,25 @@ export class InteractionService {
 
   private lastTransitionTime = 0;
   private readonly TRANSITION_COOLDOWN = 1000;
+  
+  // Throttle state
+  private lastPlayerX = -99999;
+  private lastPlayerY = -99999;
+  private forceUpdate = false;
 
   update(player: Entity, globalTime: number) {
+      // Throttling: Only query if player moved > 10 units or forced
+      const distSq = (player.x - this.lastPlayerX)**2 + (player.y - this.lastPlayerY)**2;
+      
+      // Allow minor update every 30 frames regardless of movement to catch state changes (like unlocking)
+      if (distSq < 100 && !this.forceUpdate && globalTime % 30 !== 0) {
+          return;
+      }
+      
+      this.lastPlayerX = player.x;
+      this.lastPlayerY = player.y;
+      this.forceUpdate = false;
+
       let bestTarget: Entity | null = null;
       let bestScore = Infinity;
 
@@ -178,6 +195,7 @@ export class InteractionService {
       if (!target) return;
       
       this.haptic.impactLight();
+      this.forceUpdate = true; // Refresh next frame to update UI/State
 
       if (target.subType === 'ZONE_TRANSITION') {
           const dest = (target as any).targetZoneId || target.data?.targetZone;

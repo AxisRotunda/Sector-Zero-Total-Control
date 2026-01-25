@@ -1,5 +1,5 @@
 
-import { Component, ElementRef, OnInit, ViewChild, inject, OnDestroy } from '@angular/core';
+import { Component, ElementRef, OnInit, ViewChild, inject, OnDestroy, NgZone, ChangeDetectorRef, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { GameEngineService } from './game/game-engine.service';
 import { MissionService } from './game/mission.service';
@@ -38,6 +38,7 @@ import { ComboIndicatorComponent } from './components/combo-indicator.component'
   standalone: true,
   imports: [CommonModule, HudComponent, InventoryComponent, SkillTreeComponent, JoystickComponent, ItemTooltipComponent, ShopComponent, MapComponent, SettingsComponent, AbilitiesPanelComponent, DialogueOverlayComponent, CodexComponent, MissionJournalComponent, WorldMapModalComponent, ComboIndicatorComponent],
   templateUrl: './app.component.html',
+  changeDetection: ChangeDetectionStrategy.OnPush, // Performance: Manual CD
   host: {
     '(contextmenu)': 'onRightClick($event)',
   }
@@ -60,15 +61,31 @@ export class AppComponent implements OnInit, OnDestroy {
   haptic = inject(HapticService);
   ui = inject(UiPanelService);
   zoneManager = inject(ZoneManagerService);
+  
+  private ngZone = inject(NgZone);
+  private cdr = inject(ChangeDetectorRef);
 
   private lastTapTime = 0;
   private readonly DOUBLE_TAP_THRESHOLD = 300; 
   private sub!: Subscription;
+  private uiInterval: any;
 
   ngOnInit() {
-    this.game.init(this.canvasRef.nativeElement);
+    // 1. Run Game Loop OUTSIDE Angular Zone to prevent change detection on every RAF
+    this.ngZone.runOutsideAngular(() => {
+        this.game.init(this.canvasRef.nativeElement);
+    });
+
+    // 2. Setup Manual Change Detection for UI (10fps)
+    // This keeps the HUD responsive without choking on 60fps logic
+    this.uiInterval = setInterval(() => {
+        this.cdr.detectChanges();
+    }, 100);
+
     this.sub = this.input.actionEvents.subscribe((action: Action) => {
         this.handleAction(action);
+        // Trigger immediate CD on input action for responsiveness
+        this.cdr.detectChanges();
     });
   }
   
@@ -76,6 +93,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.game.destroy();
     this.renderer.destroy();
     if (this.sub) this.sub.unsubscribe();
+    if (this.uiInterval) clearInterval(this.uiInterval);
   }
 
   handleAction(action: Action) {

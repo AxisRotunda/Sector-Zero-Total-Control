@@ -19,12 +19,12 @@ export class MapUtils {
       if (walls.length === 0) return entities;
 
       // Group by distinct properties (color, height, type, depth, locked status)
+      // We also include Width/Depth dimensions in grouping to only merge same-thickness walls
       const groups = new Map<string, Entity[]>();
       
       walls.forEach(w => {
           // Include subType and locked status in key to prevent merging distinct functional walls
-          // e.g. A locked GATE_SEGMENT should never merge with a standard WALL
-          const key = `${w.color}_${w.height}_${w.subType || 'GENERIC'}_${w.depth}_${w.locked}`;
+          const key = `${w.color}_${w.height}_${w.subType || 'GENERIC'}_${w.locked}_${w.width}_${w.depth}`;
           if (!groups.has(key)) groups.set(key, []);
           groups.get(key)!.push(w);
       });
@@ -32,6 +32,7 @@ export class MapUtils {
       const mergedWalls: Entity[] = [];
 
       groups.forEach(group => {
+          // 1. Horizontal Merge Pass
           // Sort by Y then X
           group.sort((a, b) => {
               if (Math.abs(a.y - b.y) > 1) return a.y - b.y;
@@ -39,6 +40,7 @@ export class MapUtils {
           });
 
           const processed = new Set<number>();
+          const horizontalResults: Entity[] = [];
 
           for (let i = 0; i < group.length; i++) {
               if (processed.has(group[i].id)) continue;
@@ -64,8 +66,6 @@ export class MapUtils {
                       // Check for adjacency (within small tolerance) AND Max Length Cap
                       if (Math.abs(nextLeft - currentRight) < 5) {
                           if (currentLen + nextLen > MapUtils.MAX_WALL_LENGTH) {
-                              // Don't break the loop, just stop merging into *this* segment
-                              // The next segment will start a new merge block in the outer loop
                               break;
                           }
 
@@ -81,15 +81,63 @@ export class MapUtils {
                           // Gap found, stop merging this line
                           break;
                       }
+                  } else {
+                      // Different row, stop
+                      break;
+                  }
+              }
+              horizontalResults.push(merged);
+          }
+          
+          // 2. Vertical Merge Pass (Run on results of Horizontal pass)
+          // Sort by X then Y
+          horizontalResults.sort((a, b) => {
+              if (Math.abs(a.x - b.x) > 1) return a.x - b.x;
+              return a.y - b.y;
+          });
+          
+          const vProcessed = new Set<number>();
+          
+          for (let i = 0; i < horizontalResults.length; i++) {
+              if (vProcessed.has(horizontalResults[i].id)) continue;
+              
+              let current = horizontalResults[i];
+              let merged = { ...current };
+              vProcessed.add(current.id);
+              
+              for (let j = i + 1; j < horizontalResults.length; j++) {
+                  const next = horizontalResults[j];
+                  if (vProcessed.has(next.id)) continue;
+                  
+                  // Check alignment X
+                  if (Math.abs(next.x - current.x) < 1) {
+                      const currentBottom = merged.y + (merged.depth || 0) / 2;
+                      const nextTop = next.y - (next.depth || 0) / 2;
+                      
+                      const currentH = merged.depth || 0;
+                      const nextH = next.depth || 0;
+                      
+                      if (Math.abs(nextTop - currentBottom) < 5) {
+                          if (currentH + nextH > MapUtils.MAX_WALL_LENGTH) {
+                              break;
+                          }
+                          
+                          const newDepth = currentH + nextH;
+                          const topEdge = (merged.y - currentH/2);
+                          merged.depth = newDepth;
+                          merged.y = topEdge + newDepth / 2;
+                          
+                          vProcessed.add(next.id);
+                      } else {
+                          break;
+                      }
+                  } else {
+                      break;
                   }
               }
               mergedWalls.push(merged);
           }
       });
-
-      // Also try vertical merge (Logic similar to horizontal but rotated)
-      // For MVP, we stick to horizontal primarily, but simple vertical adjacencies often come pre-merged in prefabs.
-      // If needed, a second pass here for vertical sorting.
 
       return [...others, ...mergedWalls];
   }

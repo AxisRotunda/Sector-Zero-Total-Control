@@ -60,12 +60,16 @@ export class StructureRendererService {
               if (config.detailStyle) detailStyle = config.detailStyle;
           }
 
-          cacheKey = `STRUCT_${structureType}_${w}_${d}_${h}_${e.color}_${theme}_${e.locked}_${detailStyle}_v12`;
+          // PERF: Round dimensions to integer to maximize cache reuse for procedurally aligned walls
+          // This prevents 40.00001 and 40.0 generating two different sprites
+          const cw = Math.round(w);
+          const cd = Math.round(d);
+          const ch = Math.round(h);
+
+          cacheKey = `STRUCT_${structureType}_${cw}_${cd}_${ch}_${e.color}_${theme}_${e.locked}_${detailStyle}_v12`;
           this.keyCache.set(e, cacheKey);
       } else {
-          // Re-derive W/D/H if needed, but for rendering we need them. 
-          // If we hit cache, we assume standard properties.
-          // For safety in this hybrid implementation, we just recalculate w/d/h cheaply:
+          // Re-derive W/D/H if needed for calculation, but stick to cached assumptions for rendering
           if (DECORATIONS[e.subType || 'WALL']) {
               const config = DECORATIONS[e.subType || 'WALL'];
               if (!e.width) w = config.width;
