@@ -10,7 +10,6 @@ export class EntitySorterService {
   
   // Reusable object for bounding box calculations to avoid GC
   private _bounds = { minDepth: 0, maxDepth: 0, center: 0 };
-  private frameCount = 0;
 
   sortForRender(renderList: (Entity | Particle)[], cameraRotation: number): void {
     const len = renderList.length;
@@ -44,18 +43,14 @@ export class EntitySorterService {
     renderList.sort((a, b) => (a._depthKey || 0) - (b._depthKey || 0));
 
     // 3. Probabilistic Verification
-    // Every 60 frames (approx 1 sec), sample the sorted list and verify monotonicity
-    this.frameCount++;
-    if (this.frameCount > 60) {
-        this.frameCount = 0;
-        // Optimization: Just check a stride of entities to avoid heavy serialization
-        const samples = [];
-        for (let i = 0; i < len; i += 5) {
-            samples.push(renderList[i]._depthKey || 0);
-        }
-        if (samples.length > 1) {
-            this.proofKernel.verifyRenderDepth(samples);
-        }
+    // DELEGATION: We remove local frame counting and rely on the Kernel's sampling rate.
+    // Optimization: Just check a stride of entities to avoid heavy serialization
+    const samples = [];
+    for (let i = 0; i < len; i += 5) {
+        samples.push(renderList[i]._depthKey || 0);
+    }
+    if (samples.length > 1) {
+        this.proofKernel.verifyRenderDepth(samples);
     }
   }
   

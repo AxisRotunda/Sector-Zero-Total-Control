@@ -22,7 +22,7 @@ export const KERNEL_CONFIG = {
         LOW: 1,
         MEDIUM: 5,
         HIGH: 10,
-        CRITICAL: 15 // Relaxed from 20 to prevent single-spike critical states
+        CRITICAL: 15
     },
     RECOVERY_RATE: 1, // Points per second
     THRESHOLDS: {
@@ -30,8 +30,8 @@ export const KERNEL_CONFIG = {
         CRITICAL: 40
     },
     SAMPLING: {
-        STABLE: 0.1,   // 10% check rate
-        UNSTABLE: 0.5, // 50% check rate
+        STABLE: 0.05,  // Tuned: 5% check rate for high-frequency ops when stable
+        UNSTABLE: 0.25, // 25% check rate
         CRITICAL: 1.0  // 100% check rate
     }
 };
@@ -106,10 +106,11 @@ export class KernelSupervisorService {
   constructor() {
       this.subscribeToBleeds();
       this.startRecoveryLoop();
-      (window as any).kernelSim = this.simulateStability.bind(this);
+      
+      // Expose harness globally for dev console usage
+      (window as any).kernelHarness = this.runStabilityTest.bind(this);
       
       // Push calculated sampling rate to the Proof Kernel via effect
-      // This breaks the dependency cycle (Proof -> Supervisor)
       effect(() => {
           this.proofKernel.samplingProbability.set(this.samplingMod());
       });
@@ -178,27 +179,23 @@ export class KernelSupervisorService {
       }, 1000);
   }
 
-  simulateStability(count: number, severity: 'LOW'|'MEDIUM'|'HIGH'|'CRITICAL', durationSec: number = 1) {
-      console.log(`%c[KERNEL SIMULATION] ${count}x ${severity} over ${durationSec}s`, 'color: #06b6d4; font-weight: bold');
+  /**
+   * Deterministic Stability Harness
+   * Feeds scripted sequence of severities to validate the control law.
+   * Example: runStabilityTest(['MEDIUM', 'LOW', 'CRITICAL'])
+   */
+  runStabilityTest(sequence: ('LOW'|'MEDIUM'|'HIGH'|'CRITICAL')[]) {
+      console.group('KERNEL STABILITY HARNESS');
+      console.log('Initial Score:', this.stabilityScore());
       
-      const weight = KERNEL_CONFIG.WEIGHTS[severity];
-      const totalPenalty = count * weight;
-      const ratePerSec = totalPenalty / durationSec;
+      sequence.forEach((sev, i) => {
+          const weight = KERNEL_CONFIG.WEIGHTS[sev];
+          // Simulate violation
+          this.stabilityScore.update(s => Math.max(0, s - weight));
+          console.log(`[T+${i}] Input: ${sev} (-${weight}) -> Score: ${this.stabilityScore()} [${this.systemStatus()}]`);
+      });
       
-      let s = this.stabilityScore();
-      console.log(`T=0s | Stability: ${s.toFixed(1)}%`);
-
-      for (let t = 1; t <= durationSec; t++) {
-          s = Math.max(0, s - ratePerSec); 
-          s = Math.min(100, s + KERNEL_CONFIG.RECOVERY_RATE); 
-          
-          let status = 'STABLE';
-          if (s < KERNEL_CONFIG.THRESHOLDS.CRITICAL) status = 'CRITICAL';
-          else if (s < KERNEL_CONFIG.THRESHOLDS.STABLE) status = 'UNSTABLE';
-          
-          const color = s < 40 ? 'color:red' : (s < 80 ? 'color:orange' : 'color:green');
-          console.log(`%cT=${t}s | Stability: ${s.toFixed(1)}% [${status}]`, color);
-      }
-      console.log(`Net Impact: ${(this.stabilityScore() - s).toFixed(1)} stability lost.`);
+      console.log('Final Status:', this.systemStatus());
+      console.groupEnd();
   }
 }
