@@ -8,6 +8,7 @@ import { InteractionService } from '../../services/interaction.service';
 import { PlayerStatsService } from '../../game/player/player-stats.service';
 import { PlayerAbilitiesService } from '../../game/player/player-abilities.service';
 import { WorldService } from '../../game/world/world.service';
+import { PerformanceManagerService } from '../../game/performance-manager.service';
 
 interface StatusIcon { type: 'poison' | 'burn' | 'stun' | 'weakness' | 'slow' | 'bleed'; timer: number; maxTimer: number; icon: string; color: string; }
 
@@ -18,6 +19,7 @@ export class UnitRendererService {
   private playerStats = inject(PlayerStatsService);
   private abilities = inject(PlayerAbilitiesService);
   private world = inject(WorldService);
+  private perf = inject(PerformanceManagerService);
   
   private _iso = { x: 0, y: 0 };
   private _isoLeg = { x: 0, y: 0 };
@@ -52,8 +54,21 @@ export class UnitRendererService {
       const distToPlayer = Math.hypot(e.x - player.x, e.y - player.y);
       const isPlayer = e.type === 'PLAYER'; 
       
-      // LOD 0: FAR (Simple shapes)
-      if (!isPlayer && distToPlayer > 800) {
+      // Dynamic LOD thresholds based on performance tier
+      const tier = this.perf.currentTier().name;
+      let lodFar = 800;
+      let lodMed = 400;
+
+      if (tier === 'LOW') {
+          lodFar = 550; // Aggressive culling for mobile
+          lodMed = 300;
+      } else if (tier === 'HIGH') {
+          lodFar = 1000;
+          lodMed = 600;
+      }
+      
+      // LOD 0: FAR (> limit) - Simple circle
+      if (!isPlayer && distToPlayer > lodFar) {
           IsoUtils.toIso(e.x, e.y, e.z, this._iso);
           ctx.save();
           ctx.translate(this._iso.x, this._iso.y);
@@ -66,7 +81,7 @@ export class UnitRendererService {
       }
 
       // LOD 1: MEDIUM (Simplified Geometry)
-      const useSimpleGeo = !isPlayer && distToPlayer > 400;
+      const useSimpleGeo = !isPlayer && distToPlayer > lodMed;
 
       const isGuard = e.subType === 'GUARD'; 
       const isNPC = e.type === 'NPC' && !isGuard; 

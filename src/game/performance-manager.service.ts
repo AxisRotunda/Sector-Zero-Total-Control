@@ -6,7 +6,7 @@ import { QUALITY_TIERS } from '../systems/rendering/render.config';
   providedIn: 'root'
 })
 export class PerformanceManagerService {
-  // Default to Medium (Index 1) for balanced start
+  // Default to Medium (Index 1) for balanced start, or Low (0) if mobile
   private currentTierIndex = signal(1);
 
   // Reactive settings exposed to the app
@@ -19,6 +19,18 @@ export class PerformanceManagerService {
   private fpsAccumulator = 0;
   private frameCount = 0;
   private qualityStableFrames = 0;
+
+  constructor() {
+      this.initTier();
+  }
+
+  private initTier() {
+      // Auto-detect mobile/small screen and default to LOW for performance safety
+      if (typeof window !== 'undefined' && window.innerWidth < 768) {
+          console.log('[Perf] Mobile device detected. Defaulting to LOW tier.');
+          this.currentTierIndex.set(0);
+      }
+  }
 
   monitorFrame(delta: number) {
     // Safety: Prevent division by zero or negative deltas
