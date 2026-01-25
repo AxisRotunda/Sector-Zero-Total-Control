@@ -1,5 +1,5 @@
 
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, OnDestroy } from '@angular/core';
 import { Entity } from '../models/game.models';
 import { WorldService } from '../game/world/world.service';
 import { SoundService } from '../services/sound.service';
@@ -10,27 +10,39 @@ import { GameEvents, CombatHitPayload } from '../core/events/game-events';
 import { TimeService } from '../game/time.service';
 import * as BALANCE from '../config/balance.config';
 import { DamagePacket, DAMAGE_TYPE_COLORS } from '../models/damage.model';
+import { Subject, takeUntil } from 'rxjs';
 
 @Injectable({ providedIn: 'root' })
-export class CombatFeedbackService {
+export class CombatFeedbackService implements OnDestroy {
   private world = inject(WorldService);
   private sound = inject(SoundService);
   private particles = inject(ParticleService);
   private haptic = inject(HapticService);
   private eventBus = inject(EventBusService);
   private time = inject(TimeService);
+  
+  private destroy$ = new Subject<void>();
 
   constructor() {
       // Listen to Combat Events
-      this.eventBus.on(GameEvents.COMBAT_HIT_CONFIRMED).subscribe((payload: CombatHitPayload) => {
-          this.onHitConfirmed(payload.target, payload.result.total, payload.result.isCrit, payload.result.breakdown);
-      });
+      this.eventBus.on(GameEvents.COMBAT_HIT_CONFIRMED)
+        .pipe(takeUntil(this.destroy$))
+        .subscribe((payload: CombatHitPayload) => {
+            this.onHitConfirmed(payload.target, payload.result.total, payload.result.isCrit, payload.result.breakdown);
+        });
       
       // Could also listen to EnemyKilled for death effects
-      this.eventBus.on(GameEvents.ENEMY_KILLED).subscribe((payload: { type: string }) => {
-          // General death effect could be triggered here if we pass coordinates in payload
-          // For now kept simple
-      });
+      this.eventBus.on(GameEvents.ENEMY_KILLED)
+        .pipe(takeUntil(this.destroy$))
+        .subscribe((payload: { type: string }) => {
+            // General death effect could be triggered here if we pass coordinates in payload
+            // For now kept simple
+        });
+  }
+  
+  ngOnDestroy() {
+      this.destroy$.next();
+      this.destroy$.complete();
   }
 
   private onHitConfirmed(

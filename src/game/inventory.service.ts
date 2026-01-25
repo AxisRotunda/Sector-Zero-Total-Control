@@ -52,12 +52,18 @@ export class InventoryService {
         armorPen: 0, psy: 0, tech: 0, armor: 0 
     };
     
-    const items = Object.values(this.equipped()) as (Item | null)[];
+    const equippedItems = this.equipped();
+    if (!equippedItems) return stats;
+
+    const items = Object.values(equippedItems) as (Item | null)[];
     
     items.forEach(item => {
-      if (item) {
+      // Robust check: item must exist AND have stats object
+      if (item && item.stats) {
         Object.entries(item.stats).forEach(([key, value]) => {
-            stats[key] = (stats[key] || 0) + (value as number);
+            if (typeof value === 'number') {
+                stats[key] = (stats[key] || 0) + value;
+            }
         });
       }
     });
@@ -84,23 +90,30 @@ export class InventoryService {
     const drag = this.dragState();
     const item = drag.item; 
     if (!item) return { isValid: false, isSwap: false, isMerge: false };
+    
+    // Safety check for bag signal
+    const currentBag = this.bag() || [];
+
     if (drag.sourceType === 'bag' && targetType === 'bag' && targetIndex !== undefined) {
       if (drag.sourceIndex === targetIndex) return { isValid: false, isSwap: false, isMerge: false };
-      const targetItem = this.bag()[targetIndex];
-      const targetHasItem = targetIndex < this.bag().length;
+      
+      const targetItem = currentBag[targetIndex];
+      const targetHasItem = targetIndex < currentBag.length;
+      
       if (targetItem && targetItem.name === item.name && targetItem.stack < targetItem.maxStack && item.stack > 0) return { isValid: true, isSwap: false, isMerge: true };
       return { isValid: true, isSwap: targetHasItem, isMerge: false };
     }
     if (drag.sourceType === 'bag' && targetType === 'equipment' && targetSlot) {
       const itemTypeSlot = this.getItemSlot(item.type);
       const isValidSlot = itemTypeSlot === targetSlot;
-      const targetHasItem = this.equipped()[targetSlot as keyof ReturnType<typeof this.equipped>] !== null;
+      const currentEquipped = this.equipped();
+      const targetHasItem = currentEquipped && currentEquipped[targetSlot as keyof typeof currentEquipped] !== null;
       return { isValid: isValidSlot, isSwap: isValidSlot && targetHasItem, isMerge: false };
     }
     if (drag.sourceType === 'equipment' && targetType === 'bag' && targetIndex !== undefined) {
-      const targetItem = this.bag()[targetIndex];
+      const targetItem = currentBag[targetIndex];
       if (targetItem && targetItem.name === item.name && targetItem.stack < targetItem.maxStack) return { isValid: true, isSwap: false, isMerge: true };
-      return { isValid: true, isSwap: targetIndex < this.bag().length, isMerge: false };
+      return { isValid: true, isSwap: targetIndex < currentBag.length, isMerge: false };
     }
     return { isValid: false, isSwap: false, isMerge: false };
   }

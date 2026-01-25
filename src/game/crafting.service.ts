@@ -54,6 +54,8 @@ export class CraftingService {
       // Filter by:
       // 1. Stat doesn't exist on item yet
       // 2. Item Type is valid for augment
+      if (!item.stats) return [];
+      
       return this.AUGMENTS.filter(aug => {
           if (item.stats[aug.stat] !== undefined) return false;
           if (aug.validTypes && !aug.validTypes.includes(item.type)) return false;
@@ -62,6 +64,7 @@ export class CraftingService {
   }
 
   canAugment(item: Item, augment: AugmentDef): boolean {
+      if (!item.stats) return false;
       const statCount = Object.keys(item.stats).length;
       return statCount < this.MAX_STATS && this.progression.scrap() >= augment.cost;
   }
@@ -106,12 +109,14 @@ export class CraftingService {
       // Immutable Update logic
       const newStats: Record<string, number> = {};
       
-      for (const key in item.stats) {
-          const val = item.stats[key];
-          if (key === 'speed' || key === 'crit' || key === 'ls' || key === 'cdr') {
-              newStats[key] = parseFloat((val * 1.05).toFixed(2));
-          } else {
-              newStats[key] = Math.ceil(val * 1.15);
+      if (item.stats) {
+          for (const key in item.stats) {
+              const val = item.stats[key];
+              if (key === 'speed' || key === 'crit' || key === 'ls' || key === 'cdr') {
+                  newStats[key] = parseFloat((val * 1.05).toFixed(2));
+              } else {
+                  newStats[key] = Math.ceil(val * 1.15);
+              }
           }
       }
 
@@ -169,6 +174,7 @@ export class CraftingService {
       
       // Check Equipped
       this.inventory.equipped.update(eq => {
+          if (!eq) return eq; // Safety guard
           const updates: any = {};
           if (eq.weapon?.id === newItem.id) updates.weapon = newItem;
           if (eq.armor?.id === newItem.id) updates.armor = newItem;
