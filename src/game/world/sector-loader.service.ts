@@ -64,8 +64,7 @@ export class SectorLoaderService {
                     // Default to 'DEFAULT' if not specified
                     const role = w.data?.role ?? 'DEFAULT';
                     
-                    // Determine primary axis for simple bounding box segments
-                    // If height (depth in top-down) > width, vertical
+                    // Determine primary axis
                     const vertical = dVal > wVal;
                     
                     if (vertical) {
@@ -156,11 +155,9 @@ export class SectorLoaderService {
           if (!wall.locked) wall.color = '#22c55e';
       }
       
-      // Preserve template data (ID, kind, role, etc)
       if (def.data) {
           wall.data = { ...def.data };
       }
-      // If template has explicit ID but not nested in data, attach it
       if (def.id && (!wall.data || !wall.data.id)) {
           if (!wall.data) wall.data = {};
           wall.data.id = def.id;
@@ -206,9 +203,7 @@ export class SectorLoaderService {
           if (e.data.spawnType) e.spawnType = e.data.spawnType;
       }
 
-      // Static vs Dynamic separation
       if (e.type === 'DECORATION') {
-          // If decoration is static floor type, render specially or add to static list
           if (['RUG', 'FLOOR_CRACK', 'GRAFFITI', 'TRASH'].includes(e.subType || '')) {
               world.staticDecorations.push(e);
           } else {
@@ -222,10 +217,9 @@ export class SectorLoaderService {
   private spawnExit(world: WorldService, def: any, zoneId: string) {
       const exit = this.entityPool.acquire('EXIT');
       exit.x = def.x; exit.y = def.y;
-      exit.exitType = def.direction; // Legacy mapping
+      exit.exitType = def.direction;
       exit.zoneId = zoneId;
       
-      // Modern properties
       if (def.targetZoneId) (exit as any).targetZoneId = def.targetZoneId;
       if (def.transitionType) (exit as any).transitionType = def.transitionType;
       if (def.spawnOverride) exit.spawnOverride = def.spawnOverride;

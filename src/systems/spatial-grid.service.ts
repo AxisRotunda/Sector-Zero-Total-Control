@@ -36,12 +36,8 @@ export class SpatialGridService {
       failures: m.failures
     }));
 
-    // --- AUTOMATED KERNEL CHECK (Topology) ---
-    // O(1) Check dispatched to worker. The Supervisor will handle any failures (e.g., density spikes).
+    // Async Topology Verification
     this.proofKernel.verifySpatialGridTopology(this.grid.size, activeEntities.length, this.cellSize);
-    
-    // Note: Removed heavy synchronous 'verifySpatialGrid' check. 
-    // We trust the Supervisor/Worker flow now to avoid main thread jank.
   }
 
   queryRadius(x: number, y: number, radius: number): Entity[] {

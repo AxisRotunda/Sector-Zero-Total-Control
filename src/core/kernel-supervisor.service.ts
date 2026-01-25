@@ -8,6 +8,42 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 export type SystemStatus = 'STABLE' | 'UNSTABLE' | 'CRITICAL';
 
+interface SupervisionPolicy {
+    logLevel: 'WARN' | 'ERROR';
+    action?: string; 
+    capQuality?: 'MEDIUM' | 'HIGH';
+    condition?: (severity: string) => boolean;
+}
+
+const POLICIES: Record<string, SupervisionPolicy> = {
+    'GEOMETRY_SEGMENTS': { 
+        logLevel: 'WARN', 
+        capQuality: 'HIGH', 
+        condition: (s) => s === 'CRITICAL' 
+    },
+    'SPATIAL_TOPOLOGY': { 
+        logLevel: 'ERROR', 
+        action: 'SPATIAL', 
+        capQuality: 'MEDIUM', 
+        condition: (s) => s === 'CRITICAL' 
+    },
+    'RENDER_DEPTH': { 
+        logLevel: 'WARN', 
+        action: 'RENDER' 
+    },
+    'PATH_CONTINUITY': { 
+        logLevel: 'WARN' 
+    },
+    'INVENTORY': { 
+        logLevel: 'ERROR', 
+        action: 'INVENTORY' 
+    },
+    'WORLD_GEN': { 
+        logLevel: 'ERROR', 
+        action: 'WORLD_GEN' 
+    }
+};
+
 @Injectable({
   providedIn: 'root'
 })
@@ -16,7 +52,6 @@ export class KernelSupervisorService {
   private corrector = inject(RealityCorrectorService);
   private adaptiveQuality = inject(AdaptiveQualityService);
 
-  // System Health State
   stabilityScore = signal(100);
   
   systemStatus = computed<SystemStatus>(() => {
@@ -40,57 +75,39 @@ export class KernelSupervisorService {
   }
 
   private handleViolation(payload: RealityBleedPayload) {
-      // 1. Penalize Stability based on Severity
+      // 1. Penalize Stability
       const penalty = payload.severity === 'CRITICAL' ? 20 : (payload.severity === 'MEDIUM' ? 5 : 1);
       this.stabilityScore.update(s => Math.max(0, s - penalty));
 
-      // 2. Policy Matrix: Map Domain -> Action
-      // Payload source usually comes as "KERNEL:{DOMAIN}"
-      const source = payload.source;
-      const msg = payload.message;
+      // 2. Extract Domain (Format: "KERNEL:{DOMAIN}")
+      const rawSource = payload.source;
+      const domainKey = Object.keys(POLICIES).find(k => rawSource.includes(k));
       
-      // DOMAIN: Geometry & Structural Integrity
-      if (source.includes('GEOMETRY_SEGMENTS')) {
-          // Action: Log warning, cap quality if persistent instability
-          console.warn(`[Supervisor] Structural Flaw: ${msg}`);
-          if (this.systemStatus() !== 'STABLE' || payload.severity === 'CRITICAL') {
-              this.adaptiveQuality.setSafetyCap('HIGH');
+      const policy = domainKey ? POLICIES[domainKey] : null;
+
+      // 3. Log
+      const msg = `[Supervisor] ${payload.source}: ${payload.message}`;
+      if (policy?.logLevel === 'ERROR' || payload.severity === 'CRITICAL') {
+          console.error(msg);
+      } else {
+          console.warn(msg);
+      }
+
+      // 4. Execute Policy
+      if (policy) {
+          if (policy.action) {
+              this.corrector.triggerCorrection(policy.action);
           }
-      } 
-      // DOMAIN: Spatial Topology (Grid Density)
-      else if (source.includes('SPATIAL_TOPOLOGY')) {
-          // Action: Immediate Correction (Cull entities or rebuild grid)
-          console.error(`[Supervisor] Topology Breach: ${msg}`);
-          this.corrector.triggerCorrection('SPATIAL');
           
-          if (payload.severity === 'CRITICAL') {
-              this.adaptiveQuality.setSafetyCap('MEDIUM');
+          if (policy.capQuality && policy.condition) {
+              if (policy.condition(payload.severity)) {
+                  this.adaptiveQuality.setSafetyCap(policy.capQuality);
+              }
           }
-      }
-      // DOMAIN: Render Depth (Z-Sorting)
-      else if (source.includes('RENDER_DEPTH')) {
-          // Action: Soft correction (Re-cull next frame / Flush sort cache)
-          this.corrector.triggerCorrection('RENDER');
-      }
-      // DOMAIN: Path Continuity
-      else if (source.includes('PATH_CONTINUITY')) {
-          // Action: Log only, implies navmesh desync
-          console.warn(`[Supervisor] Nav Discontinuity: ${msg}`);
-          // Potential future action: this.corrector.triggerCorrection('NAV_REBUILD');
-      }
-      // DOMAIN: Inventory State
-      else if (source.includes('INVENTORY')) {
-          // Action: State Rollback / Lock
-          this.corrector.triggerCorrection('INVENTORY');
-      }
-      // DOMAIN: World Generation
-      else if (source.includes('WorldGen')) {
-          this.corrector.triggerCorrection('WORLD_GEN');
       }
   }
 
   private startRecoveryLoop() {
-      // Slowly recover stability over time if no errors occur
       setInterval(() => {
           this.stabilityScore.update(s => Math.min(100, s + 1));
       }, 1000);

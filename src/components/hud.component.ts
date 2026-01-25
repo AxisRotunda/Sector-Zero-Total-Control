@@ -248,7 +248,6 @@ export class HudComponent {
   });
 
   constructor() {
-      // Listen for Reality Bleed events just for message log, stability score handled by Supervisor
       this.eventBus.on(GameEvents.REALITY_BLEED)
         .pipe(takeUntilDestroyed())
         .subscribe((payload: RealityBleedPayload) => {

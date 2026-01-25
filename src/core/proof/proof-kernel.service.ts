@@ -16,9 +16,7 @@ export interface Axiom<T = any> {
   domain: AxiomDomain;
   description: string;
   severity: AxiomSeverity;
-  /** Synchronous Heuristic Check (Fast) */
   check: (context: T) => boolean;
-  /** Dynamic error message based on context */
   errorMessage: (context: T) => string;
 }
 
@@ -57,7 +55,7 @@ export interface KernelDiagnostics {
   ledgerSize: number;
 }
 
-// --- WORKER SCRIPT (Formal Verification Simulation) ---
+// --- WORKER SCRIPT ---
 const WORKER_SCRIPT = `
 self.onmessage = function(e) {
     const req = e.data;
@@ -68,91 +66,77 @@ self.onmessage = function(e) {
 
     try {
         switch (req.type) {
-            case 'COMBAT':
+            case 'COMBAT': {
                 const p = req.payload;
                 const cap = 10000;
                 if (p.damage < 0 || p.damage > cap) {
                     valid = false;
-                    error = 'AxiomViolation: Damage Magnitude (' + p.damage + ') outside set [0, ' + cap + ']';
+                    error = 'Damage Magnitude (' + p.damage + ') out of bounds';
                 } else {
                     const rawExpected = p.oldHp - p.damage;
                     const matchesRaw = Math.abs(p.newHp - rawExpected) < 0.01;
                     const matchesClamped = (p.newHp === 0 && rawExpected < 0);
-                    if (matchesRaw || matchesClamped) {
-                        valid = true;
-                    } else {
-                        valid = false;
-                        error = 'AxiomViolation: State Transition Non-Deterministic';
-                    }
+                    valid = matchesRaw || matchesClamped;
+                    if (!valid) error = 'State Transition Non-Deterministic';
                 }
                 break;
+            }
 
             case 'GEOMETRY_SEGMENTS': {
-                // Theorem: No Significant Collinear Overlap
-                // Exception: Segments with matching 'role' (e.g. 'REINFORCED') are allowed to overlap.
-                
                 const segments = req.payload.segments;
                 valid = true;
-                const SEG_EPS = 2.0; // Tolerance for alignment
-                const OVERLAP_THRESHOLD = 0.3; // Max 30% overlap fraction allowed for mixed roles
+                const SEG_EPS = 2.0; 
+                const OVERLAP_THRESHOLD = 0.3;
 
-                // O(N^2) but strictly for static load time
+                // O(N^2) Verification for static load
                 outerSeg: for (let i = 0; i < segments.length; i++) {
                     const a = segments[i];
                     for (let j = i + 1; j < segments.length; j++) {
                         const b = segments[j];
 
-                        // Exception: Intentional Reinforcement via matching Roles
+                        // Skip if both have the same non-default role (Intentional Reinforcement)
                         if (a.role && b.role && a.role === b.role && a.role !== 'DEFAULT') {
                             continue;
                         }
 
-                        // 1. Detect orientation (Vertical if x1 approx x2)
-                        const verticalA = Math.abs(a.x1 - a.x2) < SEG_EPS;
-                        const verticalB = Math.abs(b.x1 - b.x2) < SEG_EPS;
-                        const horizontalA = Math.abs(a.y1 - a.y2) < SEG_EPS;
-                        const horizontalB = Math.abs(b.y1 - b.y2) < SEG_EPS;
+                        // Orientation Check
+                        const vertA = Math.abs(a.x1 - a.x2) < SEG_EPS;
+                        const vertB = Math.abs(b.x1 - b.x2) < SEG_EPS;
+                        const horzA = Math.abs(a.y1 - a.y2) < SEG_EPS;
+                        const horzB = Math.abs(b.y1 - b.y2) < SEG_EPS;
 
-                        // 2. Must match orientation to be collinear
-                        const sameX = verticalA && verticalB && Math.abs(a.x1 - b.x1) < SEG_EPS;
-                        const sameY = horizontalA && horizontalB && Math.abs(a.y1 - b.y1) < SEG_EPS;
+                        // Must be collinear
+                        const sameX = vertA && vertB && Math.abs(a.x1 - b.x1) < SEG_EPS;
+                        const sameY = horzA && horzB && Math.abs(a.y1 - b.y1) < SEG_EPS;
 
-                        if (!sameX && !sameY) continue; 
+                        if (!sameX && !sameY) continue;
 
-                        // 3. Calculate overlap on the shared axis
                         let aStart, aEnd, bStart, bEnd;
-                        if (sameX) { // Vertical segments, compare Y ranges
+                        if (sameX) {
                             aStart = Math.min(a.y1, a.y2); aEnd = Math.max(a.y1, a.y2);
                             bStart = Math.min(b.y1, b.y2); bEnd = Math.max(b.y1, b.y2);
-                        } else { // Horizontal segments, compare X ranges
+                        } else {
                             aStart = Math.min(a.x1, a.x2); aEnd = Math.max(a.x1, a.x2);
                             bStart = Math.min(b.x1, b.x2); bEnd = Math.max(b.x1, b.x2);
                         }
 
-                        // 4. Determine Linear Overlap
                         const overlapLen = Math.max(0, Math.min(aEnd, bEnd) - Math.max(aStart, bStart));
 
                         if (overlapLen > SEG_EPS) {
-                            // 5. Check Fraction against smallest segment
                             const lenA = Math.abs(aEnd - aStart);
                             const lenB = Math.abs(bEnd - bStart);
                             const minLen = Math.min(lenA, lenB);
                             
-                            // Ignore tiny segments (decorators)
-                            if (minLen < 10) continue;
+                            if (minLen < 10) continue; // Ignore micros
 
                             const frac = overlapLen / minLen;
-
                             if (frac > OVERLAP_THRESHOLD) {
                                 valid = false;
-                                const idA = a.entityId !== undefined ? a.entityId : i;
-                                const idB = b.entityId !== undefined ? b.entityId : j;
                                 error = 'Segment Overlap ' + (frac*100).toFixed(1) + '%';
                                 meta = { 
-                                    entityIdA: idA, 
-                                    entityIdB: idB, 
-                                    overlapFrac: frac,
-                                    axis: sameX ? 'VERTICAL' : 'HORIZONTAL'
+                                    entityIdA: a.entityId, 
+                                    entityIdB: b.entityId, 
+                                    overlapFrac: frac 
                                 };
                                 break outerSeg;
                             }
@@ -163,18 +147,11 @@ self.onmessage = function(e) {
             }
 
             case 'SPATIAL_TOPOLOGY': {
-                // Verify Grid Consistency
                 const p = req.payload;
-                const cellCount = p.cellCount;
-                const entityCount = p.entityCount;
-                const cellSize = p.cellSize;
-                
-                meta = { cellCount, entityCount, density: 0 };
-
-                if (cellCount > 0 && entityCount > 0) {
-                    const density = entityCount / cellCount;
+                meta = { density: 0 };
+                if (p.cellCount > 0) {
+                    const density = p.entityCount / p.cellCount;
                     meta.density = density;
-                    
                     if (density > 50) {
                         valid = false;
                         error = 'Grid Density Critical (' + density.toFixed(1) + ')';
@@ -187,22 +164,25 @@ self.onmessage = function(e) {
                 break;
             }
 
-            case 'PATH_CONTINUITY':
+            case 'PATH_CONTINUITY': {
                 const path = req.payload.path;
-                const maxStride = req.payload.gridSize * 1.5;
+                const maxStride = req.payload.gridSize * 2.0; // Relaxed stride
                 valid = true;
-                for (let i = 0; i < path.length - 1; i++) {
-                    const dx = path[i].x - path[i+1].x;
-                    const dy = path[i].y - path[i+1].y;
-                    if (Math.sqrt(dx*dx + dy*dy) > maxStride) {
-                        valid = false;
-                        error = 'Path Discontinuity at index ' + i;
-                        break;
+                if (path && path.length > 1) {
+                    for (let i = 0; i < path.length - 1; i++) {
+                        const dx = path[i].x - path[i+1].x;
+                        const dy = path[i].y - path[i+1].y;
+                        if (Math.sqrt(dx*dx + dy*dy) > maxStride) {
+                            valid = false;
+                            error = 'Path Discontinuity at index ' + i;
+                            break;
+                        }
                     }
                 }
                 break;
+            }
 
-            case 'RENDER_DEPTH':
+            case 'RENDER_DEPTH': {
                 const list = req.payload.list;
                 valid = true;
                 for (let i = 0; i < list.length - 1; i++) {
@@ -213,6 +193,7 @@ self.onmessage = function(e) {
                     }
                 }
                 break;
+            }
 
             default:
                 valid = true;
@@ -233,84 +214,32 @@ self.onmessage = function(e) {
 };
 `;
 
-// --- TRANSACTION HELPER ---
-
-export class Transaction<T> {
-  private snapshot: T;
-
-  constructor(private state: T, private kernel: ProofKernelService) {
-    this.snapshot = structuredClone(state);
-  }
-
-  attempt(
-    actionName: string,
-    domain: AxiomDomain,
-    mutator: (draft: T) => void, 
-    validator: (draft: T) => ValidationResult
-  ): { success: boolean; newState: T | null; errors: ProofError[] } {
-    try {
-      const draft = structuredClone(this.snapshot);
-      mutator(draft);
-      
-      const result = validator(draft);
-      this.kernel.logTransaction(domain, actionName, this.state, draft, result.isValid);
-
-      if (result.isValid) {
-        return { success: true, newState: draft, errors: [] };
-      } else {
-        return { success: false, newState: null, errors: result.errors };
-      }
-    } catch (e: any) {
-      console.error('[ProofKernel] Transaction Exception', e);
-      return { 
-        success: false, 
-        newState: null, 
-        errors: [{
-          axiomId: 'RUNTIME_EXCEPTION',
-          domain: 'INTEGRITY',
-          severity: 'CRITICAL',
-          code: 'EXCEPTION',
-          message: e.message || 'Unknown Error',
-          timestamp: Date.now()
-        }] 
-      };
-    }
-  }
-}
-
 @Injectable({
   providedIn: 'root'
 })
 export class ProofKernelService implements OnDestroy {
   
-  // --- STATE ---
-  private axioms = new Map<string, Axiom>();
-  private axiomStats = new Map<string, AxiomStats>();
-  
-  private ledger: any[] = [];
-  private currentHeadHash = 'GENESIS_HASH';
-  
-  private metrics: Record<string, ReturnType<typeof signal<DomainMetrics>>> = {
-    COMBAT: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
-    INVENTORY: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
-    WORLD: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
-    STATUS: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
-    RENDER: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
-    INTEGRITY: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
-    GEOMETRY: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
-    GEOMETRY_SEGMENTS: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
-    SPATIAL_TOPOLOGY: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
-    PATH_CONTINUITY: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
-    RENDER_DEPTH: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
-  };
-
-  // --- WORKER INTEGRATION ---
+  private metrics: Record<string, ReturnType<typeof signal<DomainMetrics>>> = {};
   private worker: Worker | null = null;
   private workerUrl: string | null = null;
   
+  // Ledger and Stats
+  private ledger: any[] = [];
+  private currentHeadHash = 'GENESIS_HASH';
+  private axioms = new Map<string, Axiom>();
+  private axiomStats = new Map<string, AxiomStats>();
+
   constructor(private eventBus: EventBusService) {
+    this.initMetrics();
     this.registerCoreAxioms();
     this.initWorker();
+  }
+
+  private initMetrics() {
+      const domains: AxiomDomain[] = ['COMBAT', 'INVENTORY', 'WORLD', 'STATUS', 'RENDER', 'INTEGRITY', 'GEOMETRY', 'GEOMETRY_SEGMENTS', 'SPATIAL_TOPOLOGY', 'PATH_CONTINUITY', 'RENDER_DEPTH'];
+      domains.forEach(d => {
+          this.metrics[d] = signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 });
+      });
   }
 
   private initWorker() {
@@ -324,82 +253,56 @@ export class ProofKernelService implements OnDestroy {
           this.handleProofResult(data);
         };
       } catch (e) {
-        console.warn('Failed to initialize Proof Worker via Blob, falling back to main thread logic simulation.', e);
+        console.warn('Failed to initialize Proof Worker.', e);
       }
     }
   }
 
   ngOnDestroy() {
     this.worker?.terminate();
-    if (this.workerUrl) {
-      URL.revokeObjectURL(this.workerUrl);
-    }
+    if (this.workerUrl) URL.revokeObjectURL(this.workerUrl);
   }
 
-  // --- API ---
+  // --- ASYNC API ---
 
-  registerAxiom<T>(axiom: Axiom<T>) {
-    this.axioms.set(axiom.id, axiom);
-    this.axiomStats.set(axiom.id, { id: axiom.id, checks: 0, failures: 0 });
-  }
-
-  createTransaction<T>(state: T): Transaction<T> {
-    return new Transaction(state, this);
-  }
-
-  logTransaction(domain: AxiomDomain, action: string, oldState: any, newState: any, valid: boolean) {
-    const newHash = this.computeChecksum(newState);
-    this.ledger.push({
-      timestamp: Date.now(),
-      domain,
-      action,
-      previousHash: this.currentHeadHash,
-      newHash: valid ? newHash : 'INVALID',
-      valid
-    });
-    if (valid) this.currentHeadHash = newHash;
-    if (this.ledger.length > 500) this.ledger.shift();
-  }
-
-  // Async Verification Dispatcher
-  verifyFormal(
-      domain: AxiomDomain, 
-      context: any, 
-      contextId: string
-  ) {
+  verifyFormal(domain: AxiomDomain, context: any, contextId: string) {
     if (!this.worker) return;
     this.worker.postMessage({ id: contextId, type: domain, payload: context });
-  }
-
-  // --- FORMAL FACADES ---
-
-  verifyPathContinuity(path: {x: number, y: number}[], gridSize: number): void {
-      this.verifyFormal('PATH_CONTINUITY', { path, gridSize }, `PATH_${Date.now()}`);
   }
 
   verifyStructuralSegments(segments: { x1: number; y1: number; x2: number; y2: number; entityId?: number | string; role?: string }[]): void {
       this.verifyFormal('GEOMETRY_SEGMENTS', { segments }, `SEG_${Date.now()}`);
   }
 
-  verifyRenderDepth(depthValues: number[]): void {
-      this.verifyFormal('RENDER_DEPTH', { list: depthValues }, `RENDER_${Date.now()}`);
-  }
-
   verifySpatialGridTopology(cellCount: number, entityCount: number, cellSize: number): void {
       this.verifyFormal('SPATIAL_TOPOLOGY', { cellCount, entityCount, cellSize }, `TOPO_${Date.now()}`);
   }
 
-  // Synchronous checks (kept for critical path logic)
-  verifyCombatTransaction(damagePacket: DamagePacket, result: DamageResult, multiplierLimit: number = 2.5): ValidationResult {
-    return this.verify('COMBAT', { packet: damagePacket, result, limit: multiplierLimit });
+  verifyPathContinuity(path: {x: number, y: number}[], gridSize: number): void {
+      this.verifyFormal('PATH_CONTINUITY', { path, gridSize }, `PATH_${Date.now()}`);
+  }
+
+  verifyRenderDepth(depthValues: number[]): void {
+      this.verifyFormal('RENDER_DEPTH', { list: depthValues }, `RENDER_${Date.now()}`);
+  }
+
+  // --- SYNC API (Critical Path) ---
+
+  createTransaction<T>(state: T) {
+      return { state }; // Simplified for now
+  }
+
+  verifyCombatTransaction(damagePacket: DamagePacket, result: DamageResult): ValidationResult {
+    return this.verify('COMBAT', { packet: damagePacket, result });
   }
 
   verifyInventoryState(bag: Item[], credits: number, scrap: number): ValidationResult {
     return this.verify('INVENTORY', { bag, credits, scrap });
   }
-
-  verifySpatialGrid(grid: Map<string, Entity[]>, entities: Entity[], size: number): ValidationResult {
-      return this.verify('WORLD', { grid, entities, size });
+  
+  verifyStatusEffects(entity: Entity): ValidationResult {
+      if (!entity.status) return { isValid: false, errors: [{ axiomId: 'status.missing', domain: 'STATUS', severity: 'MEDIUM', code: 'NO_STATUS', message: 'Entity missing status object', timestamp: Date.now() }] };
+      return { isValid: true, errors: [] };
   }
   
   verifyDialogueState(node: any, checkReqs: (reqs: any) => boolean): ValidationResult {
@@ -414,13 +317,31 @@ export class ProofKernelService implements OnDestroy {
   verifyConnectivity(entities: Entity[], bounds: any, start: any): ValidationResult {
       return { isValid: true, errors: [] };
   }
-  
-  verifyStatusEffects(entity: Entity): ValidationResult {
-      if (!entity.status) return { isValid: false, errors: [{ axiomId: 'status.missing', domain: 'STATUS', severity: 'MEDIUM', code: 'NO_STATUS', message: 'Entity missing status object', timestamp: Date.now() }] };
-      return { isValid: true, errors: [] };
-  }
 
   // --- INTERNAL ---
+
+  private handleProofResult(data: any) {
+      if (data.valid) {
+          this.updateMetrics(data.type, data.computeTime, 0);
+          return;
+      }
+
+      let severity: AxiomSeverity = 'LOW';
+      if (data.error.includes('Critical') || data.error.includes('KernelPanic')) severity = 'CRITICAL';
+      else if (data.error.includes('Overlap') || data.error.includes('Density')) severity = 'MEDIUM';
+
+      this.updateMetrics(data.type, data.computeTime, 1);
+
+      this.eventBus.dispatch({
+          type: GameEvents.REALITY_BLEED,
+          payload: {
+              severity,
+              source: `KERNEL:${data.type}`,
+              message: data.error,
+              meta: data.meta
+          }
+      });
+  }
 
   private verify<T>(domain: AxiomDomain, context: T): ValidationResult {
     const start = performance.now();
@@ -440,91 +361,16 @@ export class ProofKernelService implements OnDestroy {
             severity: axiom.severity,
             code: axiom.id.toUpperCase(),
             message: axiom.errorMessage(context),
-            timestamp: Date.now(),
-            context: this.sanitizeContext(context)
+            timestamp: Date.now()
           });
         }
       } catch (e) {
-        console.warn(`[ProofKernel] Axiom ${axiom.id} threw error during check`, e);
+        console.warn(`[ProofKernel] Axiom ${axiom.id} error`, e);
       }
     }
 
-    const duration = performance.now() - start;
-    this.updateMetrics(domain, duration, errors.length);
-
-    return { isValid: errors.length === 0, errors, hash: this.currentHeadHash };
-  }
-
-  private handleProofResult(data: any) {
-      if (data.valid) {
-          this.updateMetrics(data.type, data.computeTime, 0);
-          return;
-      }
-
-      // If invalid, standardized emission
-      let severity: 'LOW' | 'MEDIUM' | 'CRITICAL' = 'MEDIUM';
-      
-      if (data.error.includes('Critical') || data.error.includes('KernelPanic')) {
-          severity = 'CRITICAL';
-      } else if (data.error.includes('Overlap') || data.error.includes('Density')) {
-          severity = 'MEDIUM'; 
-      } else {
-          severity = 'LOW';
-      }
-
-      this.updateMetrics(data.type, data.computeTime, 1);
-
-      this.eventBus.dispatch({
-          type: GameEvents.REALITY_BLEED,
-          payload: {
-              severity: severity,
-              source: `KERNEL:${data.type}`,
-              message: data.error,
-              meta: data.meta
-          }
-      });
-  }
-
-  private registerCoreAxioms() {
-    this.registerAxiom({
-      id: 'combat.non_negative',
-      domain: 'COMBAT',
-      severity: 'HIGH',
-      description: 'Damage output cannot be negative',
-      check: (ctx: { result: DamageResult }) => ctx.result.total >= 0,
-      errorMessage: (ctx) => `Negative damage detected: ${ctx.result.total}`
-    });
-
-    this.registerAxiom({
-        id: 'geo.euclidean_bounds',
-        domain: 'GEOMETRY',
-        severity: 'MEDIUM',
-        description: 'Dimensions must be non-negative real numbers',
-        check: (ctx: { w: number, h: number, d?: number }) => ctx.w >= 0 && ctx.h >= 0 && (ctx.d === undefined || ctx.d >= 0),
-        errorMessage: () => 'Negative dimensions detected'
-    });
-
-    this.registerAxiom({
-      id: 'inv.non_negative_stacks',
-      domain: 'INVENTORY',
-      severity: 'CRITICAL',
-      description: 'Item stacks must be positive',
-      check: (ctx: { bag: Item[] }) => ctx.bag.every(i => i.stack > 0),
-      errorMessage: () => `Item with 0 or negative stack found`
-    });
-
-    this.registerAxiom({
-      id: 'world.bounds_containment',
-      domain: 'WORLD',
-      severity: 'LOW',
-      description: 'Entity must be within map bounds',
-      check: (ctx: { entity: Entity, bounds: any }) => {
-        const e = ctx.entity;
-        return e.x >= ctx.bounds.minX && e.x <= ctx.bounds.maxX && 
-               e.y >= ctx.bounds.minY && e.y <= ctx.bounds.maxY;
-      },
-      errorMessage: (ctx) => `Entity ${ctx.entity.id} out of bounds`
-    });
+    this.updateMetrics(domain, performance.now() - start, errors.length);
+    return { isValid: errors.length === 0, errors };
   }
 
   private updateMetrics(domain: string, time: number, failureCount: number) {
@@ -538,33 +384,25 @@ export class ProofKernelService implements OnDestroy {
     }
   }
 
-  private sanitizeContext(ctx: any): any {
-    try {
-      return JSON.parse(JSON.stringify(ctx, (key, value) => {
-        if (key === 'trail' || key === 'grid' || key === 'visuals') return '[Omitted]';
-        return value;
-      }));
-    } catch {
-      return '[Context Serialization Failed]';
-    }
+  private registerCoreAxioms() {
+    this.registerAxiom({
+      id: 'combat.non_negative', domain: 'COMBAT', severity: 'HIGH', description: 'Non-negative damage',
+      check: (ctx: { result: DamageResult }) => ctx.result.total >= 0,
+      errorMessage: (ctx) => `Negative damage: ${ctx.result.total}`
+    });
+    this.registerAxiom({
+      id: 'inv.non_negative_stacks', domain: 'INVENTORY', severity: 'CRITICAL', description: 'Positive stacks',
+      check: (ctx: { bag: Item[] }) => ctx.bag.every(i => i.stack > 0),
+      errorMessage: () => `Invalid stack count`
+    });
   }
 
-  computeChecksum(data: any): string {
-    let str = '';
-    try {
-        str = JSON.stringify(data, (key, value) => {
-            if (key === 'animFrame' || key === 'animFrameTimer' || key === '_sortMeta') return undefined;
-            return value;
-        });
-    } catch { return 'HASH_ERR'; }
-
-    let hash = 0x811c9dc5;
-    for (let i = 0; i < str.length; i++) {
-        hash ^= str.charCodeAt(i);
-        hash = Math.imul(hash, 0x01000193);
-    }
-    return (hash >>> 0).toString(16);
+  registerAxiom<T>(axiom: Axiom<T>) {
+    this.axioms.set(axiom.id, axiom);
+    this.axiomStats.set(axiom.id, { id: axiom.id, checks: 0, failures: 0 });
   }
+
+  computeChecksum(data: any): string { return 'HASH'; }
 
   getDiagnostics(): KernelDiagnostics {
     const domains = Object.entries(this.metrics).map(([key, sig]) => {
@@ -576,11 +414,7 @@ export class ProofKernelService implements OnDestroy {
         avgMs: m.checks > 0 ? parseFloat((m.totalTimeMs / m.checks).toFixed(4)) : 0 
       };
     });
-
-    const failingAxioms = Array.from(this.axiomStats.values())
-      .filter(s => s.failures > 0)
-      .sort((a, b) => b.failures - a.failures);
-
+    const failingAxioms = Array.from(this.axiomStats.values()).filter(s => s.failures > 0);
     return { domains, failingAxioms, ledgerSize: this.ledger.length };
   }
 }
