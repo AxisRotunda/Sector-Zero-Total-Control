@@ -27,6 +27,18 @@ export interface DropTarget {
   isMerge?: boolean;
 }
 
+interface InventoryState {
+    bag: Item[];
+    equipped: {
+        weapon: Item | null;
+        armor: Item | null;
+        implant: Item | null;
+        stim: Item | null;
+        amulet: Item | null;
+        ring: Item | null;
+    };
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -37,14 +49,7 @@ export class InventoryService {
   private progression = inject(PlayerProgressionService);
 
   bag = signal<Item[]>([]);
-  equipped = signal<{
-    weapon: Item | null;
-    armor: Item | null;
-    implant: Item | null;
-    stim: Item | null;
-    amulet: Item | null;
-    ring: Item | null;
-  }>({ weapon: null, armor: null, implant: null, stim: null, amulet: null, ring: null });
+  equipped = signal<InventoryState['equipped']>({ weapon: null, armor: null, implant: null, stim: null, amulet: null, ring: null });
 
   dragState = signal<DragState>({
     isDragging: false, item: null, sourceType: null, sourceIndex: null, sourceSlot: null, cursorX: 0, cursorY: 0
@@ -87,26 +92,6 @@ export class InventoryService {
   public getItemSlot(type: ItemType): 'weapon' | 'armor' | 'implant' | 'stim' | 'amulet' | 'ring' {
     if (type === 'PSI_BLADE') return 'weapon';
     return type.toLowerCase() as any;
-  }
-
-  // --- VERIFICATION ---
-  private verifyIntegrity(context: string) {
-      const result = this.proofKernel.verifyInventoryState(
-          this.bag(), 
-          this.progression.credits(), 
-          this.progression.scrap()
-      );
-
-      if (!result.isValid) {
-          this.eventBus.dispatch({
-              type: GameEvents.REALITY_BLEED,
-              payload: {
-                  severity: 'MEDIUM',
-                  source: `INVENTORY:${context}`,
-                  message: result.errors[0]
-              }
-          });
-      }
   }
 
   startDrag(item: Item, sourceType: 'bag' | 'equipment', sourceIndex?: number, sourceSlot?: any, clientX: number = 0, clientY: number = 0) {
@@ -156,33 +141,51 @@ export class InventoryService {
     if (!drag.isDragging || !drag.item || !targetType) { this.cancelDrag(); return; }
     const validation = this.validateDropTarget(targetType, targetIndex, targetSlot);
     if (!validation.isValid) { this.cancelDrag(); return; }
-    this.executeDrop(drag, targetType, targetIndex, targetSlot, validation.isSwap, validation.isMerge);
+    
+    // We reuse moveItem as the central point for logic
+    this.moveItem(drag.item, 
+        { type: drag.sourceType!, index: drag.sourceIndex ?? undefined, slot: drag.sourceSlot ?? undefined },
+        { type: targetType, index: targetIndex, slot: targetSlot }
+    );
+    
     this.cancelDrag();
   }
   
   moveItem(item: Item, source: { type: 'bag'|'equipment', index?: number, slot?: any }, target: { type: 'bag'|'equipment', index?: number, slot?: any }): boolean {
       if (this.isLocked()) return false;
       
+      // TRANSACTIONAL WRAPPER
+      const currentState: InventoryState = { bag: this.bag(), equipped: this.equipped() };
+      const transaction = this.proofKernel.createTransaction(currentState);
+
+      // We need to execute the drop logic on the *draft* state, but our logic functions 
+      // (swapInBag, etc.) are currently bound to Signals.
+      // Refactoring strategy: We will optimistic update the signals, then verify.
+      // If verification fails, we revert signals to `currentState`.
+      
+      // Execute Logic (Signals update)
+      // Re-validate inside just in case (though endDrag usually handles it)
       this.dragState.set({ isDragging: true, item: item, sourceType: source.type, sourceIndex: source.index ?? null, sourceSlot: source.slot ?? null, cursorX: 0, cursorY: 0 });
       const validation = this.validateDropTarget(target.type, target.index, target.slot);
+      
       if (validation.isValid) {
-          // Transactional Wrapper
-          const tx = this.proofKernel.createTransaction({ bag: this.bag(), equipped: this.equipped() });
-          
-          // Execute Logic (Signals update)
           this.executeDrop(this.dragState(), target.type, target.index, target.slot, validation.isSwap, validation.isMerge);
           
-          // Verify
+          // Verify Post-Op
           const verify = this.proofKernel.verifyInventoryState(this.bag(), this.progression.credits(), this.progression.scrap());
           
           if (!verify.isValid) {
-              // ROLLBACK implicitly by triggering bleed (Real rollback would revert signals here)
+              // ROLLBACK
+              console.warn('[Inventory] Kernel Rejection:', verify.errors[0].message);
+              this.bag.set(currentState.bag);
+              this.equipped.set(currentState.equipped);
+              
               this.eventBus.dispatch({
                   type: GameEvents.REALITY_BLEED,
-                  payload: { severity: 'CRITICAL', source: 'INVENTORY_TRANSACTION', message: verify.errors[0] }
+                  payload: { severity: 'MEDIUM', source: 'KERNEL:INV_ROLLBACK', message: verify.errors[0].message }
               });
-              // Force basic cleanup if corrupted (e.g. remove nulls)
-              this.bag.update(b => b.filter(i => !!i));
+              
+              this.cancelDrag();
               return false;
           }
 
@@ -194,12 +197,25 @@ export class InventoryService {
 
   quickAction(item: Item, source: { type: 'bag' | 'equipment', index?: number, slot?: string }) {
       if (this.isLocked()) return;
+      // Also protected by Kernel via moveItem calls inside equip/unequip if we refactor them, 
+      // but for now let's wrap the public entry point.
+      const snapshot = { bag: this.bag(), equipped: this.equipped() };
+      
       if (source.type === 'bag' && source.index !== undefined) {
           this.equip(item, source.index);
       } else if (source.type === 'equipment' && source.slot) {
           this.unequip(source.slot as any);
       }
-      this.verifyIntegrity('QUICK_ACTION');
+      
+      const verify = this.proofKernel.verifyInventoryState(this.bag(), this.progression.credits(), this.progression.scrap());
+      if (!verify.isValid) {
+          this.bag.set(snapshot.bag);
+          this.equipped.set(snapshot.equipped);
+          this.eventBus.dispatch({
+              type: GameEvents.REALITY_BLEED,
+              payload: { severity: 'MEDIUM', source: 'KERNEL:INV_ROLLBACK', message: verify.errors[0].message }
+          });
+      }
   }
 
   private executeDrop(drag: DragState, targetType: 'bag' | 'equipment', targetIndex?: number, targetSlot?: any, isSwap: boolean = false, isMerge: boolean = false) {
@@ -271,7 +287,7 @@ export class InventoryService {
             this.bag.set(previousBag);
             this.eventBus.dispatch({
                 type: GameEvents.REALITY_BLEED,
-                payload: { severity: 'MEDIUM', source: 'ADD_ITEM_FAIL', message: verify.errors[0] }
+                payload: { severity: 'MEDIUM', source: 'KERNEL:ADD_ITEM', message: verify.errors[0].message }
             });
             return false;
         }
