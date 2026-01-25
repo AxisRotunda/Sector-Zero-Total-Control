@@ -1,3 +1,4 @@
+
 import { Injectable, inject } from '@angular/core';
 import { Entity } from '../models/game.models';
 import { WorldService } from '../game/world/world.service';
@@ -20,16 +21,22 @@ export class NpcUpdateService {
       t.angle += 0.02;
       if (t.attackTimer <= 0) {
           const range = 500;
-          const targets = this.spatialHash.query(t.x, t.y, range, t.zoneId);
-          let nearest: Entity | null = null; let minDist = range;
-          for (const target of targets) {
+          // OPTIMIZATION: Zero-Alloc queryFast
+          const { buffer, count } = this.spatialHash.queryFast(t.x, t.y, range, t.zoneId);
+          
+          let nearest: Entity | null = null; 
+          let minDist = range;
+          
+          for (let i = 0; i < count; i++) {
+              const target = buffer[i];
               if (isEnemy(target) && target.state !== 'DEAD') {
                   const d = Math.hypot(target.x - t.x, target.y - t.y);
                   if (d < minDist) { minDist = d; nearest = target; }
               }
           }
+          
           if (nearest) {
-              const angle = Math.atan2(nearest.y - t.y, nearest.x - t.x);
+              const angle = Math.atan2((nearest as Entity).y - t.y, (nearest as Entity).x - t.x);
               t.angle = angle; 
               const proj = this.entityPool.acquire('HITBOX', undefined, t.zoneId);
               proj.source = 'DEFENSE'; proj.x = t.x + Math.cos(angle) * 30; proj.y = t.y + Math.sin(angle) * 30; proj.z = 30; 
@@ -42,23 +49,21 @@ export class NpcUpdateService {
   updateGuard(g: Entity) {
       this.checkPlayerAwareness(g);
       
-      // Behavior Override: Alert / Confront
       if (g.data?.alertBehavior === 'CONFRONT') {
           const p = this.world.player;
           const dist = Math.hypot(p.x - g.x, p.y - g.y);
-          // If player is close but not touching, face and move towards
           if (dist < (g.data.detectionRadius || 150) && dist > 50) {
               g.state = 'MOVE';
               const angle = Math.atan2(p.y - g.y, p.x - g.x);
               g.angle = angle;
-              const speed = 1.5; // Fast walk
+              const speed = 1.5; 
               g.vx += Math.cos(angle) * speed;
               g.vy += Math.sin(angle) * speed;
               this.animateMove(g);
-              return; // Override patrol
+              return; 
           } else if (dist <= 50) {
-              g.state = 'IDLE'; // Stop at player
-              g.angle = Math.atan2(p.y - g.y, p.x - g.x); // Face player
+              g.state = 'IDLE'; 
+              g.angle = Math.atan2(p.y - g.y, p.x - g.x); 
               this.animateIdle(g);
               return;
           }
@@ -127,9 +132,7 @@ export class NpcUpdateService {
   }
 
   updateCitizen(c: Entity) {
-      // NEW BEHAVIOR: 'COWER' - Tremble in place
       if (c.data?.behavior === 'COWER') {
-          // Jitter
           c.angle += (Math.random() - 0.5) * 0.1;
           this.animateIdle(c);
           return;

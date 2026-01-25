@@ -36,46 +36,41 @@ export class InteractionService {
       return null; 
   });
   
-  // Refactored to support complex transition requests
   requestedFloorChange = signal<{ id: string; spawn?: {x: number, y: number} } | null>(null);
 
-  // Cooldown tracking for zone transitions
   private lastTransitionTime = 0;
-  private readonly TRANSITION_COOLDOWN = 1000; // 1 second buffer
+  private readonly TRANSITION_COOLDOWN = 1000;
 
   update(player: Entity, globalTime: number) {
       let bestTarget: Entity | null = null;
       let bestScore = Infinity;
 
-      // CRITICAL FIX: Must pass currentZone().id to query the correct spatial bucket
       const zoneId = this.world.currentZone().id;
-      const nearby = this.spatialHash.query(player.x, player.y, 250, zoneId);
+      // OPTIMIZATION: Use Zero-Alloc queryFast
+      const { buffer, count } = this.spatialHash.queryFast(player.x, player.y, 250, zoneId);
       
       const px = player.x;
       const py = player.y;
-      // Player direction vector
       const pDirX = Math.cos(player.angle);
       const pDirY = Math.sin(player.angle);
 
       const now = Date.now();
 
-      for(const e of nearby) {
+      for (let i = 0; i < count; i++) {
+          const e = buffer[i];
+          
           // Calculate distance
           const dx = e.x - px;
           const dy = e.y - py;
           const dist = Math.hypot(dx, dy);
           const combinedRadius = player.radius + (e.radius || 20);
           
-          // 1. Exits (Legacy & Zone Transitions)
+          // 1. Exits
           if (e.type === 'EXIT') {
                if (dist < combinedRadius + 20) {
                     if (!e.locked) {
-                        // Check cooldown to prevent bounce
-                        if (now - this.lastTransitionTime < this.TRANSITION_COOLDOWN) {
-                            return;
-                        }
+                        if (now - this.lastTransitionTime < this.TRANSITION_COOLDOWN) return;
 
-                        // FIX: Read from targetZoneId (Zone system standard) instead of legacy targetSector
                         const targetId = (e as any).targetZoneId || e.exitType || 'DOWN';
                         this.requestedFloorChange.set({ 
                             id: targetId,
@@ -94,15 +89,14 @@ export class InteractionService {
                }
           }
           
-          // 2. Selectable Targets (NPCs, Terminals, Generic Interactables)
+          // 2. Selectable Targets
           const isInteractiveType = e.type === 'NPC' || e.type === 'TERMINAL' || e.type === 'INTERACTABLE' || e.subType === 'STASH' || e.subType === 'RIFTGATE' || e.subType === 'PORTAL';
-          const isActive = !e.accessed; // Terminals become inactive after access
+          const isActive = !e.accessed;
 
           if (isInteractiveType && isActive) {
                const interactRange = (e.interactionRadius || 100) + combinedRadius + 50; 
                
                if (dist < interactRange) {
-                   // Calculate "Facing Score" to prioritize what player is looking at
                    const tDirX = dx / dist;
                    const tDirY = dy / dist;
                    const dot = (pDirX * tDirX) + (pDirY * tDirY);
@@ -115,7 +109,6 @@ export class InteractionService {
                        bestTarget = e;
                    }
                    
-                   // Discovery check
                    if (e.subType && this.narrative.discoverEntity(e.subType)) {
                        this.eventBus.dispatch({ 
                            type: GameEvents.FLOATING_TEXT_SPAWN, 
@@ -126,7 +119,6 @@ export class InteractionService {
           }
       }
       
-      // Haptic bump when changing targets
       if (bestTarget && this.nearbyInteractable()?.id !== bestTarget.id) {
           this.haptic.impactLight();
       }
@@ -134,11 +126,9 @@ export class InteractionService {
       this.nearbyInteractable.set(bestTarget);
   }
 
-  // New: Direct World Interaction via Tap
   tryInteractAt(screenX: number, screenY: number, screenWidth: number, screenHeight: number) {
       const cam = this.world.camera;
       
-      // 1. Inverse Camera Transform (Screen -> World)
       const sx = screenX - screenWidth / 2;
       const sy = screenY - screenHeight / 2;
       
@@ -149,19 +139,22 @@ export class InteractionService {
       const targetIsoX = unzoomedX + camIso.x;
       const targetIsoY = unzoomedY + camIso.y;
       
-      // Inverse Iso (Iso -> Cartesian)
       const worldX = targetIsoY + 0.5 * targetIsoX;
       const worldY = targetIsoY - 0.5 * targetIsoX;
       
-      // 2. Query at World Coords
       const zoneId = this.world.currentZone().id;
-      const targets = this.spatialHash.query(worldX, worldY, 100, zoneId);
+      // OPTIMIZATION: Use queryFast
+      const { buffer, count } = this.spatialHash.queryFast(worldX, worldY, 100, zoneId);
       
-      // 3. Filter for interactables
-      const validTarget = targets.find(e => 
-          (e.type === 'NPC' || e.type === 'INTERACTABLE' || (e.type === 'TERMINAL' && !e.accessed) || e.subType === 'STASH' || e.subType === 'RIFTGATE' || e.subType === 'PORTAL') && 
-          e.state !== 'DEAD'
-      );
+      let validTarget: Entity | null = null;
+
+      for (let i = 0; i < count; i++) {
+          const e = buffer[i];
+          if ((e.type === 'NPC' || e.type === 'INTERACTABLE' || (e.type === 'TERMINAL' && !e.accessed) || e.subType === 'STASH' || e.subType === 'RIFTGATE' || e.subType === 'PORTAL') && e.state !== 'DEAD') {
+              validTarget = e;
+              break; 
+          }
+      }
       
       if (validTarget) {
           const p = this.world.player;
@@ -187,7 +180,6 @@ export class InteractionService {
       this.haptic.impactLight();
 
       if (target.subType === 'ZONE_TRANSITION') {
-          // FIX: Check targetZoneId on entity root first, then data
           const dest = (target as any).targetZoneId || target.data?.targetZone;
           if (dest) {
               const spawn = target.spawnOverride || target.data?.spawnOverride;
@@ -234,7 +226,7 @@ export class InteractionService {
   }
 
   private processTerminal(e: Entity) {
-      if (!e.logId && !e.dialogueId) return; // Terminals can be purely dialogue or lore logs
+      if (!e.logId && !e.dialogueId) return;
       
       if (e.dialogueId) {
           this.dialogueService.startDialogue(e.dialogueId);

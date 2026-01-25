@@ -33,7 +33,6 @@ export class PlayerCombatService {
   }
 
   private handleInputs(player: Entity) {
-    // Buffer Skills
     if (this.input.isDown('SKILL_1')) this.inputBuffer.addCommand('SECONDARY', this.input.aimAngle ?? undefined, 2);
     if (this.input.isDown('SKILL_2')) this.inputBuffer.addCommand('UTILITY', this.input.aimAngle ?? undefined, 2);
     if (this.input.isDown('SKILL_3')) this.inputBuffer.addCommand('DASH', this.input.aimAngle ?? undefined, 3);
@@ -87,7 +86,8 @@ export class PlayerCombatService {
   private findBestTarget(player: Entity): Entity | null {
       const zoneId = this.world.currentZone().id;
       const range = 500; 
-      const candidates = this.spatialHash.query(player.x, player.y, range, zoneId);
+      // OPTIMIZATION: Zero-Alloc
+      const { buffer, count } = this.spatialHash.queryFast(player.x, player.y, range, zoneId);
       
       let best: Entity | null = null;
       let minScore = Infinity;
@@ -95,7 +95,8 @@ export class PlayerCombatService {
       const playerDirX = Math.cos(player.angle);
       const playerDirY = Math.sin(player.angle);
 
-      for (const e of candidates) {
+      for (let i = 0; i < count; i++) {
+          const e = buffer[i];
           if (e.id === player.id) continue;
           if (e.state === 'DEAD') continue;
           if (!isEnemy(e) && !isDestructible(e)) continue;
@@ -129,17 +130,19 @@ export class PlayerCombatService {
 
   private handleAutoAttack(player: Entity) {
        const zoneId = this.world.currentZone().id;
-       const nearbyTargets = this.spatialHash.query(player.x, player.y, BALANCE.COMBAT.AUTO_ATTACK_RANGE, zoneId);
+       // OPTIMIZATION: Zero-Alloc
+       const { buffer, count } = this.spatialHash.queryFast(player.x, player.y, BALANCE.COMBAT.AUTO_ATTACK_RANGE, zoneId);
        
        let closest: Entity | null = null; 
        let minD = BALANCE.COMBAT.AUTO_ATTACK_RANGE;
        
-       nearbyTargets.forEach(e => {
+       for (let i = 0; i < count; i++) {
+          const e = buffer[i];
           if ((isEnemy(e) || isDestructible(e)) && e.state !== 'DEAD') {
               const d = Math.hypot(e.x - player.x, e.y - player.y);
               if (d < minD) { minD = d; closest = e; }
           }
-      });
+      }
 
       if (closest) {
            if (isEnemy(closest)) this.tutorial.trigger('COMBAT');
