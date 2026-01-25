@@ -21,6 +21,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RealityCorrectorService } from '../core/reality-corrector.service';
 import { PerformanceTelemetryService } from '../systems/performance-telemetry.service';
 import { AdaptiveQualityService } from '../systems/adaptive-quality.service';
+import { ProofKernelService, KernelDiagnostics } from '../core/proof/proof-kernel.service';
 
 @Component({
   selector: 'app-hud',
@@ -89,6 +90,19 @@ import { AdaptiveQualityService } from '../systems/adaptive-quality.service';
                   [class.animate-pulse]="realityIntegrity() < 30"></div>
               </div>
               
+              <!-- KERNEL DEBUG PANEL (Visible if failures exist) -->
+              @if (kernelDiagnostics().failingAxioms.length > 0) {
+                <div class="mt-1 border-t border-zinc-800 pt-1 bg-red-900/10 p-1">
+                  <div class="text-[9px] text-red-500 font-bold tracking-tight mb-1">TOP AXIOM FAILURES</div>
+                  @for (ax of kernelDiagnostics().failingAxioms | slice:0:3; track ax.id) {
+                    <div class="flex justify-between text-[8px] text-zinc-400 font-mono">
+                      <span class="truncate max-w-[120px]">{{ ax.id }}</span>
+                      <span class="text-red-400">{{ ax.failures }}</span>
+                    </div>
+                  }
+                </div>
+              }
+
               <!-- Performance Telemetry Overlay -->
               <div class="mt-2 pt-2 border-t border-zinc-800">
                   <div class="flex justify-between text-[10px]">
@@ -229,6 +243,7 @@ export class HudComponent {
   interaction = inject(InteractionService);
   private eventBus = inject(EventBusService);
   private realityCorrector = inject(RealityCorrectorService);
+  private proofKernel = inject(ProofKernelService);
   
   // New Injections
   private telemetry = inject(PerformanceTelemetryService);
@@ -268,6 +283,10 @@ export class HudComponent {
 
   getCorrectionStats() {
     return this.realityCorrector.getStats();
+  }
+
+  kernelDiagnostics() {
+    return this.proofKernel.getDiagnostics();
   }
 
   // Performance monitoring integration

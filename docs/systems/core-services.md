@@ -3,7 +3,7 @@
 
 **META**
 - **ID**: `core-services`
-- **LAST_UPDATED**: `2026-02-05T10:00:00Z`
+- **LAST_UPDATED**: `2026-02-05T14:30:00Z`
 - **PRIMARY_FILES**:
   - `src/game/game-engine.service.ts`
   - `src/game/time.service.ts`
@@ -27,6 +27,7 @@
 - **Proof Kernel**: The `ProofKernelService` acts as a runtime verifier (Axiomatic Guard). It enforces invariants (e.g., "Health cannot be negative", "Inventory stack > 0") *before* state is committed.
   - **Axioms**: Explicit rules registered per domain (Combat, Inventory, World).
   - **Transactions**: Atomic operations that are validated against axioms. If validation fails, the transaction rolls back, and a `REALITY_BLEED` event is dispatched.
+  - **Diagnostics**: The Kernel now exposes `getDiagnostics()`, allowing the HUD to visualize which specific axioms are failing in real-time.
   - **Reality Bleed**: A meta-concept representing system corruption or logic failures, handled by the `RealityCorrectorService`.
 - **Game Loop**: `GameEngineService` uses `requestAnimationFrame`. `TimeService` manages fixed-step logic updates (`tick()`).
 - **Input Pipeline**: Raw inputs -> `InputService` -> `InputBufferService` (queuing) -> `InputValidatorService` (NaN checks).
@@ -34,7 +35,7 @@
 
 **KEY_INTERACTIONS**:
 - **Proof**: `CombatService` asks Kernel to verify damage calculations. `InventoryService` asks Kernel to verify item moves.
-- **Output**: `RealityCorrectorService` listens for Kernel failures and applies auto-fixes (e.g., clamping values, resetting grids).
+- **Output**: `RealityCorrectorService` listens for Kernel failures and applies auto-fixes (e.g., clamping values, resetting grids). `HudComponent` polls Kernel Diagnostics.
 
 **HEURISTICS_AND_PATTERNS**:
 - **Design by Contract**: The Kernel enforces the "Contract" of the game state.
@@ -53,6 +54,7 @@
 - `verify(domain: AxiomDomain, context: any)`: Runs checks. Returns `ValidationResult`.
 - `verifyCombatTransaction(...)`: Facade for checking damage integrity.
 - `verifyInventoryState(...)`: Facade for checking bag/currency integrity.
+- `getDiagnostics()`: Returns `KernelDiagnostics` containing per-domain and per-axiom failure statistics.
 
 ### `src/game/game-engine.service.ts`
 

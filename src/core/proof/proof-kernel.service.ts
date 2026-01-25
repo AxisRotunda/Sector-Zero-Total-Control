@@ -41,6 +41,17 @@ export interface DomainMetrics {
   totalTimeMs: number;
 }
 
+export interface AxiomStats {
+  id: string;
+  checks: number;
+  failures: number;
+}
+
+export interface KernelDiagnostics {
+  domains: { domain: string; checks: number; failures: number; avgMs: number }[];
+  failingAxioms: AxiomStats[];
+}
+
 // --- TRANSACTION HELPER ---
 
 export class Transaction<T> {
@@ -96,6 +107,9 @@ export class ProofKernelService {
   // --- STATE ---
   private axioms = new Map<string, Axiom>();
   
+  // Track stats per individual axiom for granular debugging
+  private axiomStats = new Map<string, AxiomStats>();
+  
   private metrics = {
     COMBAT: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
     INVENTORY: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
@@ -112,6 +126,7 @@ export class ProofKernelService {
 
   registerAxiom<T>(axiom: Axiom<T>) {
     this.axioms.set(axiom.id, axiom);
+    this.axiomStats.set(axiom.id, { id: axiom.id, checks: 0, failures: 0 });
   }
 
   createTransaction<T>(state: T): Transaction<T> {
@@ -129,8 +144,14 @@ export class ProofKernelService {
     for (const axiom of this.axioms.values()) {
       if (axiom.domain !== domain) continue;
 
+      // Update stats
+      const stats = this.axiomStats.get(axiom.id);
+      if (stats) stats.checks++;
+
       try {
         if (!axiom.check(context)) {
+          if (stats) stats.failures++;
+          
           errors.push({
             axiomId: axiom.id,
             domain: domain,
@@ -154,6 +175,24 @@ export class ProofKernelService {
       isValid: errors.length === 0,
       errors
     };
+  }
+
+  getDiagnostics(): KernelDiagnostics {
+    const domains = Object.entries(this.metrics).map(([key, sig]) => {
+      const m = sig();
+      return { 
+        domain: key, 
+        checks: m.checks, 
+        failures: m.failures, 
+        avgMs: m.checks > 0 ? parseFloat((m.totalTimeMs / m.checks).toFixed(4)) : 0 
+      };
+    });
+
+    const failingAxioms = Array.from(this.axiomStats.values())
+      .filter(s => s.failures > 0)
+      .sort((a, b) => b.failures - a.failures);
+
+    return { domains, failingAxioms };
   }
 
   // --- SPECIFIC VERIFICATION HELPERS (Facades) ---
@@ -190,10 +229,20 @@ export class ProofKernelService {
       description: 'Output cannot exceed theoretical maximum',
       check: (ctx: { packet: DamagePacket, result: DamageResult, limit: number }) => {
         const rawInput = ctx.packet.physical + ctx.packet.fire + ctx.packet.cold + ctx.packet.lightning + ctx.packet.chaos;
-        // Allow a small buffer constant (+50) for flat bonuses
-        return ctx.result.total <= (rawInput * ctx.limit) + 50;
+        // Allow a small buffer constant (+50) for flat bonuses, handle 0 input case
+        const maxAllowed = (Math.max(1, rawInput) * ctx.limit) + 50;
+        return ctx.result.total <= maxAllowed;
       },
-      errorMessage: (ctx) => `Entropy Violation: Output ${ctx.result.total} exceeds limit for input`
+      errorMessage: (ctx) => `Entropy Violation: Output ${ctx.result.total} exceeds limit`
+    });
+
+    this.registerAxiom({
+      id: 'combat.overflow_cap',
+      domain: 'COMBAT',
+      severity: 'CRITICAL',
+      description: 'Damage cannot exceed hard engine cap (9999)',
+      check: (ctx: { result: DamageResult }) => ctx.result.total <= 9999,
+      errorMessage: (ctx) => `Damage Overflow: ${ctx.result.total}`
     });
 
     // 2. INVENTORY AXIOMS
@@ -204,6 +253,24 @@ export class ProofKernelService {
       description: 'Item stacks must be positive',
       check: (ctx: { bag: Item[] }) => ctx.bag.every(i => i.stack > 0),
       errorMessage: () => `Item with 0 or negative stack found`
+    });
+
+    this.registerAxiom({
+      id: 'inv.stack_overflow',
+      domain: 'INVENTORY',
+      severity: 'HIGH',
+      description: 'Item stack cannot exceed maxStack',
+      check: (ctx: { bag: Item[] }) => ctx.bag.every(i => i.stack <= i.maxStack),
+      errorMessage: () => `Item stack exceeds max limit`
+    });
+
+    this.registerAxiom({
+      id: 'inv.ghost_items',
+      domain: 'INVENTORY',
+      severity: 'CRITICAL',
+      description: 'Items must have valid IDs',
+      check: (ctx: { bag: Item[] }) => ctx.bag.every(i => !!i.id && i.id.length > 0),
+      errorMessage: () => `Ghost Item detected (Missing ID)`
     });
 
     this.registerAxiom({
@@ -247,7 +314,7 @@ export class ProofKernelService {
     try {
       // Simple shallow copy or specific field extraction could go here
       return JSON.parse(JSON.stringify(ctx, (key, value) => {
-        if (key === 'trail' || key === 'grid') return '[Omitted]';
+        if (key === 'trail' || key === 'grid' || key === 'visuals') return '[Omitted]';
         return value;
       }));
     } catch {
