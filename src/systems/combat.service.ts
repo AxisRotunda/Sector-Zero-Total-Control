@@ -25,6 +25,7 @@ import { GameEvents } from '../core/events/game-events';
 import { LootService } from '../services/loot.service';
 import { InventoryService } from '../game/inventory.service';
 import { SoundService } from '../services/sound.service';
+import { ProofKernelService } from '../core/proof/proof-kernel.service';
 
 @Injectable({ providedIn: 'root' })
 export class CombatService {
@@ -36,6 +37,7 @@ export class CombatService {
   private inventory = inject(InventoryService);
   private sound = inject(SoundService);
   private loot = inject(LootService);
+  private proofKernel = inject(ProofKernelService);
 
   private damageResultPool: DamageResult[] = [];
 
@@ -59,19 +61,30 @@ export class CombatService {
 
     const damagePacket = hitbox.damagePacket ?? this.createFallbackDamagePacket(hitbox);
     
-    if (BALANCE.PLAYER.BASE_HP < 0) { 
-        this.validateDamagePacket(damagePacket, `${hitbox.source} -> ${target.type}`);
+    // Validate Input Packet (Axiom Check)
+    if (damagePacket.physical < 0 || isNaN(damagePacket.physical)) {
+        this.eventBus.dispatch({
+            type: GameEvents.REALITY_BLEED,
+            payload: { severity: 'LOW', source: 'CombatInput', message: 'Negative damage input detected' }
+        });
+        damagePacket.physical = 0;
     }
 
     const result = this.calculateMitigatedDamage(hitbox, target, damagePacket);
     
+    // --- VERIFICATION STEP ---
+    const proof = this.proofKernel.verifyCombatTransaction(damagePacket, result, 2.5); // 2.5x max multiplier tolerance
+    if (!proof.isValid) {
+        this.eventBus.dispatch({
+            type: GameEvents.REALITY_BLEED,
+            payload: { severity: 'MEDIUM', source: 'CombatMath', message: proof.errors[0] }
+        });
+        // Correct-by-construction fallback: Clamp to safe input value
+        result.total = Math.min(result.total, calculateTotalDamage(damagePacket) * 2);
+    }
+    
     this.applyCombatResult(hitbox, target, result);
     
-    // Release pooled object after use in event dispatch
-    // Note: We dispatch copy of primitives in event payload usually, but here we pass the result object.
-    // Listeners should consume synchronously or clone if needed.
-    // For safety in this async-event architecture, we might rely on GC if listeners are async.
-    // But since eventBus is synchronous Subject:
     this.releaseDamageResult(result);
   }
 
@@ -90,11 +103,6 @@ export class CombatService {
     const result = this.calculateMitigatedDamage(attacker, target, damagePacket);
     this.applyCombatResult(attacker, target, result);
     this.releaseDamageResult(result);
-  }
-
-  private validateDamagePacket(packet: DamagePacket, source: string): void {
-      if (packet.physical === undefined || isNaN(packet.physical)) packet.physical = 0;
-      if (calculateTotalDamage(packet) < 0) console.warn(`[Combat] Negative damage from ${source}`);
   }
 
   private createFallbackDamagePacket(hitbox: Entity): DamagePacket {
@@ -265,7 +273,7 @@ export class CombatService {
     // Use Pooled Object
     const result = this.acquireDamageResult();
     result.total = finalTotal;
-    result.breakdown = mitigatedDamage; // Note: breakdown is a new object from step 8, safe to assign
+    result.breakdown = mitigatedDamage; 
     result.isCrit = isCrit;
     result.penetratedResistances = effectiveResistances;
 
@@ -279,7 +287,6 @@ export class CombatService {
   ): void {
     const { total } = result;
 
-    // DECOUPLED: Dispatch Event instead of calling Feedback directly
     this.eventBus.dispatch({
         type: GameEvents.COMBAT_HIT_CONFIRMED,
         payload: { source, target, result }
@@ -394,9 +401,6 @@ export class CombatService {
     const currentZone = this.world.currentZone();
 
     if (currentZone.isTrainingZone) {
-      // Derez Effect dispatched via event now? No, Feedback service is decoupled.
-      // We can dispatch a specific event or keep using feedback for visual-only stuff via subscription
-      // For now, let's allow CombatService to fire "EnemyKilled" event and have feedback listen
       this.eventBus.dispatch({ type: GameEvents.ENEMY_KILLED, payload: { type: e.subType || '' } });
       this.checkTrainingWaveComplete();
     } else {
@@ -433,10 +437,6 @@ export class CombatService {
   public destroyObject(e: Entity): void {
     e.state = 'DEAD';
     if (e.subType === 'BARREL') {
-      // Explosion logic is visual + gameplay.
-      // Visuals handled by feedback listener to DEATH event or similar? 
-      // Or we trigger explosion hitbox here.
-      
       const explosion = this.entityPool.acquire('HITBOX', undefined, e.zoneId);
       explosion.source = 'ENVIRONMENT';
       explosion.x = e.x;
@@ -451,10 +451,7 @@ export class CombatService {
       explosion.status.stun = BALANCE.ENVIRONMENT.BARREL_EXPLOSION_STUN;
       this.world.entities.push(explosion);
       
-      // We still need audio/visuals for explosion.
-      // Dispatch specific event for Barrel Explosion
-      // For now, simple way:
-      this.sound.play('EXPLOSION'); // Keeping basic audio here for now or move to feedback
+      this.sound.play('EXPLOSION');
     } 
     this.loot.processDestructibleRewards(e);
   }

@@ -11,6 +11,7 @@ import { EventBusService } from '../core/events/event-bus.service';
 import { GameEvents } from '../core/events/game-events';
 import { InventoryService } from '../game/inventory.service';
 import { ItemGeneratorService } from './item-generator.service';
+import { ProofKernelService } from '../core/proof/proof-kernel.service';
 
 @Injectable({ providedIn: 'root' })
 export class DialogueService implements OnDestroy {
@@ -22,6 +23,7 @@ export class DialogueService implements OnDestroy {
   private eventBus = inject(EventBusService);
   private inventory = inject(InventoryService);
   private itemGen = inject(ItemGeneratorService);
+  private proofKernel = inject(ProofKernelService);
 
   activeDialogue = signal<DialogueNode | null>(null);
   visibleText = signal('');
@@ -39,10 +41,25 @@ export class DialogueService implements OnDestroy {
   startDialogue(id: string) {
       const node = DIALOGUES[id];
       if (!node) {
+          // If ID missing, log bleed and close
+          this.eventBus.dispatch({ type: GameEvents.REALITY_BLEED, payload: { severity: 'LOW', source: 'Dialogue', message: `Missing Node: ${id}` }});
           this.close();
           return;
       }
       
+      // --- VERIFICATION STEP ---
+      const proof = this.proofKernel.verifyDialogueState(node, (reqs) => this.checkRequirements(reqs));
+      if (!proof.isValid) {
+          this.eventBus.dispatch({
+              type: GameEvents.REALITY_BLEED,
+              payload: { severity: 'MEDIUM', source: 'DialogueCheck', message: proof.errors[0] }
+          });
+          
+          // Glitch fallback: Override mood to show corruption
+          node.mood = 'GLITCHED';
+          node.text = '...[DATA CORRUPTED]... [AXIOM FAILURE]...';
+      }
+
       this.activeDialogue.set(node);
       this.fullText = node.text;
       this.visibleText.set('');

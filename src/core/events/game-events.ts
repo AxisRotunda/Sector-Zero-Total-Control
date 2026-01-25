@@ -34,6 +34,12 @@ export type CombatHitPayload = {
     result: DamageResult;
 };
 
+export type RealityBleedPayload = {
+    severity: 'LOW' | 'MEDIUM' | 'CRITICAL';
+    source: string;
+    message: string;
+};
+
 export type GameEvent =
   | { type: 'FLOATING_TEXT_SPAWN'; payload: FloatingTextPayload }
   | { type: 'PLAYER_DEATH'; payload?: void }
@@ -42,7 +48,8 @@ export type GameEvent =
   | { type: 'LOCATION_DISCOVERED'; payload: LocationDiscoveryPayload }
   | { type: 'ENEMY_KILLED'; payload: EnemyKillPayload }
   | { type: 'ITEM_COLLECTED'; payload: ItemCollectPayload }
-  | { type: 'COMBAT_HIT_CONFIRMED'; payload: CombatHitPayload };
+  | { type: 'COMBAT_HIT_CONFIRMED'; payload: CombatHitPayload }
+  | { type: 'REALITY_BLEED'; payload: RealityBleedPayload };
 
 export const GameEvents = {
   FLOATING_TEXT_SPAWN: 'FLOATING_TEXT_SPAWN' as const,
@@ -53,4 +60,5 @@ export const GameEvents = {
   ENEMY_KILLED: 'ENEMY_KILLED' as const,
   ITEM_COLLECTED: 'ITEM_COLLECTED' as const,
   COMBAT_HIT_CONFIRMED: 'COMBAT_HIT_CONFIRMED' as const,
+  REALITY_BLEED: 'REALITY_BLEED' as const,
 };

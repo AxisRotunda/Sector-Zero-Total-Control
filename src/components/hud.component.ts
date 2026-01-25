@@ -15,6 +15,9 @@ import { ICONS } from '../config/icons.config';
 import { UiPanelService } from '../services/ui-panel.service';
 import { InteractionService } from '../services/interaction.service';
 import { Entity } from '../models/game.models';
+import { EventBusService } from '../core/events/event-bus.service';
+import { GameEvents, RealityBleedPayload } from '../core/events/game-events';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 @Component({
   selector: 'app-hud',
@@ -55,6 +58,25 @@ import { Entity } from '../models/game.models';
                    <span class="text-[10px] text-yellow-500 font-bold">{{ player.progression.credits() }} CR</span>
                    <span class="text-[9px] text-zinc-500">{{ player.progression.scrap() }} SCRAP</span>
                </div>
+            </div>
+            
+            <!-- REALITY INTEGRITY INDICATOR (Observable Verification) -->
+            <div class="mt-2 pt-2 border-t border-zinc-800">
+                <div class="flex justify-between text-[8px] uppercase tracking-widest font-bold mb-1">
+                    <span class="text-cyan-600">REALITY STABILITY</span>
+                    <span [class.text-red-500]="realityIntegrity() < 80" [class.text-cyan-500]="realityIntegrity() >= 80">
+                        {{ realityIntegrity() }}%
+                    </span>
+                </div>
+                <div class="w-full h-1 bg-zinc-900">
+                    <div class="h-full transition-all duration-500"
+                         [style.width.%]="realityIntegrity()"
+                         [class.bg-cyan-600]="realityIntegrity() >= 80"
+                         [class.bg-red-600]="realityIntegrity() < 80"></div>
+                </div>
+                @if (lastBleedMessage()) {
+                    <div class="text-[8px] text-red-500 mt-1 animate-pulse truncate">{{ lastBleedMessage() }}</div>
+                }
             </div>
           </div>
 
@@ -158,6 +180,7 @@ export class HudComponent {
   narrative = inject(NarrativeService);
   ui = inject(UiPanelService);
   interaction = inject(InteractionService);
+  private eventBus = inject(EventBusService);
 
   openInventory = output<void>();
   openSkills = output<void>();
@@ -169,4 +192,26 @@ export class HudComponent {
   readonly Math = Math;
   readonly icons = ICONS;
   readonly FACTIONS = FACTIONS;
+
+  realityIntegrity = signal(100);
+  lastBleedMessage = signal<string | null>(null);
+
+  constructor() {
+      // Listen for Reality Bleed events to lower stability
+      this.eventBus.on(GameEvents.REALITY_BLEED)
+        .pipe(takeUntilDestroyed())
+        .subscribe((payload: RealityBleedPayload) => {
+            const drop = payload.severity === 'CRITICAL' ? 15 : (payload.severity === 'MEDIUM' ? 5 : 1);
+            this.realityIntegrity.update(v => Math.max(0, v - drop));
+            this.lastBleedMessage.set(`[${payload.source}] ${payload.message}`);
+            
+            // Auto-heal stability over time in a real app, or leave as flavor
+            setTimeout(() => this.lastBleedMessage.set(null), 3000);
+        });
+        
+      // Recover Integrity slowly
+      setInterval(() => {
+          this.realityIntegrity.update(v => Math.min(100, v + 1));
+      }, 1000);
+  }
 }
