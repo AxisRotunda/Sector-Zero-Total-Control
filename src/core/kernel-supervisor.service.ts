@@ -26,8 +26,8 @@ const POLICIES: Record<string, SupervisionPolicy> = {
         logLevel: 'ERROR', 
         action: 'SPATIAL', 
         capQuality: 'MEDIUM', 
-        // Only consider capping if the violation itself is critical
-        condition: (s) => s === 'CRITICAL' 
+        // Allow MEDIUM errors to enter the evaluation loop, but logic will only cap if Status is CRITICAL
+        condition: (s) => s === 'MEDIUM' || s === 'CRITICAL' 
     },
     'RENDER_DEPTH': { 
         logLevel: 'WARN', 
@@ -110,15 +110,17 @@ export class KernelSupervisorService {
               const status = this.systemStatus();
 
               // Emergency MEDIUM cap only if system is globally critical and not already capped
+              // This turns "Entropy Critical" into a rare, meaningful event instead of something triggered by isolated violations.
               if (policy.capQuality === 'MEDIUM') {
                   if (status === 'CRITICAL' && !this.emergencyCapApplied) {
+                      console.warn('[Supervisor] Stability Critical. Engaging Emergency Caps.');
                       this.adaptiveQuality.setSafetyCap('MEDIUM');
                       this.emergencyCapApplied = true;
                   }
                   return;
               }
 
-              // High cap for geometry/visuals, one-shot
+              // High cap for geometry/visuals, one-shot (If geometry is overlapping, we assume high load)
               if (policy.capQuality === 'HIGH') {
                   this.adaptiveQuality.setSafetyCap('HIGH');
               }
@@ -128,10 +130,13 @@ export class KernelSupervisorService {
 
   private startRecoveryLoop() {
       setInterval(() => {
+          // Slowly recover stability over time
           this.stabilityScore.update(s => Math.min(100, s + 1));
           
-          // Reset emergency latch if stability recovers
+          // Reset emergency latch if stability recovers significantly
+          // We wait until > 80 (STABLE) to ensure we don't oscillate
           if (this.stabilityScore() > 80 && this.emergencyCapApplied) {
+              console.log('[Supervisor] Stability recovered. Disengaging Emergency Locks.');
               this.emergencyCapApplied = false;
           }
       }, 1000);
