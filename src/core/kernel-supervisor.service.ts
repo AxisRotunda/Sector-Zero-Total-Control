@@ -180,20 +180,35 @@ export class KernelSupervisorService {
   }
 
   /**
-   * Deterministic Stability Harness
-   * Feeds scripted sequence of severities to validate the control law.
-   * Example: runStabilityTest(['MEDIUM', 'LOW', 'CRITICAL'])
+   * Deterministic Stability Harness (Event-Driven)
+   * Feeds scripted sequence of severities to validate the control law via the Event Bus.
+   * Usage: kernelHarness(['MEDIUM', 'LOW', 'CRITICAL'])
    */
-  runStabilityTest(sequence: ('LOW'|'MEDIUM'|'HIGH'|'CRITICAL')[]) {
+  async runStabilityTest(sequence: ('LOW'|'MEDIUM'|'HIGH'|'CRITICAL')[]) {
       console.group('KERNEL STABILITY HARNESS');
       console.log('Initial Score:', this.stabilityScore());
-      
-      sequence.forEach((sev, i) => {
+      console.log('Starting Event Sequence...');
+
+      for (let i = 0; i < sequence.length; i++) {
+          const sev = sequence[i];
           const weight = KERNEL_CONFIG.WEIGHTS[sev];
-          // Simulate violation
-          this.stabilityScore.update(s => Math.max(0, s - weight));
-          console.log(`[T+${i}] Input: ${sev} (-${weight}) -> Score: ${this.stabilityScore()} [${this.systemStatus()}]`);
-      });
+          
+          // Simulate timeline delay to watch recovery fight back
+          await new Promise(resolve => setTimeout(resolve, 500));
+
+          console.log(`[T+${i}] Dispatching: ${sev}`);
+          
+          this.eventBus.dispatch({
+              type: GameEvents.REALITY_BLEED,
+              payload: {
+                  severity: sev,
+                  source: 'HARNESS_TEST',
+                  message: `Simulated Fault #${i}`
+              }
+          });
+
+          console.log(`   -> Score: ${this.stabilityScore()} [${this.systemStatus()}]`);
+      }
       
       console.log('Final Status:', this.systemStatus());
       console.groupEnd();

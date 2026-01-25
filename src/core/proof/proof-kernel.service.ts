@@ -341,15 +341,16 @@ export class ProofKernelService implements OnDestroy {
       let severity: AxiomSeverity = 'LOW';
       
       // Mapped Logic for Severity Constraints
+      // Policy: only kernel-level failures as CRITICAL
       if (data.type === 'SPATIAL_TOPOLOGY') {
-          // Density errors are notable but recoverable
           severity = 'MEDIUM'; 
       } else if (data.type === 'GEOMETRY_SEGMENTS') {
-          // Structural overlaps are warnings, not crashes
           severity = 'MEDIUM'; 
       } else if (data.error.includes('KernelPanic')) {
-          // Reserved for actual logic crashes
           severity = 'CRITICAL';
+      } else {
+          // Default logic errors (paths, etc)
+          severity = 'MEDIUM';
       }
 
       this.updateMetrics(data.type, data.computeTime, 1);
@@ -416,8 +417,9 @@ export class ProofKernelService implements OnDestroy {
       check: (ctx: { result: DamageResult }) => ctx.result.total >= 0,
       errorMessage: (ctx) => `Negative damage: ${ctx.result.total}`
     });
+    // Downgraded from CRITICAL to HIGH to match "Only kernel failures are critical" policy
     this.registerAxiom({
-      id: 'inv.non_negative_stacks', domain: 'INVENTORY', severity: 'CRITICAL', description: 'Positive stacks',
+      id: 'inv.non_negative_stacks', domain: 'INVENTORY', severity: 'HIGH', description: 'Positive stacks',
       check: (ctx: { bag: Item[] }) => ctx.bag.every(i => i.stack > 0),
       errorMessage: () => `Invalid stack count`
     });
