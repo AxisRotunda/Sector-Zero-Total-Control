@@ -65,7 +65,11 @@ export class StructureRendererService {
 
   // --- FLOOR DECORATIONS ---
   drawFloorDecoration(ctx: CanvasRenderingContext2D, e: Entity) {
-      const w = e.width || 40;
+      const config = DECORATIONS[e.subType || ''] || { 
+          width: 40, depth: 40, height: 40, baseColor: '#333' 
+      };
+
+      const w = e.width || config.width;
       // Use depth for Y-dimension if available, otherwise height (legacy data), otherwise width
       const d = e.depth || e.height || w; 
       
@@ -93,9 +97,9 @@ export class StructureRendererService {
           ctx.textBaseline = 'middle';
           
           // Spray paint effect
-          ctx.shadowColor = e.color;
+          ctx.shadowColor = e.color || config.baseColor;
           ctx.shadowBlur = 10;
-          ctx.fillStyle = e.color;
+          ctx.fillStyle = e.color || config.baseColor;
           ctx.globalAlpha = 0.8;
           
           ctx.fillText(e.data?.label || 'RESIST', 0, 0);
@@ -103,7 +107,24 @@ export class StructureRendererService {
           return;
       }
 
-      ctx.fillStyle = e.color || '#333';
+      if (e.subType === 'TRASH') {
+          ctx.fillStyle = e.color || config.baseColor;
+          const debris = [
+              { dx: -5, dy: 5, w: 4, h: 2 },
+              { dx: 10, dy: -5, w: 3, h: 3 },
+              { dx: 2, dy: 2, w: 5, h: 2 },
+              { dx: -8, dy: -8, w: 3, h: 3 }
+          ];
+          
+          debris.forEach(bit => {
+              const dp = IsoUtils.toIso(e.x + bit.dx, e.y + bit.dy, 0);
+              ctx.fillRect(Math.floor(dp.x), Math.floor(dp.y), bit.w, bit.h);
+          });
+          return;
+      }
+
+      // RUG / GENERIC FILL
+      ctx.fillStyle = e.data?.color || e.color || config.baseColor;
       
       ctx.beginPath();
       ctx.moveTo(p1.x, p1.y);
@@ -112,6 +133,13 @@ export class StructureRendererService {
       ctx.lineTo(p4.x, p4.y);
       ctx.closePath();
       ctx.fill();
+
+      // Border for Rugs
+      if (e.subType === 'RUG') {
+          ctx.strokeStyle = this.textureGen.adjustColor(ctx.fillStyle as string, -20);
+          ctx.lineWidth = 2;
+          ctx.stroke();
+      }
 
       // Simple details
       if (e.subType === 'FLOOR_CRACK') {
