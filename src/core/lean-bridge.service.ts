@@ -13,18 +13,26 @@ export interface LeanCombatInput {
   penetration: number; // Mapped to Nat
 }
 
+// 1. Canonical geometry model
 export interface LeanRect {
-  id: number | string; // Mapped to Nat (logic handles string IDs via hash or equivalence)
-  x: number; // Mapped to Int (left)
-  y: number; // Mapped to Int (bottom)
-  w: number; // Mapped to Nat (width)
-  h: number; // Mapped to Nat (height)
+  id: number | string; // Mapped to Nat
+  x: number; // left (Int)
+  y: number; // bottom (Int)
+  w: number; // width (Nat, > 0)
+  h: number; // height (Nat, > 0)
 }
 
 export interface LeanProofResult {
   valid: boolean;
   reason?: string;
+  pair?: [number, number]; // New: Indices of failing pair
 }
+
+// Helper functions (Pure, no allocations)
+const left   = (r: LeanRect) => r.x;
+const right  = (r: LeanRect) => r.x + r.w;
+const bottom = (r: LeanRect) => r.y;
+const top    = (r: LeanRect) => r.y + r.h;
 
 /**
  * Acts as the FFI (Foreign Function Interface) to the hypothetical Lean/WASM module.
@@ -36,54 +44,104 @@ export interface LeanProofResult {
 })
 export class LeanBridgeService {
 
+  constructor() {
+    this.runGeometrySelfTest();
+  }
+
   // --- 1. GEOMETRY DOMAIN ---
   // Reference: src/lean/geometry.lean :: ValidLevel
 
   /**
-   * Logical model (Lean):
-   * rectOverlap(a, b) holds iff:
-   * a.w > 0 ∧ a.h > 0 ∧ b.w > 0 ∧ b.h > 0 (non-degenerate rectangles) and
-   * a.left < b.right ∧ b.left < a.right (intervals overlap on X) and
-   * a.bottom < b.top ∧ b.bottom < a.top (intervals overlap on Y).
-   * 
-   * Derived helpers:
-   * left(r) = r.x
-   * right(r) = r.x + r.w
-   * bottom(r) = r.y
-   * top(r) = r.y + r.h
+   * 2. Strict overlap kernel
+   * Private overlap predicate.
+   * Strict `<` in Lean is implemented via early-return `>=` checks.
    */
   private rectOverlap(a: LeanRect, b: LeanRect): boolean {
-    const wpos = a.w > 0 && b.w > 0;
-    const hpos = a.h > 0 && b.h > 0;
+    if (a.w <= 0 || a.h <= 0 || b.w <= 0 || b.h <= 0) return false;
     
-    const xInt = a.x < (b.x + b.w) && b.x < (a.x + a.w);
-    const yInt = a.y < (b.y + b.h) && b.y < (a.y + a.h);
+    // Separation Axis Theorem (simplified for AABB)
+    // If they are separated on any axis, they do not overlap.
+    if (left(a)   >= right(b))  return false;
+    if (left(b)   >= right(a))  return false;
+    if (bottom(a) >= top(b))    return false;
+    if (bottom(b) >= top(a))    return false;
     
-    return wpos && hpos && xInt && yInt;
+    return true;
+  }
+
+  /**
+   * Deterministic validity check with minimal allocations.
+   * Complexity: O(n^2 / 2)
+   */
+  private validLevel(rects: readonly LeanRect[]): { ok: boolean; pair?: [number, number] } {
+    const n = rects.length;
+    for (let i = 0; i < n; i++) {
+      const ri = rects[i];
+      // Symmetry is exploited by iterating j = i + 1
+      for (let j = i + 1; j < n; j++) { 
+        const rj = rects[j];
+        if (this.rectOverlap(ri, rj)) {
+          return { ok: false, pair: [i, j] };
+        }
+      }
+    }
+    return { ok: true };
   }
 
   /**
    * Simulates: `ValidLevel : List Rect -> Bool`
    * Executable Boolean version: validLevelBool(walls) returns true iff no pair of distinct rectangles overlaps.
-   * This is O(n^2) and deterministic; it is the intended "kernel-level" check.
    */
-  proveGeometryValidity(walls: LeanRect[]): LeanProofResult {
-    const n = walls.length;
-    for (let i = 0; i < n; i++) {
-        const ri = walls[i];
-        for (let j = 0; j < n; j++) {
-            if (i === j) continue; // i ≠ j
-            const rj = walls[j];
-            
-            if (this.rectOverlap(ri, rj)) {
-                return { 
-                    valid: false, 
-                    reason: `Geometric Axiom Violation: Intersection detected between Entity ${ri.id} and Entity ${rj.id}` 
-                };
-            }
-        }
+  proveGeometryValidity(walls: readonly LeanRect[]): LeanProofResult {
+    const result = this.validLevel(walls);
+    
+    if (!result.ok && result.pair) {
+        const [i, j] = result.pair;
+        const a = walls[i];
+        const b = walls[j];
+        return {
+            valid: false,
+            reason: `Geometric Axiom Violation: Intersection detected between Entity ${a.id} and Entity ${b.id}`,
+            pair: result.pair
+        };
     }
+
     return { valid: true };
+  }
+
+  // --- 4. Mechanistic verification and automation ---
+  private runGeometrySelfTest() {
+     const cases: { rects: LeanRect[]; expectOk: boolean; name: string }[] = [
+       {
+         name: "single rect",
+         expectOk: true,
+         rects: [{ id: 0, x: 0, y: 0, w: 10, h: 10 }],
+       },
+       {
+         name: "overlapping",
+         expectOk: false,
+         rects: [
+           { id: 0, x: 0, y: 0, w: 10, h: 10 },
+           { id: 1, x: 5, y: 5, w: 10, h: 10 },
+         ],
+       },
+       {
+         name: "touching edge (allowed)",
+         expectOk: true,
+         rects: [
+           { id: 0, x: 0, y: 0, w: 10, h: 10 },
+           { id: 1, x: 10, y: 0, w: 10, h: 10 },
+         ],
+       },
+     ];
+
+     for (const c of cases) {
+       const r = this.validLevel(c.rects);
+       if (r.ok !== c.expectOk) {
+         console.warn("[LeanBridge] GeometryKernelSelfTest mismatch", c.name, r);
+       }
+     }
+     // console.log("[LeanBridge] Self-test complete.");
   }
 
   // --- 2. COMBAT DOMAIN ---
