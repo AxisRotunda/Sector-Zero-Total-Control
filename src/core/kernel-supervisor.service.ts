@@ -1,4 +1,3 @@
-
 import { Injectable, inject, signal, computed, effect } from '@angular/core';
 import { EventBusService } from './events/event-bus.service';
 import { GameEvents, RealityBleedPayload } from './events/game-events';
@@ -22,12 +21,12 @@ export const KERNEL_CONFIG = {
         LOW: 1,
         MEDIUM: 5,
         HIGH: 10,
-        CRITICAL: 15
+        CRITICAL: 12 // Reduced from 15 to prevent single-hit criticals
     },
     RECOVERY_RATE: 1, // Points per second
     THRESHOLDS: {
         STABLE: 80,
-        CRITICAL: 40
+        CRITICAL: 35 // Lowered from 40 to increase buffer
     },
     SAMPLING: {
         STABLE: 0.05,  // Tuned: 5% check rate for high-frequency ops when stable
@@ -152,6 +151,7 @@ export class KernelSupervisorService {
           if (policy.capQuality) {
               const status = this.systemStatus();
               if (policy.capQuality === 'MEDIUM') {
+                  // Guard: Only trigger emergency cap if not already active to prevent log spam
                   if (status === 'CRITICAL' && !this.emergencyCapActive()) {
                       console.warn('[Supervisor] Stability Critical. Engaging Emergency Caps.');
                       this.adaptiveQuality.setSafetyCap('MEDIUM');

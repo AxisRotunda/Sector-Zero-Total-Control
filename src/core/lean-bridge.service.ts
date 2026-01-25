@@ -15,10 +15,10 @@ export interface LeanCombatInput {
 
 export interface LeanRect {
   id: number | string; // Mapped to Nat (logic handles string IDs via hash or equivalence)
-  x: number; // Mapped to Int
-  y: number; // Mapped to Int
-  w: number; // Mapped to Nat
-  h: number; // Mapped to Nat
+  x: number; // Mapped to Int (left)
+  y: number; // Mapped to Int (bottom)
+  w: number; // Mapped to Nat (width)
+  h: number; // Mapped to Nat (height)
 }
 
 export interface LeanProofResult {
@@ -40,34 +40,48 @@ export class LeanBridgeService {
   // Reference: src/lean/geometry.lean :: ValidLevel
 
   /**
+   * Logical model (Lean):
+   * rectOverlap(a, b) holds iff:
+   * a.w > 0 ∧ a.h > 0 ∧ b.w > 0 ∧ b.h > 0 (non-degenerate rectangles) and
+   * a.left < b.right ∧ b.left < a.right (intervals overlap on X) and
+   * a.bottom < b.top ∧ b.bottom < a.top (intervals overlap on Y).
+   * 
+   * Derived helpers:
+   * left(r) = r.x
+   * right(r) = r.x + r.w
+   * bottom(r) = r.y
+   * top(r) = r.y + r.h
+   */
+  private rectOverlap(a: LeanRect, b: LeanRect): boolean {
+    const wpos = a.w > 0 && b.w > 0;
+    const hpos = a.h > 0 && b.h > 0;
+    
+    const xInt = a.x < (b.x + b.w) && b.x < (a.x + a.w);
+    const yInt = a.y < (b.y + b.h) && b.y < (a.y + a.h);
+    
+    return wpos && hpos && xInt && yInt;
+  }
+
+  /**
    * Simulates: `ValidLevel : List Rect -> Bool`
-   * Checks for strict non-overlap of static geometry using the Separating Axis Theorem (AABB).
+   * Executable Boolean version: validLevelBool(walls) returns true iff no pair of distinct rectangles overlaps.
+   * This is O(n^2) and deterministic; it is the intended "kernel-level" check.
    */
   proveGeometryValidity(walls: LeanRect[]): LeanProofResult {
-    const len = walls.length;
-    // O(N^2) naive check - acceptable for static initialization phase verification.
-    // In a WASM context, this would be optimized, but the logic remains the axiom source.
-    for (let i = 0; i < len; i++) {
-      const a = walls[i];
-      for (let j = i + 1; j < len; j++) {
-        const b = walls[j];
-        
-        // Strict overlap check (Mirroring `intersects` in geometry.lean)
-        // Note: Using <= for non-overlap to handle touching edges as valid (non-intersecting)
-        const noOverlap = (
-          (a.x + a.w <= b.x) ||
-          (b.x + b.w <= a.x) ||
-          (a.y + a.h <= b.y) ||
-          (b.y + b.h <= a.y)
-        );
-
-        if (!noOverlap) {
-          return { 
-            valid: false, 
-            reason: `Geometric Axiom Violation: Intersection between Wall #${a.id} and #${b.id}` 
-          };
+    const n = walls.length;
+    for (let i = 0; i < n; i++) {
+        const ri = walls[i];
+        for (let j = 0; j < n; j++) {
+            if (i === j) continue; // i ≠ j
+            const rj = walls[j];
+            
+            if (this.rectOverlap(ri, rj)) {
+                return { 
+                    valid: false, 
+                    reason: `Geometric Axiom Violation: Intersection detected between Entity ${ri.id} and Entity ${rj.id}` 
+                };
+            }
         }
-      }
     }
     return { valid: true };
   }

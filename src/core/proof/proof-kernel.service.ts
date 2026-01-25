@@ -392,8 +392,13 @@ export class ProofKernelService implements OnDestroy {
       let severity: AxiomSeverity = 'LOW';
       if (data.type === 'SPATIAL_TOPOLOGY') severity = 'MEDIUM'; 
       else if (data.type === 'GEOMETRY_SEGMENTS') severity = 'MEDIUM'; 
-      else if (data.error.includes('KernelPanic')) severity = 'CRITICAL';
+      else if (data.error && data.error.includes('KernelPanic')) severity = 'CRITICAL';
       else severity = 'MEDIUM';
+
+      // SAFETY: Explicitly downgrade severity if it defaulted to CRITICAL in worker but isn't a Panic
+      if (severity === 'CRITICAL' && !data.error.includes('KernelPanic')) {
+          severity = 'HIGH';
+      }
 
       this.updateMetrics(data.type, data.computeTime, 1);
 
