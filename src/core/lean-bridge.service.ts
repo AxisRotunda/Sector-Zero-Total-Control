@@ -28,6 +28,13 @@ export interface LeanProofResult {
   details?: { i: number; j: number; aId: number | string; bId: number | string };
 }
 
+interface LeanTestCase {
+  name: string;
+  reason: string;
+  rects: LeanRect[];
+  expectOk: boolean;
+}
+
 // Helper functions (Pure, no allocations)
 const left   = (r: LeanRect) => r.x;
 const right  = (r: LeanRect) => r.x + r.w;
@@ -115,16 +122,80 @@ export class LeanBridgeService {
   }
 
   // --- 4. Mechanistic verification and automation ---
+  
+  private lcg(seed: number) {
+    let s = seed;
+    return () => {
+      s = Math.imul(1664525, s) + 1013904223;
+      s = s >>> 0;
+      return s / 4294967296;
+    }
+  }
+
+  private generateFuzzCases(count: number, seed: number): LeanTestCase[] {
+    const rng = this.lcg(seed);
+    const cases: LeanTestCase[] = [];
+
+    for (let i = 0; i < count; i++) {
+        // Generate random disjoint rects (simplified grid approach to ensure no overlap)
+        const rects: LeanRect[] = [];
+        const gridSize = 50;
+        const mapSize = 5; // 5x5 grid
+        
+        for (let x = 0; x < mapSize; x++) {
+            for (let y = 0; y < mapSize; y++) {
+                if (rng() > 0.7) continue; // Skip some cells
+                rects.push({
+                    id: `fuzz_${i}_${x}_${y}`,
+                    x: x * gridSize + 5,
+                    y: y * gridSize + 5,
+                    w: gridSize - 10,
+                    h: gridSize - 10
+                });
+            }
+        }
+
+        // 50% chance to inject a failure
+        let expectOk = true;
+        let reason = "Generated disjoint grid";
+        
+        if (rects.length > 2 && rng() > 0.5) {
+            // Inject overlap
+            const target = rects[0];
+            const overlapRect = {
+                id: 'fuzz_overlap',
+                x: target.x + 5,
+                y: target.y + 5,
+                w: 10, 
+                h: 10
+            };
+            rects.push(overlapRect);
+            expectOk = false;
+            reason = "Injected deliberate overlap";
+        }
+
+        cases.push({
+            name: `fuzz_case_${i}`,
+            reason,
+            rects,
+            expectOk
+        });
+    }
+    return cases;
+  }
+
   private runGeometrySelfTest() {
      // Deterministic edge cases & random small sets
-     const cases: { rects: LeanRect[]; expectOk: boolean; name: string }[] = [
+     const fixedCases: LeanTestCase[] = [
        {
          name: "single rect",
+         reason: "A single rectangle cannot overlap itself",
          expectOk: true,
          rects: [{ id: 'test1', x: 0, y: 0, w: 10, h: 10 }],
        },
        {
          name: "identical overlapping",
+         reason: "Two identical rectangles occupy the same space",
          expectOk: false,
          rects: [
            { id: 'a', x: 0, y: 0, w: 10, h: 10 },
@@ -133,6 +204,7 @@ export class LeanBridgeService {
        },
        {
          name: "touching edge (allowed)",
+         reason: "Shared edges are valid (strict inequality check)",
          expectOk: true,
          rects: [
            { id: 'a', x: 0, y: 0, w: 10, h: 10 },
@@ -141,6 +213,7 @@ export class LeanBridgeService {
        },
        {
          name: "nested",
+         reason: "One rectangle completely inside another is an overlap",
          expectOk: false,
          rects: [
            { id: 'outer', x: 0, y: 0, w: 20, h: 20 },
@@ -149,6 +222,7 @@ export class LeanBridgeService {
        },
        {
          name: "zero-dimension (ignored)",
+         reason: "Zero width/height rects are ghost entities",
          expectOk: true,
          rects: [
            { id: 'valid', x: 0, y: 0, w: 10, h: 10 },
@@ -157,18 +231,24 @@ export class LeanBridgeService {
        }
      ];
 
+     // Fuzz block: small number, deterministic seed
+     const fuzzCases = this.generateFuzzCases(32, 0xC0FFEE);
+
      let passed = 0;
-     for (const c of cases) {
+     const allCases = [...fixedCases, ...fuzzCases];
+
+     for (const c of allCases) {
        const r = this.validLevel(c.rects);
        if (r.ok !== c.expectOk) {
-         console.error(`[LeanBridge] SELF-TEST FAILED: ${c.name}`, r);
+         console.error(`[LeanBridge] SELF-TEST FAILED: ${c.name} (${c.reason})`, r);
        } else {
          passed++;
        }
      }
      
-     if (passed === cases.length) {
-       // console.log(`[LeanBridge] Kernel Integrity Verified (${passed}/${cases.length} axioms held)`);
+     if (passed === allCases.length) {
+        // Silent success to avoid console noise, or debug log if needed
+        // console.log(`[LeanBridge] Kernel Integrity Verified (${passed}/${allCases.length} axioms held)`);
      }
   }
 

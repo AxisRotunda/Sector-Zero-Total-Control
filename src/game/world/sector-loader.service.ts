@@ -48,7 +48,7 @@ export class SectorLoaderService {
 
           world.entities = MapUtils.mergeWalls(world.entities);
 
-          // --- KERNEL VERIFICATION: CANONICAL GEOMETRY ---
+          // --- KERNEL VERIFICATION: AUTHORITATIVE GATE ---
           try {
               const walls = world.entities.filter(e => e.type === 'WALL');
               
@@ -56,11 +56,32 @@ export class SectorLoaderService {
               const rects: LeanRect[] = walls.map(w => this.entityToLeanRect(w));
 
               if (rects.length > 0) {
-                  // Fire-and-forget call to the Kernel (Canonical Check)
-                  this.proofKernel.verifyGeometry(rects);
+                  // Run synchronous geometric proof
+                  const proof = this.proofKernel.verifyGeometry(rects);
+                  
+                  if (!proof.valid) {
+                      if (this.proofKernel.isDevMode) {
+                          // Dev Mode: Fatal Error
+                          throw new Error(`[SectorLoader] Geometry Integrity Failure: ${proof.reason}. Details: ${JSON.stringify(proof.details)}`);
+                      } else {
+                          // Prod Mode: Degrade and Log
+                          console.warn(`[SectorLoader] Sector ${zoneId} tainted by geometric conflict. Flagging as degraded.`);
+                          // We could set a degraded flag on the zone here if the model supported it.
+                          // For now, we rely on the ProofKernel already emitting a REALITY_BLEED event which the KernelSupervisor logs.
+                          
+                          // Optional: Insert visual indicator of corruption
+                          this.eventBus.dispatch({
+                              type: GameEvents.REALITY_BLEED,
+                              payload: { severity: 'MEDIUM', source: 'SECTOR_LOAD_GATE', message: 'Sector geometry degraded. Proceed with caution.' }
+                          });
+                      }
+                  }
               }
               
           } catch (verifyErr) {
+              if (this.proofKernel.isDevMode) {
+                  throw verifyErr;
+              }
               console.warn('[SectorLoader] Verification Exception:', verifyErr);
               this.eventBus.dispatch({
                   type: GameEvents.REALITY_BLEED,

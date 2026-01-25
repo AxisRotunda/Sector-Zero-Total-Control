@@ -4,7 +4,7 @@ import { DamageResult, DamagePacket } from '../../models/damage.model';
 import { Item } from '../../models/item.models';
 import { EventBusService } from '../events/event-bus.service';
 import { GameEvents } from '../events/game-events';
-import { LeanBridgeService, LeanCombatState, LeanCombatInput, LeanRect } from '../lean-bridge.service';
+import { LeanBridgeService, LeanCombatState, LeanCombatInput, LeanRect, LeanProofResult } from '../lean-bridge.service';
 
 export type AxiomDomain = 'COMBAT' | 'INVENTORY' | 'WORLD' | 'STATUS' | 'RENDER' | 'INTEGRITY' | 'GEOMETRY' | 'GEOMETRY_SEGMENTS' | 'SPATIAL_TOPOLOGY' | 'PATH_CONTINUITY' | 'RENDER_DEPTH';
 export type AxiomSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
@@ -56,6 +56,12 @@ export interface AxiomStats {
   id: string;
   checks: number;
   failures: number;
+}
+
+export interface GeometryLedgerEntry {
+    t: number;
+    aId: number | string;
+    bId: number | string;
 }
 
 export interface KernelDiagnostics {
@@ -157,9 +163,16 @@ export class ProofKernelService implements OnDestroy {
   // Public signal for sampling rate to break dependency cycle with Supervisor
   public samplingProbability = signal(0.1);
   
-  private ledger: any[] = [];
+  // Observability Ledger
+  private geometryLedger: GeometryLedgerEntry[] = [];
+  private readonly LEDGER_CAP = 100;
+
   private axioms = new Map<string, Axiom>();
   private axiomStats = new Map<string, AxiomStats>();
+
+  // Mode Configuration
+  // In a real app, this might come from environment.ts
+  public isDevMode = false;
 
   constructor() {
     this.initMetrics();
@@ -212,13 +225,23 @@ export class ProofKernelService implements OnDestroy {
   }
 
   // Refactored to use LeanBridge canonical geometry
-  verifyGeometry(rects: LeanRect[]): void {
+  // Now returns the proof result for gating logic
+  verifyGeometry(rects: LeanRect[]): LeanProofResult {
       const start = performance.now();
       const proof = this.leanBridge.proveGeometryValidity(rects);
       const time = performance.now() - start;
 
       if (!proof.valid) {
           this.updateMetrics('GEOMETRY', time, 1);
+          
+          // Ledger Recording
+          this.geometryLedger.push({
+              t: performance.now(),
+              aId: proof.details?.aId || '?',
+              bId: proof.details?.bId || '?'
+          });
+          if (this.geometryLedger.length > this.LEDGER_CAP) this.geometryLedger.shift();
+
           this.eventBus.dispatch({
               type: GameEvents.REALITY_BLEED,
               payload: { 
@@ -231,6 +254,8 @@ export class ProofKernelService implements OnDestroy {
       } else {
           this.updateMetrics('GEOMETRY', time, 0);
       }
+      
+      return proof;
   }
 
   verifySpatialGridTopology(cellCount: number, entityCount: number, cellSize: number): void {
@@ -243,6 +268,15 @@ export class ProofKernelService implements OnDestroy {
 
   verifyRenderDepth(depthValues: number[]): void {
       this.verifyFormal('RENDER_DEPTH', { list: depthValues }, `RENDER_${Date.now()}`);
+  }
+
+  // --- OBSERVABILITY API ---
+  getGeometryViolationCount(): number {
+      return this.geometryLedger.length;
+  }
+
+  getLastGeometryViolations(k: number): GeometryLedgerEntry[] {
+      return this.geometryLedger.slice(-k);
   }
 
   // --- SYNC API (Critical Path) ---
@@ -432,6 +466,6 @@ export class ProofKernelService implements OnDestroy {
       };
     });
     const failingAxioms = Array.from(this.axiomStats.values()).filter(s => s.failures > 0);
-    return { domains, failingAxioms, ledgerSize: this.ledger.length };
+    return { domains, failingAxioms, ledgerSize: this.geometryLedger.length };
   }
 }
