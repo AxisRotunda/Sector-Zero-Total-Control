@@ -15,6 +15,7 @@
     "@angular/compiler": "^21.1.0",
     "@angular/core": "^21.1.0",
     "d3": "7.9.0",
+    "webworker": "^0.8.4",
     "@angular/build": "^21.1.0",
     "@angular/cli": "^21.1.0",
     "@angular/compiler-cli": "^21.1.0",

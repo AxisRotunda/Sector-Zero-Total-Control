@@ -263,6 +263,16 @@ export class HudComponent {
   realityIntegrity = signal(100);
   lastBleedMessage = signal<string | null>(null);
 
+  // Use computed to access service method reactively and safely
+  kernelDiagnostics = computed(() => {
+      // Ensure the service is ready before calling logic
+      if (this.proofKernel && typeof this.proofKernel.getDiagnostics === 'function') {
+          return this.proofKernel.getDiagnostics();
+      }
+      // Fallback if kernel not ready (shouldn't happen with proper DI, but safe for hot reload)
+      return { domains: [], failingAxioms: [], ledgerSize: 0 };
+  });
+
   constructor() {
       // Listen for Reality Bleed events to lower stability
       this.eventBus.on(GameEvents.REALITY_BLEED)
@@ -283,10 +293,6 @@ export class HudComponent {
 
   getCorrectionStats() {
     return this.realityCorrector.getStats();
-  }
-
-  kernelDiagnostics() {
-    return this.proofKernel.getDiagnostics();
   }
 
   // Performance monitoring integration

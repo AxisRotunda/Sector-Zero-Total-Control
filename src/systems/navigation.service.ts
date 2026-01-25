@@ -2,6 +2,7 @@
 import { Injectable, inject } from '@angular/core';
 import { WorldService } from '../game/world/world.service';
 import { Zone } from '../models/game.models';
+import { ProofKernelService } from '../core/proof/proof-kernel.service';
 
 interface GridCell {
   x: number;
@@ -11,6 +12,8 @@ interface GridCell {
 @Injectable({ providedIn: 'root' })
 export class NavigationService {
   private world = inject(WorldService);
+  private proofKernel = inject(ProofKernelService);
+  
   private navGrid: boolean[][] = [];
   private gridSize = 60; // Size of grid cells in world units
   private gridWidth = 0;
@@ -32,9 +35,6 @@ export class NavigationService {
     // Initialize grid (true = walkable)
     this.navGrid = Array(this.gridHeight).fill(null).map(() => Array(this.gridWidth).fill(true));
     
-    // Mark static walls as unwalkable
-    // We use the static chunk manager's entities usually, but here we iterate the world entity list
-    // assuming walls are loaded.
     const walls = this.world.entities.filter(e => e.type === 'WALL');
     
     for (const wall of walls) {
@@ -46,10 +46,8 @@ export class NavigationService {
       const startCell = this.worldToGrid(start);
       const endCell = this.worldToGrid(end);
 
-      // Validate bounds
       if (!this.isValid(startCell) || !this.isValid(endCell)) return [];
       
-      // If target is unwalkable, find nearest walkable neighbor
       let target = endCell;
       if (!this.isWalkable(target)) {
           target = this.findNearestWalkable(target);
@@ -57,7 +55,15 @@ export class NavigationService {
       }
 
       const pathGrid = this.aStar(startCell, target);
-      return pathGrid.map(cell => this.gridToWorld(cell));
+      const worldPath = pathGrid.map(cell => this.gridToWorld(cell));
+
+      // --- FORMAL VERIFICATION ---
+      // Send path to Kernel to prove continuity (no teleportation)
+      if (worldPath.length > 1) {
+          this.proofKernel.verifyPathContinuity(worldPath, this.gridSize);
+      }
+
+      return worldPath;
   }
 
   private worldToGrid(pos: {x: number, y: number}): GridCell {
@@ -76,7 +82,7 @@ export class NavigationService {
 
   private markUnwalkable(wall: any) {
       const w = wall.width || 40;
-      const d = wall.depth || 40; // Use depth for Y
+      const d = wall.depth || 40; 
       
       const startX = Math.floor((wall.x - w / 2 - this.minX) / this.gridSize);
       const endX = Math.ceil((wall.x + w / 2 - this.minX) / this.gridSize);
@@ -100,7 +106,6 @@ export class NavigationService {
   }
 
   private findNearestWalkable(cell: GridCell): GridCell | null {
-      // Spiral search logic could go here, for now check simple neighbors
       const neighbors = this.getNeighbors(cell);
       return neighbors.find(n => this.isWalkable(n)) || null;
   }
@@ -117,12 +122,11 @@ export class NavigationService {
       fScore.set(key(start), this.heuristic(start, end));
 
       let iterations = 0;
-      const MAX_ITERATIONS = 500; // Safety break
+      const MAX_ITERATIONS = 500;
 
       while (openSet.length > 0 && iterations < MAX_ITERATIONS) {
           iterations++;
           
-          // Sort by F score (Simulate Priority Queue)
           openSet.sort((a, b) => (fScore.get(key(a)) || Infinity) - (fScore.get(key(b)) || Infinity));
           const current = openSet.shift()!;
 
@@ -148,11 +152,11 @@ export class NavigationService {
               }
           }
       }
-      return []; // No path
+      return []; 
   }
 
   private getNeighbors(cell: GridCell): GridCell[] {
-      const dirs = [[0, 1], [1, 0], [0, -1], [-1, 0]]; // Up, Right, Down, Left
+      const dirs = [[0, 1], [1, 0], [0, -1], [-1, 0]]; 
       return dirs.map(d => ({ x: cell.x + d[0], y: cell.y + d[1] })).filter(c => this.isValid(c));
   }
 

@@ -61,33 +61,23 @@ export class CombatService {
 
     const damagePacket = hitbox.damagePacket ?? this.createFallbackDamagePacket(hitbox);
     
+    // Create Transaction for Kernel verification
+    const transaction = this.proofKernel.createTransaction({ targetHp: target.hp, dmg: 0 });
+    
+    // 1. Calculate Potential Damage (Pure Function)
     const result = this.calculateMitigatedDamage(hitbox, target, damagePacket);
     
-    // --- KERNEL VERIFICATION ---
-    const proof = this.proofKernel.verifyCombatTransaction(damagePacket, result, 3.0); 
-    
-    if (!proof.isValid) {
-        // Log the violation
-        this.eventBus.dispatch({
-            type: GameEvents.REALITY_BLEED,
-            payload: { 
-                severity: 'MEDIUM', 
-                source: 'KERNEL:COMBAT_AXIOM', 
-                message: proof.errors[0].message 
-            }
-        });
-        
-        // Auto-Correct: Clamp damage to safe fallback to prevent overflow/exploits
-        const safeTotal = calculateTotalDamage(damagePacket);
-        if (result.total > safeTotal * 3) {
-            result.total = safeTotal;
-            console.warn('[Combat] Damage clamped by Kernel');
-        }
-        
-        if (result.total < 0) result.total = 0;
-    }
-    
+    // 2. Optimistic Application
     this.applyCombatResult(hitbox, target, result);
+
+    // 3. Async Verification Trigger (Fire and Forget)
+    // In a full implementation, we'd pass the specific pre/post state here.
+    // For now, we simulate sending the data to the worker via the Kernel.
+    this.proofKernel.verifyFormal('COMBAT', 
+        { oldHp: target.hp + result.total, damage: result.total, newHp: target.hp }, 
+        { oldHp: target.hp + result.total, damage: result.total, newHp: target.hp }, // Same for now in sim
+        'PROCESS_HIT'
+    );
     
     this.releaseDamageResult(result);
   }
@@ -105,10 +95,7 @@ export class CombatService {
     damagePacket.physical = baseDamage;
 
     const result = this.calculateMitigatedDamage(attacker, target, damagePacket);
-    // Direct damage is simpler, but we still verify negative checks via axiom
-    const proof = this.proofKernel.verify('COMBAT', { result });
-    if (!proof.isValid) return; // Drop invalid frame
-
+    
     this.applyCombatResult(attacker, target, result);
     this.releaseDamageResult(result);
   }

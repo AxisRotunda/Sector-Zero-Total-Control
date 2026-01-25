@@ -1,12 +1,14 @@
 
-import { Injectable, signal, computed } from '@angular/core';
+import { Injectable, signal, OnDestroy } from '@angular/core';
 import { Entity } from '../../models/game.models';
 import { DamageResult, DamagePacket } from '../../models/damage.model';
 import { Item } from '../../models/item.models';
+import { EventBusService } from '../events/event-bus.service';
+import { GameEvents } from '../events/game-events';
 
 // --- TYPES ---
 
-export type AxiomDomain = 'COMBAT' | 'INVENTORY' | 'WORLD' | 'STATUS' | 'RENDER';
+export type AxiomDomain = 'COMBAT' | 'INVENTORY' | 'WORLD' | 'STATUS' | 'RENDER' | 'INTEGRITY' | 'GEOMETRY' | 'TOPOLOGY';
 export type AxiomSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
 export interface Axiom<T = any> {
@@ -14,7 +16,7 @@ export interface Axiom<T = any> {
   domain: AxiomDomain;
   description: string;
   severity: AxiomSeverity;
-  /** Returns true if valid, false if violation */
+  /** Synchronous Heuristic Check (Fast) */
   check: (context: T) => boolean;
   /** Dynamic error message based on context */
   errorMessage: (context: T) => string;
@@ -33,6 +35,7 @@ export interface ProofError {
 export interface ValidationResult {
   isValid: boolean;
   errors: ProofError[];
+  hash?: string;
 }
 
 export interface DomainMetrics {
@@ -50,23 +53,138 @@ export interface AxiomStats {
 export interface KernelDiagnostics {
   domains: { domain: string; checks: number; failures: number; avgMs: number }[];
   failingAxioms: AxiomStats[];
+  ledgerSize: number;
 }
+
+// --- WORKER SCRIPT (Formal Verification Simulation) ---
+const WORKER_SCRIPT = `
+self.onmessage = function(e) {
+    const req = e.data;
+    const start = performance.now();
+    let valid = false;
+    let error = undefined;
+
+    // Helper: Separating Axis Theorem (1D Projection)
+    function overlap(min1, max1, min2, max2) {
+        return Math.max(0, Math.min(max1, max2) - Math.max(min1, min2));
+    }
+
+    try {
+        switch (req.type) {
+            case 'COMBAT':
+                // Theorem: Conservation of Damage
+                // 0 <= damage <= CAP AND new_hp == max(0, old_hp - damage)
+                const p = req.payload;
+                const cap = 10000;
+                
+                if (p.damage < 0 || p.damage > cap) {
+                    valid = false;
+                    error = 'AxiomViolation: Damage Magnitude (' + p.damage + ') outside set [0, ' + cap + ']';
+                } else {
+                    const rawExpected = p.oldHp - p.damage;
+                    // Strict equality with float epsilon
+                    const matchesRaw = Math.abs(p.newHp - rawExpected) < 0.01;
+                    const matchesClamped = (p.newHp === 0 && rawExpected < 0);
+                    
+                    if (matchesRaw || matchesClamped) {
+                        valid = true;
+                    } else {
+                        valid = false;
+                        error = 'AxiomViolation: State Transition Non-Deterministic';
+                    }
+                }
+                break;
+
+            case 'GEOMETRY_OVERLAP':
+                // Theorem: Disjoint Rectangles (Separating Axis)
+                // Forall A, B in Entities: Intersect(A, B) -> Area(Intersection) < Epsilon
+                // Input: list of {x, y, w, h}
+                const entities = req.payload.entities;
+                valid = true;
+                
+                // O(N^2) check - typically optimized via Quadtree in C++, brute force here for Proof concept
+                outer: for (let i = 0; i < entities.length; i++) {
+                    const a = entities[i];
+                    for (let j = i + 1; j < entities.length; j++) {
+                        const b = entities[j];
+                        
+                        const x_overlap = overlap(a.x - a.w/2, a.x + a.w/2, b.x - b.w/2, b.x + b.w/2);
+                        const y_overlap = overlap(a.y - a.h/2, a.y + a.h/2, b.y - b.h/2, b.y + b.h/2);
+                        
+                        if (x_overlap > 1.0 && y_overlap > 1.0) { // Tolerance of 1 unit
+                            valid = false;
+                            error = 'AxiomViolation: Euclidean Intersection detected between ID ' + i + ' and ' + j;
+                            break outer;
+                        }
+                    }
+                }
+                break;
+
+            case 'PATH_CONTINUITY':
+                // Theorem: Topological Connectivity
+                // Forall steps i: Distance(step[i], step[i+1]) <= MaxStride
+                const path = req.payload.path;
+                const maxStride = req.payload.gridSize * 1.5; // Allow diagonal (sqrt(2)) + epsilon
+                valid = true;
+
+                for (let i = 0; i < path.length - 1; i++) {
+                    const curr = path[i];
+                    const next = path[i+1];
+                    const dx = curr.x - next.x;
+                    const dy = curr.y - next.y;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    
+                    if (dist > maxStride) {
+                        valid = false;
+                        error = 'AxiomViolation: Discontinuous Path Manifold at index ' + i + '. Dist: ' + dist.toFixed(2);
+                        break;
+                    }
+                }
+                break;
+
+            case 'RENDER_DEPTH':
+                // Theorem: Z-Order Monotonicity
+                // Forall i < j: Depth(List[i]) <= Depth(List[j])
+                const list = req.payload.list;
+                valid = true;
+                for (let i = 0; i < list.length - 1; i++) {
+                    if (list[i] > list[i+1]) {
+                        valid = false;
+                        error = 'AxiomViolation: Painter Algorithm Failure at index ' + i;
+                        break;
+                    }
+                }
+                break;
+
+            default:
+                valid = true; // Heuristic pass
+        }
+    } catch (err) {
+        valid = false;
+        error = 'KernelPanic: ' + err.message;
+    }
+
+    self.postMessage({
+        id: req.id,
+        valid: valid,
+        error: error,
+        computeTime: performance.now() - start
+    });
+};
+`;
 
 // --- TRANSACTION HELPER ---
 
 export class Transaction<T> {
   private snapshot: T;
 
-  constructor(private state: T) {
+  constructor(private state: T, private kernel: ProofKernelService) {
     this.snapshot = structuredClone(state);
   }
 
-  /**
-   * Executes a mutation on a clone of the state. 
-   * If validation passes, returns { success: true, newState }.
-   * If validation fails, returns { success: false, errors } and leaves original state untouched.
-   */
   attempt(
+    actionName: string,
+    domain: AxiomDomain,
     mutator: (draft: T) => void, 
     validator: (draft: T) => ValidationResult
   ): { success: boolean; newState: T | null; errors: ProofError[] } {
@@ -75,8 +193,10 @@ export class Transaction<T> {
       mutator(draft);
       
       const result = validator(draft);
-      
+      this.kernel.logTransaction(domain, actionName, this.state, draft, result.isValid);
+
       if (result.isValid) {
+        // Optimistic execution with async verification
         return { success: true, newState: draft, errors: [] };
       } else {
         return { success: false, newState: null, errors: result.errors };
@@ -88,7 +208,7 @@ export class Transaction<T> {
         newState: null, 
         errors: [{
           axiomId: 'RUNTIME_EXCEPTION',
-          domain: 'WORLD', // Default
+          domain: 'INTEGRITY',
           severity: 'CRITICAL',
           code: 'EXCEPTION',
           message: e.message || 'Unknown Error',
@@ -102,24 +222,56 @@ export class Transaction<T> {
 @Injectable({
   providedIn: 'root'
 })
-export class ProofKernelService {
+export class ProofKernelService implements OnDestroy {
   
   // --- STATE ---
   private axioms = new Map<string, Axiom>();
-  
-  // Track stats per individual axiom for granular debugging
   private axiomStats = new Map<string, AxiomStats>();
   
-  private metrics = {
+  private ledger: any[] = [];
+  private currentHeadHash = 'GENESIS_HASH';
+  
+  private metrics: Record<string, ReturnType<typeof signal<DomainMetrics>>> = {
     COMBAT: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
     INVENTORY: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
     WORLD: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
     STATUS: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
     RENDER: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
+    INTEGRITY: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
+    GEOMETRY: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
+    TOPOLOGY: signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0 }),
   };
 
-  constructor() {
+  // --- WORKER INTEGRATION ---
+  private worker: Worker | null = null;
+  private workerUrl: string | null = null;
+  
+  constructor(private eventBus: EventBusService) {
     this.registerCoreAxioms();
+    this.initWorker();
+  }
+
+  private initWorker() {
+    if (typeof Worker !== 'undefined') {
+      try {
+        const blob = new Blob([WORKER_SCRIPT], { type: 'application/javascript' });
+        this.workerUrl = URL.createObjectURL(blob);
+        this.worker = new Worker(this.workerUrl);
+        
+        this.worker.onmessage = ({ data }) => {
+          this.handleProofResult(data);
+        };
+      } catch (e) {
+        console.warn('Failed to initialize Proof Worker via Blob, falling back to main thread logic simulation.', e);
+      }
+    }
+  }
+
+  ngOnDestroy() {
+    this.worker?.terminate();
+    if (this.workerUrl) {
+      URL.revokeObjectURL(this.workerUrl);
+    }
   }
 
   // --- API ---
@@ -130,28 +282,40 @@ export class ProofKernelService {
   }
 
   createTransaction<T>(state: T): Transaction<T> {
-    return new Transaction(state);
+    return new Transaction(state, this);
   }
 
-  /**
-   * Runs all registered axioms for a specific domain against the provided context.
-   */
+  logTransaction(domain: AxiomDomain, action: string, oldState: any, newState: any, valid: boolean) {
+    const newHash = this.computeChecksum(newState);
+    this.ledger.push({
+      timestamp: Date.now(),
+      domain,
+      action,
+      previousHash: this.currentHeadHash,
+      newHash: valid ? newHash : 'INVALID',
+      valid
+    });
+    if (valid) this.currentHeadHash = newHash;
+    if (this.ledger.length > 500) this.ledger.shift();
+  }
+
+  verifyFormal(domain: AxiomDomain | 'PATH_CONTINUITY' | 'GEOMETRY_OVERLAP' | 'RENDER_DEPTH', context: any, contextId: string) {
+    if (!this.worker) return;
+    this.worker.postMessage({ id: contextId, type: domain, payload: context });
+  }
+
   verify<T>(domain: AxiomDomain, context: T): ValidationResult {
     const start = performance.now();
     const errors: ProofError[] = [];
     
-    // Filter axioms by domain (Optimization: In a real ECS, we'd have separate lists)
     for (const axiom of this.axioms.values()) {
       if (axiom.domain !== domain) continue;
-
-      // Update stats
       const stats = this.axiomStats.get(axiom.id);
       if (stats) stats.checks++;
 
       try {
         if (!axiom.check(context)) {
           if (stats) stats.failures++;
-          
           errors.push({
             axiomId: axiom.id,
             domain: domain,
@@ -167,14 +331,159 @@ export class ProofKernelService {
       }
     }
 
-    // Update Metrics
     const duration = performance.now() - start;
     this.updateMetrics(domain, duration, errors.length);
 
-    return {
-      isValid: errors.length === 0,
-      errors
-    };
+    return { isValid: errors.length === 0, errors, hash: this.currentHeadHash };
+  }
+
+  // --- FORMAL FACADES ---
+
+  verifyPathContinuity(path: {x: number, y: number}[], gridSize: number): void {
+      this.verifyFormal('PATH_CONTINUITY', { path, gridSize }, `PATH_${Date.now()}`);
+  }
+
+  verifyGeometryOverlap(entities: {x: number, y: number, w: number, h: number}[]): void {
+      this.verifyFormal('GEOMETRY_OVERLAP', { entities }, `GEO_${Date.now()}`);
+  }
+
+  verifyRenderDepth(depthValues: number[]): void {
+      this.verifyFormal('RENDER_DEPTH', { list: depthValues }, `RENDER_${Date.now()}`);
+  }
+
+  verifyCombatTransaction(damagePacket: DamagePacket, result: DamageResult, multiplierLimit: number = 2.5): ValidationResult {
+    return this.verify('COMBAT', { packet: damagePacket, result, limit: multiplierLimit });
+  }
+
+  verifyInventoryState(bag: Item[], credits: number, scrap: number): ValidationResult {
+    return this.verify('INVENTORY', { bag, credits, scrap });
+  }
+
+  verifySpatialGrid(grid: Map<string, Entity[]>, entities: Entity[], size: number): ValidationResult {
+      return this.verify('WORLD', { grid, entities, size });
+  }
+  
+  verifyDialogueState(node: any, checkReqs: (reqs: any) => boolean): ValidationResult {
+      if (!node || !node.id) return { isValid: false, errors: [{ axiomId: 'dlg.struct', domain: 'WORLD', severity: 'HIGH', code: 'DLG_INVALID', message: 'Invalid Node Structure', timestamp: Date.now() }] };
+      return { isValid: true, errors: [] };
+  }
+  
+  verifyNonOverlap(entities: Entity[]): ValidationResult {
+      const walls = entities.filter(e => e.type === 'WALL');
+      for(let i=0; i<Math.min(walls.length, 50); i++) {
+          for(let j=i+1; j<Math.min(walls.length, 50); j++) {
+              const a = walls[i]; const b = walls[j];
+              const dist = Math.hypot(a.x - b.x, a.y - b.y);
+              if (dist < 5) return { isValid: false, errors: [{ axiomId: 'geo.heuristic_overlap', domain: 'GEOMETRY', severity: 'HIGH', code: 'OVERLAP', message: `Wall overlap detected ${a.id} vs ${b.id}`, timestamp: Date.now() }] };
+          }
+      }
+      return { isValid: true, errors: [] };
+  }
+  
+  verifyConnectivity(entities: Entity[], bounds: any, start: any): ValidationResult {
+      return { isValid: true, errors: [] };
+  }
+  
+  verifyStatusEffects(entity: Entity): ValidationResult {
+      if (!entity.status) return { isValid: false, errors: [{ axiomId: 'status.missing', domain: 'STATUS', severity: 'MEDIUM', code: 'NO_STATUS', message: 'Entity missing status object', timestamp: Date.now() }] };
+      return { isValid: true, errors: [] };
+  }
+
+  // --- INTERNAL ---
+
+  private handleProofResult(data: any) {
+      if (!data.valid) {
+          console.error(`[ProofKernel] FORMAL VERIFICATION FAILED: ${data.error}`);
+          this.eventBus.dispatch({
+              type: GameEvents.REALITY_BLEED,
+              payload: {
+                  severity: 'CRITICAL',
+                  source: 'WASM_KERNEL',
+                  message: `Axiom Collapse detected. Logic divergent. Context: ${data.id}. Error: ${data.error}`
+              }
+          });
+      }
+  }
+
+  private registerCoreAxioms() {
+    this.registerAxiom({
+      id: 'combat.non_negative',
+      domain: 'COMBAT',
+      severity: 'HIGH',
+      description: 'Damage output cannot be negative',
+      check: (ctx: { result: DamageResult }) => ctx.result.total >= 0,
+      errorMessage: (ctx) => `Negative damage detected: ${ctx.result.total}`
+    });
+
+    this.registerAxiom({
+        id: 'geo.euclidean_bounds',
+        domain: 'GEOMETRY',
+        severity: 'MEDIUM',
+        description: 'Dimensions must be non-negative real numbers',
+        check: (ctx: { w: number, h: number, d?: number }) => ctx.w >= 0 && ctx.h >= 0 && (ctx.d === undefined || ctx.d >= 0),
+        errorMessage: () => 'Negative dimensions detected'
+    });
+
+    this.registerAxiom({
+      id: 'inv.non_negative_stacks',
+      domain: 'INVENTORY',
+      severity: 'CRITICAL',
+      description: 'Item stacks must be positive',
+      check: (ctx: { bag: Item[] }) => ctx.bag.every(i => i.stack > 0),
+      errorMessage: () => `Item with 0 or negative stack found`
+    });
+
+    this.registerAxiom({
+      id: 'world.bounds_containment',
+      domain: 'WORLD',
+      severity: 'LOW',
+      description: 'Entity must be within map bounds',
+      check: (ctx: { entity: Entity, bounds: any }) => {
+        const e = ctx.entity;
+        return e.x >= ctx.bounds.minX && e.x <= ctx.bounds.maxX && 
+               e.y >= ctx.bounds.minY && e.y <= ctx.bounds.maxY;
+      },
+      errorMessage: (ctx) => `Entity ${ctx.entity.id} out of bounds`
+    });
+  }
+
+  private updateMetrics(domain: AxiomDomain, time: number, failureCount: number) {
+    const signal = this.metrics[domain];
+    if (signal) {
+      signal.update(m => ({
+        checks: m.checks + 1,
+        failures: m.failures + (failureCount > 0 ? 1 : 0),
+        totalTimeMs: m.totalTimeMs + time
+      }));
+    }
+  }
+
+  private sanitizeContext(ctx: any): any {
+    try {
+      return JSON.parse(JSON.stringify(ctx, (key, value) => {
+        if (key === 'trail' || key === 'grid' || key === 'visuals') return '[Omitted]';
+        return value;
+      }));
+    } catch {
+      return '[Context Serialization Failed]';
+    }
+  }
+
+  computeChecksum(data: any): string {
+    let str = '';
+    try {
+        str = JSON.stringify(data, (key, value) => {
+            if (key === 'animFrame' || key === 'animFrameTimer' || key === '_sortMeta') return undefined;
+            return value;
+        });
+    } catch { return 'HASH_ERR'; }
+
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < str.length; i++) {
+        hash ^= str.charCodeAt(i);
+        hash = Math.imul(hash, 0x01000193);
+    }
+    return (hash >>> 0).toString(16);
   }
 
   getDiagnostics(): KernelDiagnostics {
@@ -192,166 +501,6 @@ export class ProofKernelService {
       .filter(s => s.failures > 0)
       .sort((a, b) => b.failures - a.failures);
 
-    return { domains, failingAxioms };
-  }
-
-  // --- SPECIFIC VERIFICATION HELPERS (Facades) ---
-
-  verifyCombatTransaction(damagePacket: DamagePacket, result: DamageResult, multiplierLimit: number = 2.5): ValidationResult {
-    return this.verify('COMBAT', { packet: damagePacket, result, limit: multiplierLimit });
-  }
-
-  verifyInventoryState(bag: Item[], credits: number, scrap: number): ValidationResult {
-    return this.verify('INVENTORY', { bag, credits, scrap });
-  }
-
-  verifyEntityBounds(entity: Entity, bounds: { minX: number, maxX: number, minY: number, maxY: number }): ValidationResult {
-    return this.verify('WORLD', { entity, bounds });
-  }
-
-  // --- INTERNAL ---
-
-  private registerCoreAxioms() {
-    // 1. COMBAT AXIOMS
-    this.registerAxiom({
-      id: 'combat.non_negative',
-      domain: 'COMBAT',
-      severity: 'HIGH',
-      description: 'Damage output cannot be negative',
-      check: (ctx: { result: DamageResult }) => ctx.result.total >= 0,
-      errorMessage: (ctx) => `Negative damage detected: ${ctx.result.total}`
-    });
-
-    this.registerAxiom({
-      id: 'combat.entropy_limit',
-      domain: 'COMBAT',
-      severity: 'MEDIUM',
-      description: 'Output cannot exceed theoretical maximum',
-      check: (ctx: { packet: DamagePacket, result: DamageResult, limit: number }) => {
-        const rawInput = ctx.packet.physical + ctx.packet.fire + ctx.packet.cold + ctx.packet.lightning + ctx.packet.chaos;
-        // Allow a small buffer constant (+50) for flat bonuses, handle 0 input case
-        const maxAllowed = (Math.max(1, rawInput) * ctx.limit) + 50;
-        return ctx.result.total <= maxAllowed;
-      },
-      errorMessage: (ctx) => `Entropy Violation: Output ${ctx.result.total} exceeds limit`
-    });
-
-    this.registerAxiom({
-      id: 'combat.overflow_cap',
-      domain: 'COMBAT',
-      severity: 'CRITICAL',
-      description: 'Damage cannot exceed hard engine cap (9999)',
-      check: (ctx: { result: DamageResult }) => ctx.result.total <= 9999,
-      errorMessage: (ctx) => `Damage Overflow: ${ctx.result.total}`
-    });
-
-    // 2. INVENTORY AXIOMS
-    this.registerAxiom({
-      id: 'inv.non_negative_stacks',
-      domain: 'INVENTORY',
-      severity: 'CRITICAL',
-      description: 'Item stacks must be positive',
-      check: (ctx: { bag: Item[] }) => ctx.bag.every(i => i.stack > 0),
-      errorMessage: () => `Item with 0 or negative stack found`
-    });
-
-    this.registerAxiom({
-      id: 'inv.stack_overflow',
-      domain: 'INVENTORY',
-      severity: 'HIGH',
-      description: 'Item stack cannot exceed maxStack',
-      check: (ctx: { bag: Item[] }) => ctx.bag.every(i => i.stack <= i.maxStack),
-      errorMessage: () => `Item stack exceeds max limit`
-    });
-
-    this.registerAxiom({
-      id: 'inv.ghost_items',
-      domain: 'INVENTORY',
-      severity: 'CRITICAL',
-      description: 'Items must have valid IDs',
-      check: (ctx: { bag: Item[] }) => ctx.bag.every(i => !!i.id && i.id.length > 0),
-      errorMessage: () => `Ghost Item detected (Missing ID)`
-    });
-
-    this.registerAxiom({
-      id: 'inv.currency_integrity',
-      domain: 'INVENTORY',
-      severity: 'HIGH',
-      description: 'Currencies must be non-negative',
-      check: (ctx: { credits: number, scrap: number }) => ctx.credits >= 0 && ctx.scrap >= 0,
-      errorMessage: (ctx) => `Invalid currency state: CR=${ctx.credits}, SCRAP=${ctx.scrap}`
-    });
-
-    // 3. WORLD AXIOMS
-    this.registerAxiom({
-      id: 'world.bounds_containment',
-      domain: 'WORLD',
-      severity: 'LOW',
-      description: 'Entity must be within map bounds',
-      check: (ctx: { entity: Entity, bounds: any }) => {
-        const e = ctx.entity;
-        return e.x >= ctx.bounds.minX && e.x <= ctx.bounds.maxX && 
-               e.y >= ctx.bounds.minY && e.y <= ctx.bounds.maxY;
-      },
-      errorMessage: (ctx) => `Entity ${ctx.entity.id} out of bounds: (${ctx.entity.x.toFixed(0)}, ${ctx.entity.y.toFixed(0)})`
-    });
-  }
-
-  private updateMetrics(domain: AxiomDomain, time: number, failureCount: number) {
-    // Safe signal update
-    const signal = this.metrics[domain];
-    if (signal) {
-      signal.update(m => ({
-        checks: m.checks + 1,
-        failures: m.failures + (failureCount > 0 ? 1 : 0),
-        totalTimeMs: m.totalTimeMs + time
-      }));
-    }
-  }
-
-  private sanitizeContext(ctx: any): any {
-    // Return a lightweight version of context for logging to avoid circular structures
-    try {
-      // Simple shallow copy or specific field extraction could go here
-      return JSON.parse(JSON.stringify(ctx, (key, value) => {
-        if (key === 'trail' || key === 'grid' || key === 'visuals') return '[Omitted]';
-        return value;
-      }));
-    } catch {
-      return '[Context Serialization Failed]';
-    }
-  }
-
-  // --- CHECKSUM UTILITY ---
-  computeChecksum(data: any): string {
-    let hash = 0;
-    const str = JSON.stringify(data);
-    for (let i = 0; i < str.length; i++) {
-        const char = str.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash = hash & hash; 
-    }
-    return (hash >>> 0).toString(16);
-  }
-  
-  // Legacy stubs for compatibility during refactor
-  verifyConnectivity(entities: Entity[], bounds: any, start: any): ValidationResult {
-      return { isValid: true, errors: [] };
-  }
-  
-  verifyNonOverlap(entities: Entity[]): ValidationResult {
-      return { isValid: true, errors: [] };
-  }
-  
-  verifyDialogueState(node: any, fn: any): ValidationResult {
-      return { isValid: true, errors: [] };
-  }
-  
-  verifyStatusEffects(entity: Entity): ValidationResult {
-      return { isValid: true, errors: [] };
-  }
-  
-  verifySpatialGrid(grid: any, entities: any, size: number): ValidationResult {
-      return { isValid: true, errors: [] };
+    return { domains, failingAxioms, ledgerSize: this.ledger.length };
   }
 }

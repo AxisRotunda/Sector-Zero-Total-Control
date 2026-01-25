@@ -7,18 +7,19 @@ import { NarrativeService } from '../narrative.service';
 import { MapUtils } from '../../utils/map-utils';
 import { SpatialHashService } from '../../systems/spatial-hash.service';
 import { DECORATIONS } from '../../config/decoration.config';
+import { ProofKernelService } from '../../core/proof/proof-kernel.service';
 
 @Injectable({ providedIn: 'root' })
 export class SectorLoaderService {
   private entityPool = inject(EntityPoolService);
   private narrative = inject(NarrativeService);
   private spatialHash = inject(SpatialHashService);
+  private proofKernel = inject(ProofKernelService);
 
   loadFromTemplate(world: WorldService, template: ZoneTemplate): void {
       try {
           const zoneId = template.id;
 
-          // 1. Set Global Zone Params
           world.currentZone.set({
               id: template.id,
               name: template.name,
@@ -31,26 +32,30 @@ export class SectorLoaderService {
               weather: template.environment.weather,
               floorPattern: template.environment.floorPattern,
               ambientColor: template.environment.ambientColor,
-              isSafeZone: template.isSafeZone // New Safe Zone flag
+              isSafeZone: template.isSafeZone 
           });
           world.mapBounds = template.bounds;
 
-          // 2. Spawn Walls
           if (template.geometry.walls) {
               template.geometry.walls.forEach(w => this.spawnWall(world, w, zoneId));
           }
 
-          // 3. Merge Walls optimization
           world.entities = MapUtils.mergeWalls(world.entities);
 
-          // 4. Insert Walls into Static Spatial Hash
+          // --- FORMAL VERIFICATION ---
+          // Check for illegal overlaps in static geometry that might trap players or cause z-fighting
+          const walls = world.entities.filter(e => e.type === 'WALL');
+          const geometrySnapshots = walls.map(w => ({
+              x: w.x, y: w.y, w: w.width || 40, h: w.depth || 40
+          }));
+          this.proofKernel.verifyGeometryOverlap(geometrySnapshots);
+
           world.entities.forEach(e => {
               if (e.type === 'WALL') {
                   this.spatialHash.insert(e, true);
               }
           });
 
-          // 5. Spawn Entities (Static & Dynamic)
           if (template.entities.static) {
               template.entities.static.forEach(e => this.spawnEntity(world, e, zoneId));
           }
@@ -58,12 +63,10 @@ export class SectorLoaderService {
               template.entities.dynamic.forEach(e => this.spawnEntity(world, e, zoneId));
           }
 
-          // 6. Insert Static Decorations into Static Spatial Hash
           world.staticDecorations.forEach(e => {
               this.spatialHash.insert(e, true);
           });
 
-          // 7. Spawn Exits
           if (template.exits) {
               template.exits.forEach(e => this.spawnExit(world, e, zoneId));
           }
@@ -99,20 +102,17 @@ export class SectorLoaderService {
   }
 
   private spawnEntity(world: WorldService, def: ZoneEntityDef, zoneId: string) {
-      // Progressive Unlocking: Check Narrative Condition
       if (def.conditionFlag) {
           const isMet = this.narrative.getFlag(def.conditionFlag);
-          if (!isMet) return; // Skip spawning
+          if (!isMet) return; 
       }
 
       const e = this.entityPool.acquire(def.type as any, def.subType as any);
       e.x = def.x; e.y = def.y; e.zoneId = zoneId;
       
-      // Defaults
       if (!e.radius) e.radius = 20;
       if (!e.color) e.color = '#fff';
 
-      // Apply Config Defaults if available
       if (def.subType && DECORATIONS[def.subType]) {
           const config = DECORATIONS[def.subType];
           e.width = config.width;
@@ -121,13 +121,9 @@ export class SectorLoaderService {
           e.color = config.baseColor;
       }
 
-      // Apply Instance Overrides
       if (def.data) {
-          // CRITICAL FIX: Propagate the entire data object to the entity.
-          // This ensures properties like 'targetZone' for transitions are preserved.
           e.data = { ...def.data };
 
-          // Map specific properties to entity root for performance/logic access
           if (def.data.dialogueId) e.dialogueId = def.data.dialogueId;
           if (def.data.color) e.color = def.data.color;
           if (def.data.width) e.width = def.data.width;
@@ -148,21 +144,17 @@ export class SectorLoaderService {
               e.color = '#333'; 
               e.radius = 20;
           }
-          // AI Properties
           if (def.data.patrolPoints) e.patrolPoints = def.data.patrolPoints;
           if (def.data.homeX !== undefined) e.homeX = def.data.homeX;
           if (def.data.homeY !== undefined) e.homeY = def.data.homeY;
           if (def.data.wanderRadius !== undefined) e.aggroRadius = def.data.wanderRadius;
       }
       
-      // --- ID MAPPING ---
-      // If the definition has a stable ID, persist it in the data bag for runtime lookup
       if (def.id) {
           if (!e.data) e.data = {};
           e.data.id = def.id;
       }
       
-      // Special logic for NPCs colors if not overridden
       if (e.type === 'NPC' && (!def.data || !def.data.color)) {
           if (!e.radius) e.radius = 25;
           e.interactionRadius = 100;
@@ -173,7 +165,6 @@ export class SectorLoaderService {
           else e.color = '#94a3b8';
       }
 
-      // Determine storage list based on Config
       if (e.type === 'DECORATION' && e.subType && DECORATIONS[e.subType]?.isStaticFloor) {
           world.staticDecorations.push(e);
       } else {
@@ -187,9 +178,8 @@ export class SectorLoaderService {
       exit.exitType = def.direction || 'DOWN'; 
       exit.targetX = 0;
       
-      // Visuals: Logic to distinguish Return (HUB) portals from Forward (Danger) gates
       if (def.targetZoneId === 'HUB') {
-          exit.color = '#06b6d4'; // Cyan for Return
+          exit.color = '#06b6d4'; 
       } else {
           exit.color = def.transitionType === 'GATE' ? '#ef4444' : '#f97316';
       }
@@ -198,7 +188,6 @@ export class SectorLoaderService {
       exit.zoneId = zoneId;
       (exit as any).targetSector = def.targetZoneId;
       
-      // Defensive Copy: Only set spawnOverride if defined
       if (def.spawnOverride) {
           exit.spawnOverride = { x: def.spawnOverride.x, y: def.spawnOverride.y };
       }
