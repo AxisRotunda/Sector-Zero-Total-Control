@@ -26,6 +26,7 @@ import { LootService } from '../services/loot.service';
 import { InventoryService } from '../game/inventory.service';
 import { SoundService } from '../services/sound.service';
 import { ProofKernelService } from '../core/proof/proof-kernel.service';
+import { LeanCombatState, LeanCombatInput } from '../core/lean-bridge.service';
 
 @Injectable({ providedIn: 'root' })
 export class CombatService {
@@ -61,8 +62,8 @@ export class CombatService {
 
     const damagePacket = hitbox.damagePacket ?? this.createFallbackDamagePacket(hitbox);
     
-    // Create Transaction for Kernel verification
-    const transaction = this.proofKernel.createTransaction({ targetHp: target.hp, dmg: 0 });
+    // Snapshot Pre-State
+    const oldHp = target.hp;
     
     // 1. Calculate Potential Damage (Pure Function)
     const result = this.calculateMitigatedDamage(hitbox, target, damagePacket);
@@ -70,13 +71,14 @@ export class CombatService {
     // 2. Optimistic Application
     this.applyCombatResult(hitbox, target, result);
 
-    // 3. Async Verification Trigger (Fire and Forget)
-    // In a full implementation, we'd pass the specific pre/post state here.
-    // For now, we simulate sending the data to the worker via the Kernel.
-    this.proofKernel.verifyFormal('COMBAT', 
-        { oldHp: target.hp + result.total, damage: result.total, newHp: target.hp }, 
-        'PROCESS_HIT'
-    );
+    // 3. Kernel Gate Verification
+    // Map to Lean types
+    const prev: LeanCombatState = { hp: oldHp, max_hp: target.maxHp, armor: target.armor || 0 };
+    const next: LeanCombatState = { hp: target.hp, max_hp: target.maxHp, armor: target.armor || 0 };
+    const input: LeanCombatInput = { damage: result.total, penetration: 0 }; // Simplified input for kernel check
+
+    // This call logs violations in SOFT_PROD and throws in STRICT_DEV
+    this.proofKernel.verifyCombatStep('PROCESS_HIT', prev, input, next);
     
     this.releaseDamageResult(result);
   }
@@ -90,12 +92,20 @@ export class CombatService {
       return;
     }
 
+    const oldHp = target.hp;
     const damagePacket = createEmptyDamagePacket();
     damagePacket.physical = baseDamage;
 
     const result = this.calculateMitigatedDamage(attacker, target, damagePacket);
     
     this.applyCombatResult(attacker, target, result);
+
+    const prev: LeanCombatState = { hp: oldHp, max_hp: target.maxHp, armor: target.armor || 0 };
+    const next: LeanCombatState = { hp: target.hp, max_hp: target.maxHp, armor: target.armor || 0 };
+    const input: LeanCombatInput = { damage: result.total, penetration: 0 };
+
+    this.proofKernel.verifyCombatStep('DIRECT_DAMAGE', prev, input, next);
+
     this.releaseDamageResult(result);
   }
 

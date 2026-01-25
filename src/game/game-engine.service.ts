@@ -22,7 +22,7 @@ import { PerformanceTelemetryService } from '../systems/performance-telemetry.se
 import { AdaptiveQualityService } from '../systems/adaptive-quality.service';
 import { ProofKernelService } from '../core/proof/proof-kernel.service';
 import { WORLD_GRAPH } from '../data/world/world-graph.config';
-import { LeanRect } from '../core/lean-bridge.service';
+import { GeometryMapping } from '../utils/geometry-mapping.util';
 
 @Injectable({
   providedIn: 'root'
@@ -88,25 +88,15 @@ export class GameEngineService {
           for (const config of zones) {
               const tmpl = config.template;
               
-              // Skip zones with no static walls (e.g. purely procedural ones generated at runtime)
+              // Skip zones with no static walls
               if (!tmpl.geometry.walls || tmpl.geometry.walls.length === 0) continue;
               
               totalZones++;
               
-              // Map to Canonical Model (LeanRect)
-              // Note: We replicate the SectorLoader transformation here to ensure parity
-              const rects: LeanRect[] = tmpl.geometry.walls.map((w, index) => {
-                  const width = w.w || 40;
-                  const depth = w.depth || w.h || 40; // Depth is H in schema usually, mapping carefully
-                  
-                  return {
-                      id: `static_${tmpl.id}_${index}`,
-                      x: w.x - (width / 2),
-                      y: w.y - (depth / 2),
-                      w: width,
-                      h: depth
-                  };
-              });
+              // Map to Canonical Model using shared mapping module
+              const rects = tmpl.geometry.walls.map((w, index) => 
+                  GeometryMapping.fromWallTemplate(w, index, tmpl.id)
+              );
               
               // This CALL will throw if invalid because we are in STRICT_DEV
               this.proofKernel.verifyGeometry(rects, tmpl.id, "CI_SCAN");
@@ -116,8 +106,7 @@ export class GameEngineService {
           
       } catch (e: any) {
           console.error(`%c[CI] CRITICAL FAILURE: ${e.message}`, 'color: #ef4444; font-weight: bold;');
-          // In a real CI environment, we would process.exit(1) here or similar
-          throw e; // Re-throw to ensure caller knows
+          throw e;
       } finally {
           // Always reset to SOFT_PROD so the game doesn't crash if played after test
           this.proofKernel.setGeometryGateMode('SOFT_PROD');

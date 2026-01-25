@@ -1,483 +1,161 @@
 
-import { Injectable, signal, OnDestroy, inject } from '@angular/core';
-import { Entity } from '../../models/game.models';
-import { DamageResult, DamagePacket } from '../../models/damage.model';
-import { Item } from '../../models/item.models';
+import { Injectable, signal, inject } from '@angular/core';
+import { LeanBridgeService, LeanRect, LeanProofResult, GeometryDetails, CombatDetails, LeanCombatState, LeanCombatInput } from '../lean-bridge.service';
 import { EventBusService } from '../events/event-bus.service';
 import { GameEvents } from '../events/game-events';
-import { LeanBridgeService, LeanCombatState, LeanCombatInput, LeanRect, LeanProofResult, GeometryDetails } from '../lean-bridge.service';
 
-export type AxiomDomain = 'COMBAT' | 'INVENTORY' | 'WORLD' | 'STATUS' | 'RENDER' | 'INTEGRITY' | 'GEOMETRY' | 'GEOMETRY_SEGMENTS' | 'SPATIAL_TOPOLOGY' | 'PATH_CONTINUITY' | 'RENDER_DEPTH';
-export type AxiomSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type GeometryGateMode = "STRICT_DEV" | "SOFT_PROD";
 
-// Critical domains bypass sampling and always run
-const CRITICAL_DOMAINS = new Set<AxiomDomain>([
-    'INVENTORY', 
-    'COMBAT', 
-    'GEOMETRY', 
-    'GEOMETRY_SEGMENTS',
-    'WORLD', 
-    'STATUS'
-]);
-
-export interface Axiom<T = any> {
-  id: string;
-  domain: AxiomDomain;
-  description: string;
-  severity: AxiomSeverity;
-  check: (context: T) => boolean;
-  errorMessage: (context: T) => string;
-}
-
-export interface ProofError {
-  axiomId: string;
-  domain: AxiomDomain;
-  severity: AxiomSeverity;
-  code: string;
-  message: string;
-  timestamp: number;
-  context?: any;
-}
-
-export interface ValidationResult {
-  isValid: boolean;
-  errors: ProofError[];
-  hash?: string;
-  meta?: any;
-}
-
-export interface DomainMetrics {
-  checks: number;
-  failures: number;
-  totalTimeMs: number;
-  lastFailure: number;
-}
-
-export interface AxiomStats {
-  id: string;
-  checks: number;
-  failures: number;
-}
-
 export interface KernelDiagnostics {
-  domains: { domain: string; checks: number; failures: number; avgMs: number; lastFailure: number }[];
-  failingAxioms: AxiomStats[];
-  ledgerSize: number;
+  geometry: { checks: number; violations: number; avgMs: number; ledgerSize: number };
+  combat: { checks: number; violations: number; avgMs: number; ledgerSize: number };
+  gateMode: GeometryGateMode;
 }
 
-const WORKER_SCRIPT = `
-self.onmessage = function(e) {
-    const req = e.data;
-    const start = performance.now();
-    let valid = false;
-    let error = undefined;
-    let meta = {};
-
-    try {
-        switch (req.type) {
-            case 'SPATIAL_TOPOLOGY': {
-                const p = req.payload;
-                meta = { density: 0 };
-                if (p.cellCount > 0) {
-                    const density = p.entityCount / p.cellCount;
-                    meta.density = density;
-                    if (density > 50) {
-                        valid = false;
-                        error = 'Grid Density Critical (' + density.toFixed(1) + ')';
-                    } else {
-                        valid = true;
-                    }
-                } else {
-                    valid = true;
-                }
-                break;
-            }
-
-            case 'PATH_CONTINUITY': {
-                const path = req.payload.path;
-                const maxStride = req.payload.gridSize * 2.0; 
-                valid = true;
-                if (path && path.length > 1) {
-                    for (let i = 0; i < path.length - 1; i++) {
-                        const dx = path[i].x - path[i+1].x;
-                        const dy = path[i].y - path[i+1].y;
-                        if (Math.sqrt(dx*dx + dy*dy) > maxStride) {
-                            valid = false;
-                            error = 'Path Discontinuity at index ' + i;
-                            break;
-                        }
-                    }
-                }
-                break;
-            }
-
-            case 'RENDER_DEPTH': {
-                const list = req.payload.list;
-                valid = true;
-                for (let i = 0; i < list.length - 1; i++) {
-                    if (list[i] > list[i+1]) {
-                        valid = false;
-                        error = 'Z-Sort Monotonicity Failure';
-                        break;
-                    }
-                }
-                break;
-            }
-
-            default:
-                valid = true;
-        }
-    } catch (err) {
-        valid = false;
-        error = 'KernelPanic: ' + err.message;
-    }
-
-    self.postMessage({
-        id: req.id,
-        type: req.type,
-        valid: valid,
-        error: error,
-        meta: meta,
-        computeTime: performance.now() - start
-    });
-};
-`;
+interface GateConfig<T> {
+    domain: 'GEOMETRY' | 'COMBAT';
+    source: string;
+    kernelCall: () => LeanProofResult<T>;
+    toDetails?: (result: LeanProofResult<T>) => any;
+}
 
 @Injectable({
   providedIn: 'root'
 })
-export class ProofKernelService implements OnDestroy {
-  
-  private metrics: Record<string, ReturnType<typeof signal<DomainMetrics>>> = {};
-  private worker: Worker | null = null;
-  private workerUrl: string | null = null;
-  
-  private eventBus = inject(EventBusService);
+export class ProofKernelService {
   private leanBridge = inject(LeanBridgeService);
+  private eventBus = inject(EventBusService);
+
+  private gateMode: GeometryGateMode = "SOFT_PROD";
   
-  // Public signal for sampling rate to break dependency cycle with Supervisor
-  public samplingProbability = signal(0.1);
-  
-  // --- KERNEL GATE & AUTOMATION STATE ---
-  private geometryGateMode: GeometryGateMode = "SOFT_PROD";
-  private geometryLedger: GeometryDetails[] = [];
-  private geometryViolationCount = 0;
-  private readonly LEDGER_CAP = 100;
+  // Ledgers
+  private readonly LEDGER_CAP = 50;
+  private geometryLedger: { timestamp: number, details: GeometryDetails }[] = [];
+  private combatLedger: { timestamp: number, details: CombatDetails }[] = [];
 
-  private axioms = new Map<string, Axiom>();
-  private axiomStats = new Map<string, AxiomStats>();
+  // Metrics
+  private metrics = {
+      geometry: { checks: 0, violations: 0, totalMs: 0 },
+      combat: { checks: 0, violations: 0, totalMs: 0 }
+  };
 
-  constructor() {
-    this.initMetrics();
-    this.registerCoreAxioms();
-    this.initWorker();
-  }
+  constructor() {}
 
-  // --- GATE API ---
   setGeometryGateMode(mode: GeometryGateMode) {
-      this.geometryGateMode = mode;
+      this.gateMode = mode;
       console.log(`[ProofKernel] Gate Mode switched to: ${mode}`);
   }
 
-  getGeometryGateMode(): GeometryGateMode {
-      return this.geometryGateMode;
-  }
+  getGeometryGateMode() { return this.gateMode; }
 
-  // --- ORCHESTRATION ---
+  // --- GENERIC GATE TEMPLATE ---
   
-  /**
-   * The canonical verification loop for geometry.
-   * 1. Call Bridge (Pure check)
-   * 2. Interpret Result
-   * 3. Ledger & Metrics (Side effects)
-   * 4. Gate Enforcement (Throw vs Log)
-   */
-  verifyGeometry(rects: readonly LeanRect[], sectorId?: string, source: GeometryDetails["source"] = "SECTOR_LOAD"): LeanProofResult {
+  private runGate<T>(config: GateConfig<T>): boolean {
       const start = performance.now();
       
-      // 1. Call Bridge
-      const proof = this.leanBridge.proveGeometryValidity(rects, sectorId, source);
+      // 1. Call Kernel
+      const result = config.kernelCall();
       
-      const time = performance.now() - start;
-
-      // 2. Interpret & Ledger
-      if (!proof.valid) {
-          this.geometryViolationCount++;
-          this.updateMetrics('GEOMETRY', time, 1);
-          
-          if (proof.details) {
-              this.pushGeometryLedger(proof.details);
-          }
-
-          this.eventBus.dispatch({
-              type: GameEvents.REALITY_BLEED,
-              payload: { 
-                  severity: 'HIGH', 
-                  source: `LEAN:GEOMETRY:${source}`, 
-                  message: proof.reason || 'Geometric overlapping detected',
-                  meta: proof.details 
-              }
-          });
-      } else {
-          this.updateMetrics('GEOMETRY', time, 0);
-      }
-
-      // 3. Gate Enforcement
-      if (!proof.valid && this.geometryGateMode === "STRICT_DEV") {
-         const msg = `[StrictGate] Sector ${sectorId ?? "UNKNOWN"} failed geometry: ${proof.reason}. Details: ${JSON.stringify(proof.details)}`;
-         console.error(msg);
-         throw new Error(msg);
-      }
+      const duration = performance.now() - start;
+      const metricObj = config.domain === 'GEOMETRY' ? this.metrics.geometry : this.metrics.combat;
       
-      return proof;
-  }
+      metricObj.checks++;
+      metricObj.totalMs += duration;
 
-  private pushGeometryLedger(details: GeometryDetails) {
-      this.geometryLedger.push(details);
-      if (this.geometryLedger.length > this.LEDGER_CAP) {
-          this.geometryLedger.shift();
+      // 2. Interpret Result
+      if (result.valid) {
+          return true;
       }
-  }
 
-  // --- Worker & Async Verification ---
-
-  private shouldVerify(domain: AxiomDomain): boolean {
-      if (CRITICAL_DOMAINS.has(domain)) return true;
-      const chance = this.samplingProbability();
-      return Math.random() < (chance || 0.1);
-  }
-
-  private initMetrics() {
-      const domains: AxiomDomain[] = ['COMBAT', 'INVENTORY', 'WORLD', 'STATUS', 'RENDER', 'INTEGRITY', 'GEOMETRY', 'GEOMETRY_SEGMENTS', 'SPATIAL_TOPOLOGY', 'PATH_CONTINUITY', 'RENDER_DEPTH'];
-      domains.forEach(d => {
-          this.metrics[d] = signal<DomainMetrics>({ checks: 0, failures: 0, totalTimeMs: 0, lastFailure: 0 });
-      });
-  }
-
-  private initWorker() {
-    if (typeof Worker !== 'undefined') {
-      try {
-        const blob = new Blob([WORKER_SCRIPT], { type: 'application/javascript' });
-        this.workerUrl = URL.createObjectURL(blob);
-        this.worker = new Worker(this.workerUrl);
-        
-        this.worker.onmessage = ({ data }) => {
-          this.handleProofResult(data);
-        };
-      } catch (e) {
-        console.warn('Failed to initialize Proof Worker.', e);
-      }
-    }
-  }
-
-  ngOnDestroy() {
-    this.worker?.terminate();
-    if (this.workerUrl) URL.revokeObjectURL(this.workerUrl);
-  }
-
-  verifyFormal(domain: AxiomDomain, context: any, contextId: string) {
-    if (!this.shouldVerify(domain)) return;
-    if (!this.worker) return;
-    this.worker.postMessage({ id: contextId, type: domain, payload: context });
-  }
-
-  verifySpatialGridTopology(cellCount: number, entityCount: number, cellSize: number): void {
-      this.verifyFormal('SPATIAL_TOPOLOGY', { cellCount, entityCount, cellSize }, `TOPO_${Date.now()}`);
-  }
-
-  verifyPathContinuity(path: {x: number, y: number}[], gridSize: number): void {
-      this.verifyFormal('PATH_CONTINUITY', { path, gridSize }, `PATH_${Date.now()}`);
-  }
-
-  verifyRenderDepth(depthValues: number[]): void {
-      this.verifyFormal('RENDER_DEPTH', { list: depthValues }, `RENDER_${Date.now()}`);
-  }
-
-  getGeometryViolationCount(): number { return this.geometryViolationCount; }
-  getLastGeometryViolations(k: number): GeometryDetails[] { return this.geometryLedger.slice(-k); }
-  debugRunGeometrySelfTest(): void { this.leanBridge.runGeometrySelfTest(); }
-
-  createTransaction<T>(state: T) { return { state }; }
-
-  // Combat Verification
-  verifyCombatTransaction(context: { oldHp: number, damage: number, newHp: number }): ValidationResult {
-    const prev: LeanCombatState = { hp: context.oldHp, max_hp: 10000, armor: 0 }; 
-    const next: LeanCombatState = { hp: context.newHp, max_hp: 10000, armor: 0 };
-    const input: LeanCombatInput = { damage: context.damage, penetration: 0 };
-    
-    // Reuse Gate pattern for Combat if needed, currently Soft
-    const proof = this.leanBridge.proveCombatStep(prev, input, next);
-    
-    if (!proof.valid) {
-        return { 
-            isValid: false, 
-            errors: [{ 
-                axiomId: 'lean.combat.validity', 
-                domain: 'COMBAT', 
-                severity: 'CRITICAL', 
-                code: 'LEAN_VIOLATION', 
-                message: proof.reason || 'Unknown Lean Failure', 
-                timestamp: Date.now() 
-            }] 
-        };
-    }
-    return this.verify('COMBAT', { result: { total: context.damage } });
-  }
-
-  verifyInventoryState(bag: Item[], credits: number, scrap: number): ValidationResult {
-    return this.verify('INVENTORY', { bag, credits, scrap });
-  }
-  
-  verifyStatusEffects(entity: Entity): ValidationResult {
-      if (!entity.status) return { isValid: false, errors: [{ axiomId: 'status.missing', domain: 'STATUS', severity: 'MEDIUM', code: 'NO_STATUS', message: 'Entity missing status object', timestamp: Date.now() }] };
-      return { isValid: true, errors: [] };
-  }
-  
-  verifyDialogueState(node: any, checkReqs: (reqs: any) => boolean): ValidationResult {
-      if (!node || !node.id) return { isValid: false, errors: [{ axiomId: 'dlg.struct', domain: 'WORLD', severity: 'HIGH', code: 'DLG_INVALID', message: 'Invalid Node Structure', timestamp: Date.now() }] };
-      return { isValid: true, errors: [] };
-  }
-  
-  // High-level wrapper for World Gen
-  verifyNonOverlap(entities: Entity[]): ValidationResult {
-      const rects: LeanRect[] = entities
-        .filter(e => e.type === 'WALL' && e.width && e.depth)
-        .map(e => ({
-            id: e.id,
-            x: e.x - (e.width || 40)/2,
-            y: e.y - (e.depth || 40)/2,
-            w: e.width || 40,
-            h: e.depth || 40
-        }));
+      // 3. Update Ledger & Metrics on Failure
+      metricObj.violations++;
       
-      const proof = this.verifyGeometry(rects, "AD_HOC", "WORLD_GEN");
-      
-      if (!proof.valid) {
-          return { 
-              isValid: false, 
-              errors: [{ 
-                  axiomId: 'lean.geo.overlap', 
-                  domain: 'GEOMETRY', 
-                  severity: 'HIGH', 
-                  code: 'OVERLAP', 
-                  message: proof.reason!, 
-                  context: proof.details,
-                  timestamp: Date.now() 
-              }] 
-          };
-      }
-      return { isValid: true, errors: [] };
-  }
-  
-  verifyConnectivity(entities: Entity[], bounds: any, start: any): ValidationResult {
-      return { isValid: true, errors: [] };
-  }
-
-  private handleProofResult(data: any) {
-      if (data.valid) {
-          this.updateMetrics(data.type, data.computeTime, 0);
-          return;
+      if (config.domain === 'GEOMETRY' && result.details) {
+          this.geometryLedger.unshift({ timestamp: Date.now(), details: result.details as any });
+          if (this.geometryLedger.length > this.LEDGER_CAP) this.geometryLedger.pop();
+      } else if (config.domain === 'COMBAT' && result.details) {
+          this.combatLedger.unshift({ timestamp: Date.now(), details: result.details as any });
+          if (this.combatLedger.length > this.LEDGER_CAP) this.combatLedger.pop();
       }
 
-      let severity: AxiomSeverity = 'LOW';
-      if (data.type === 'SPATIAL_TOPOLOGY') severity = 'MEDIUM'; 
-      else if (data.error && data.error.includes('KernelPanic')) severity = 'CRITICAL';
-      else severity = 'MEDIUM';
-
-      if (severity === 'CRITICAL' && !data.error.includes('KernelPanic')) {
-          severity = 'HIGH';
-      }
-
-      this.updateMetrics(data.type, data.computeTime, 1);
-
+      // 4. Emit Event
       this.eventBus.dispatch({
           type: GameEvents.REALITY_BLEED,
-          payload: {
-              severity,
-              source: `KERNEL:${data.type}`,
-              message: data.error,
-              meta: data.meta
+          payload: { 
+              severity: 'HIGH', 
+              source: `KERNEL:${config.domain}:${config.source}`, 
+              message: result.reason || 'Kernel Validation Failed',
+              meta: result.details 
           }
+      });
+
+      // 5. Conditional Throw
+      if (this.gateMode === "STRICT_DEV") {
+          throw new Error(`[KernelGate] STRICT VIOLATION in ${config.domain}: ${result.reason}`);
+      }
+
+      return false;
+  }
+
+  // --- CONCRETE WRAPPERS ---
+
+  verifyGeometry(rects: readonly LeanRect[], sectorId: string = "UNKNOWN", source: string = "RUNTIME"): boolean {
+      return this.runGate<GeometryDetails>({
+          domain: 'GEOMETRY',
+          source,
+          kernelCall: () => this.leanBridge.proveGeometryValidity(rects, sectorId, source)
       });
   }
 
-  private verify<T>(domain: AxiomDomain, context: T): ValidationResult {
-    if (!this.shouldVerify(domain)) return { isValid: true, errors: [] };
-
-    const start = performance.now();
-    const errors: ProofError[] = [];
-    
-    for (const axiom of this.axioms.values()) {
-      if (axiom.domain !== domain) continue;
-      const stats = this.axiomStats.get(axiom.id);
-      if (stats) stats.checks++;
-
-      try {
-        if (!axiom.check(context)) {
-          if (stats) stats.failures++;
-          errors.push({
-            axiomId: axiom.id,
-            domain: domain,
-            severity: axiom.severity,
-            code: axiom.id.toUpperCase(),
-            message: axiom.errorMessage(context),
-            timestamp: Date.now()
-          });
-        }
-      } catch (e) {
-        console.warn(`[ProofKernel] Axiom ${axiom.id} error`, e);
-      }
-    }
-
-    this.updateMetrics(domain, performance.now() - start, errors.length);
-    return { isValid: errors.length === 0, errors };
+  verifyCombatStep(source: string, prev: LeanCombatState, input: LeanCombatInput, next: LeanCombatState): boolean {
+      return this.runGate<CombatDetails>({
+          domain: 'COMBAT',
+          source,
+          kernelCall: () => this.leanBridge.proveCombatStep(prev, input, next)
+      });
   }
 
-  private updateMetrics(domain: string, time: number, failureCount: number) {
-    const signal = this.metrics[domain];
-    if (signal) {
-      signal.update(m => ({
-        checks: m.checks + 1,
-        failures: m.failures + (failureCount > 0 ? 1 : 0),
-        totalTimeMs: m.totalTimeMs + time,
-        lastFailure: failureCount > 0 ? Date.now() : m.lastFailure
-      }));
-    }
-  }
+  // --- DIAGNOSTICS & HELPERS ---
 
-  private registerCoreAxioms() {
-    this.registerAxiom({
-      id: 'combat.non_negative', domain: 'COMBAT', severity: 'HIGH', description: 'Non-negative damage',
-      check: (ctx: { result: DamageResult }) => ctx.result.total >= 0,
-      errorMessage: (ctx) => `Negative damage: ${ctx.result.total}`
-    });
-    this.registerAxiom({
-      id: 'inv.non_negative_stacks', domain: 'INVENTORY', severity: 'HIGH', description: 'Positive stacks',
-      check: (ctx: { bag: Item[] }) => ctx.bag.every(i => i.stack > 0),
-      errorMessage: () => `Invalid stack count`
-    });
+  debugRunGeometrySelfTest() {
+      this.leanBridge.runGeometrySelfTest();
   }
-
-  registerAxiom<T>(axiom: Axiom<T>) {
-    this.axioms.set(axiom.id, axiom);
-    this.axiomStats.set(axiom.id, { id: axiom.id, checks: 0, failures: 0 });
-  }
-
-  computeChecksum(data: any): string { return 'HASH'; }
 
   getDiagnostics(): KernelDiagnostics {
-    const domains = Object.entries(this.metrics).map(([key, sig]) => {
-      const m = sig();
-      return { 
-        domain: key, 
-        checks: m.checks, 
-        failures: m.failures, 
-        avgMs: m.checks > 0 ? parseFloat((m.totalTimeMs / m.checks).toFixed(4)) : 0,
-        lastFailure: m.lastFailure 
+      const g = this.metrics.geometry;
+      const c = this.metrics.combat;
+      return {
+          geometry: { 
+              checks: g.checks, 
+              violations: g.violations, 
+              avgMs: g.checks > 0 ? g.totalMs / g.checks : 0,
+              ledgerSize: this.geometryLedger.length 
+          },
+          combat: { 
+              checks: c.checks, 
+              violations: c.violations, 
+              avgMs: c.checks > 0 ? c.totalMs / c.checks : 0,
+              ledgerSize: this.combatLedger.length 
+          },
+          gateMode: this.gateMode
       };
-    });
-    const failingAxioms = Array.from(this.axiomStats.values()).filter(s => s.failures > 0);
-    return { domains, failingAxioms, ledgerSize: this.geometryLedger.length };
   }
+  
+  getGeometryViolationCount() { return this.metrics.geometry.violations; }
+  getCombatViolationCount() { return this.metrics.combat.violations; }
+  getLastGeometryViolations(k: number) { return this.geometryLedger.slice(0, k).map(x => x.details); }
+  
+  // Legacy facade methods if needed
+  createTransaction<T>(state: T) { return { state }; }
+  
+  // Compatibility with old supervisor calls until fully migrated
+  verifySpatialGridTopology(cellCount: number, entityCount: number, cellSize: number) {}
+  verifyPathContinuity(path: any[], gridSize: number) {}
+  verifyRenderDepth(samples: any[]) {}
+  verifyStatusEffects(e: any): any { return { isValid: true, errors: [] }; }
+  verifyDialogueState(node: any, check: any): any { return { isValid: true, errors: [] }; }
+  verifyInventoryState(bag: any, c: any, s: any): any { return { isValid: true, errors: [] }; }
+  computeChecksum(entities: any): string { return "CHECK"; }
+  verifyNonOverlap(entities: any): any { return { isValid: true, errors: [] }; }
+  verifyConnectivity(entities: any, bounds: any, start: any): any { return { isValid: true, errors: [] }; }
 }

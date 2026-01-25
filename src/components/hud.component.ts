@@ -120,8 +120,12 @@ import { KernelSupervisorService } from '../core/kernel-supervisor.service';
                       <span class="text-cyan-400">{{ (supervisor.samplingMod() * 100).toFixed(0) }}%</span>
                   </div>
                   <div class="flex justify-between text-zinc-400">
-                      <span>Ledger Size:</span>
-                      <span class="text-white">{{ kernelDiagnostics().ledgerSize }}</span>
+                      <span>Geo Ledger:</span>
+                      <span class="text-white">{{ kernelDiagnostics().geometry.ledgerSize }}</span>
+                  </div>
+                  <div class="flex justify-between text-zinc-400">
+                      <span>Cmb Ledger:</span>
+                      <span class="text-white">{{ kernelDiagnostics().combat.ledgerSize }}</span>
                   </div>
                   <div class="mt-2 text-zinc-500 uppercase tracking-widest font-bold">Recent Violations</div>
                   <div class="flex flex-col gap-1 mt-1">
@@ -260,11 +264,15 @@ export class HudComponent {
 
   lastBleedMessage = signal<string | null>(null);
 
-  kernelDiagnostics = computed(() => {
+  kernelDiagnostics = computed<KernelDiagnostics>(() => {
       if (this.proofKernel && typeof this.proofKernel.getDiagnostics === 'function') {
           return this.proofKernel.getDiagnostics();
       }
-      return { domains: [], failingAxioms: [], ledgerSize: 0 };
+      return { 
+          geometry: { checks: 0, violations: 0, avgMs: 0, ledgerSize: 0 },
+          combat: { checks: 0, violations: 0, avgMs: 0, ledgerSize: 0 },
+          gateMode: 'SOFT_PROD'
+      };
   });
 
   constructor() {
@@ -274,24 +282,6 @@ export class HudComponent {
             this.lastBleedMessage.set(`[${payload.source}] ${payload.message}`);
             setTimeout(() => this.lastBleedMessage.set(null), 3000);
         });
-  }
-
-  isDomainFailing(displayDomain: string): boolean {
-      const diag = this.kernelDiagnostics();
-      let key = displayDomain;
-      if (displayDomain === 'GEOMETRY') key = 'GEOMETRY_SEGMENTS';
-      if (displayDomain === 'SPATIAL') key = 'SPATIAL_TOPOLOGY';
-      if (displayDomain === 'NAV') key = 'PATH_CONTINUITY';
-      if (displayDomain === 'RENDER') key = 'RENDER_DEPTH';
-
-      const domainData = diag.domains.find(d => d.domain === key);
-      
-      if (domainData && domainData.lastFailure > 0) {
-          const now = Date.now();
-          const active = now - domainData.lastFailure < 2000; 
-          return active;
-      }
-      return false;
   }
 
   getCorrectionStats() {

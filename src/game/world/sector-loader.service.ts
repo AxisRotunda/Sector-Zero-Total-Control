@@ -10,9 +10,7 @@ import { DECORATIONS } from '../../config/decoration.config';
 import { ProofKernelService } from '../../core/proof/proof-kernel.service';
 import { EventBusService } from '../../core/events/event-bus.service';
 import { GameEvents } from '../../core/events/game-events';
-import { AdaptiveQualityService } from '../../systems/adaptive-quality.service';
-import { LeanRect } from '../../core/lean-bridge.service';
-import { Entity } from '../../models/game.models';
+import { GeometryMapping } from '../../utils/geometry-mapping.util';
 
 @Injectable({ providedIn: 'root' })
 export class SectorLoaderService {
@@ -21,7 +19,6 @@ export class SectorLoaderService {
   private spatialHash = inject(SpatialHashService);
   private proofKernel = inject(ProofKernelService);
   private eventBus = inject(EventBusService);
-  private adaptiveQuality = inject(AdaptiveQualityService);
 
   loadFromTemplate(world: WorldService, template: ZoneTemplate): void {
       try {
@@ -53,34 +50,20 @@ export class SectorLoaderService {
           try {
               const walls = world.entities.filter(e => e.type === 'WALL');
               
-              // Map to Canonical LeanRect Model
-              const rects: LeanRect[] = walls.map(w => this.entityToLeanRect(w));
+              // Use standardized mapping module
+              const rects = walls.map(w => GeometryMapping.fromEntity(w));
 
               if (rects.length > 0) {
-                  // Run synchronous geometric proof
-                  // Pass source as SECTOR_LOAD
-                  // Gate logic handled inside verifyGeometry (SOFT vs STRICT)
-                  const proof = this.proofKernel.verifyGeometry(rects, zoneId, "SECTOR_LOAD");
-                  
-                  if (!proof.valid) {
-                      // If we are here, we are in SOFT_PROD (STRICT_DEV throws)
-                      console.warn(`[SectorLoader] Sector ${zoneId} tainted by geometric conflict. Flagging as degraded.`);
-                  }
+                  // The verifyGeometry method now handles the logic for STRICT_DEV throwing
+                  // and SOFT_PROD logging automatically.
+                  this.proofKernel.verifyGeometry(rects, zoneId, "SECTOR_LOAD");
               }
               
           } catch (verifyErr: any) {
-              // If we are here, verifyGeometry threw an error (STRICT_DEV)
-              // OR there was a system error
-              if (this.proofKernel.getGeometryGateMode() === "STRICT_DEV") {
-                  console.error('[SectorLoader] HARD GATE REJECTION:', verifyErr.message);
-                  throw verifyErr; // Bubble up to crash the load
-              }
-              
-              console.warn('[SectorLoader] Verification Exception:', verifyErr);
-              this.eventBus.dispatch({
-                  type: GameEvents.REALITY_BLEED,
-                  payload: { severity: 'MEDIUM', source: 'SECTOR_LOAD_VERIFY', message: 'Geometry verification exception' }
-              });
+              // This catch block catches STRICT_DEV throws
+              console.error('[SectorLoader] HARD GATE REJECTION:', verifyErr.message);
+              // In strict mode, we want to stop loading to prevent broken state
+              throw verifyErr; 
           }
 
           world.entities.forEach(e => {
@@ -117,23 +100,6 @@ export class SectorLoaderService {
               payload: { severity: 'CRITICAL', source: 'SECTOR_LOAD_CRASH', message: 'Sector initialization failed. Loading fallback geometry.' }
           });
       }
-  }
-
-  /**
-   * Adapts an Engine Entity/Segment to the Canonical LeanRect model.
-   * Coordinate System: Center-based (Engine) -> Corner-based (Lean)
-   */
-  private entityToLeanRect(e: Entity): LeanRect {
-      const w = e.width || 40;
-      const h = e.depth || 40; // LeanRect 'h' corresponds to depth (Y-span) in top-down logic
-      
-      return {
-          id: e.id,
-          x: e.x - w / 2, // Convert center X to left
-          y: e.y - h / 2, // Convert center Y to bottom/top
-          w: w,
-          h: h
-      };
   }
 
   private spawnWall(world: WorldService, def: any, zoneId: string) {
