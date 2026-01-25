@@ -1,3 +1,4 @@
+
 import { Injectable, inject } from '@angular/core';
 import { WorldService } from './world.service';
 import { EntityPoolService } from '../../services/entity-pool.service';
@@ -57,29 +58,21 @@ export class SectorLoaderService {
 
               if (rects.length > 0) {
                   // Run synchronous geometric proof
-                  const proof = this.proofKernel.verifyGeometry(rects);
+                  // Pass source as SECTOR_LOAD
+                  const proof = this.proofKernel.verifyGeometry(rects, zoneId, "SECTOR_LOAD");
                   
                   if (!proof.valid) {
-                      if (this.proofKernel.isDevMode) {
-                          // Dev Mode: Fatal Error
-                          throw new Error(`[SectorLoader] Geometry Integrity Failure: ${proof.reason}. Details: ${JSON.stringify(proof.details)}`);
-                      } else {
+                      if (this.proofKernel.getGeometryGateMode() === "SOFT_PROD") {
                           // Prod Mode: Degrade and Log
                           console.warn(`[SectorLoader] Sector ${zoneId} tainted by geometric conflict. Flagging as degraded.`);
-                          // We could set a degraded flag on the zone here if the model supported it.
-                          // For now, we rely on the ProofKernel already emitting a REALITY_BLEED event which the KernelSupervisor logs.
-                          
-                          // Optional: Insert visual indicator of corruption
-                          this.eventBus.dispatch({
-                              type: GameEvents.REALITY_BLEED,
-                              payload: { severity: 'MEDIUM', source: 'SECTOR_LOAD_GATE', message: 'Sector geometry degraded. Proceed with caution.' }
-                          });
+                          // The ProofKernel has already emitted a REALITY_BLEED event.
                       }
+                      // If STRICT_DEV, verifyGeometry threw an error, caught by outer block.
                   }
               }
               
           } catch (verifyErr) {
-              if (this.proofKernel.isDevMode) {
+              if (this.proofKernel.getGeometryGateMode() === "STRICT_DEV") {
                   throw verifyErr;
               }
               console.warn('[SectorLoader] Verification Exception:', verifyErr);

@@ -1,3 +1,4 @@
+
 import { Injectable } from '@angular/core';
 
 // --- MIRROR TYPES (Matching .lean definitions) ---
@@ -22,10 +23,19 @@ export interface LeanRect {
   h: number; // height (Nat, > 0)
 }
 
+export interface GeometryDetails {
+  sectorId?: string;
+  aId?: number | string;
+  bId?: number | string;
+  i?: number;
+  j?: number;
+  source: "SELFTEST" | "SECTOR_LOAD" | "WORLD_GEN";
+}
+
 export interface LeanProofResult {
   valid: boolean;
-  reason?: string;
-  details?: { i: number; j: number; aId: number | string; bId: number | string };
+  reason?: "GEOMETRY_OVERLAP" | "GEOMETRY_SELFTEST_FAIL" | string;
+  details?: GeometryDetails;
 }
 
 interface LeanTestCase {
@@ -40,6 +50,51 @@ const left   = (r: LeanRect) => r.x;
 const right  = (r: LeanRect) => r.x + r.w;
 const bottom = (r: LeanRect) => r.y;
 const top    = (r: LeanRect) => r.y + r.h;
+
+const GEOMETRY_CORPUS: LeanTestCase[] = [
+   {
+     name: "single rect",
+     reason: "A single rectangle cannot overlap itself",
+     expectOk: true,
+     rects: [{ id: 'test1', x: 0, y: 0, w: 10, h: 10 }],
+   },
+   {
+     name: "identical overlapping",
+     reason: "Two identical rectangles occupy the same space",
+     expectOk: false,
+     rects: [
+       { id: 'a', x: 0, y: 0, w: 10, h: 10 },
+       { id: 'b', x: 0, y: 0, w: 10, h: 10 },
+     ],
+   },
+   {
+     name: "touching edge (allowed)",
+     reason: "Shared edges are valid (strict inequality check)",
+     expectOk: true,
+     rects: [
+       { id: 'a', x: 0, y: 0, w: 10, h: 10 },
+       { id: 'b', x: 10, y: 0, w: 10, h: 10 },
+     ],
+   },
+   {
+     name: "nested",
+     reason: "One rectangle completely inside another is an overlap",
+     expectOk: false,
+     rects: [
+       { id: 'outer', x: 0, y: 0, w: 20, h: 20 },
+       { id: 'inner', x: 5, y: 5, w: 10, h: 10 },
+     ],
+   },
+   {
+     name: "zero-dimension (ignored)",
+     reason: "Zero width/height rects are ghost entities",
+     expectOk: true,
+     rects: [
+       { id: 'valid', x: 0, y: 0, w: 10, h: 10 },
+       { id: 'ghost', x: 5, y: 5, w: 0, h: 0 },
+     ],
+   }
+];
 
 /**
  * Acts as the FFI (Foreign Function Interface) to the hypothetical Lean/WASM module.
@@ -102,7 +157,7 @@ export class LeanBridgeService {
    * Simulates: `ValidLevel : List Rect -> Bool`
    * Executable Boolean version: validLevelBool(walls) returns true iff no pair of distinct rectangles overlaps.
    */
-  proveGeometryValidity(rects: readonly LeanRect[]): LeanProofResult {
+  proveGeometryValidity(rects: readonly LeanRect[], sectorId?: string, source: GeometryDetails["source"] = "WORLD_GEN"): LeanProofResult {
     const { ok, pair } = this.validLevel(rects);
     
     if (ok) {
@@ -117,7 +172,13 @@ export class LeanBridgeService {
     return {
       valid: false,
       reason: "GEOMETRY_OVERLAP",
-      details: { i, j, aId: rects[i]?.id, bId: rects[j]?.id }
+      details: { 
+          i, j, 
+          aId: rects[i]?.id, 
+          bId: rects[j]?.id,
+          sectorId,
+          source
+      }
     };
   }
 
@@ -184,63 +245,20 @@ export class LeanBridgeService {
     return cases;
   }
 
-  private runGeometrySelfTest() {
+  public runGeometrySelfTest() {
      // Deterministic edge cases & random small sets
-     const fixedCases: LeanTestCase[] = [
-       {
-         name: "single rect",
-         reason: "A single rectangle cannot overlap itself",
-         expectOk: true,
-         rects: [{ id: 'test1', x: 0, y: 0, w: 10, h: 10 }],
-       },
-       {
-         name: "identical overlapping",
-         reason: "Two identical rectangles occupy the same space",
-         expectOk: false,
-         rects: [
-           { id: 'a', x: 0, y: 0, w: 10, h: 10 },
-           { id: 'b', x: 0, y: 0, w: 10, h: 10 },
-         ],
-       },
-       {
-         name: "touching edge (allowed)",
-         reason: "Shared edges are valid (strict inequality check)",
-         expectOk: true,
-         rects: [
-           { id: 'a', x: 0, y: 0, w: 10, h: 10 },
-           { id: 'b', x: 10, y: 0, w: 10, h: 10 },
-         ],
-       },
-       {
-         name: "nested",
-         reason: "One rectangle completely inside another is an overlap",
-         expectOk: false,
-         rects: [
-           { id: 'outer', x: 0, y: 0, w: 20, h: 20 },
-           { id: 'inner', x: 5, y: 5, w: 10, h: 10 },
-         ],
-       },
-       {
-         name: "zero-dimension (ignored)",
-         reason: "Zero width/height rects are ghost entities",
-         expectOk: true,
-         rects: [
-           { id: 'valid', x: 0, y: 0, w: 10, h: 10 },
-           { id: 'ghost', x: 5, y: 5, w: 0, h: 0 }, // Should be ignored
-         ],
-       }
-     ];
-
      // Fuzz block: small number, deterministic seed
      const fuzzCases = this.generateFuzzCases(32, 0xC0FFEE);
 
      let passed = 0;
-     const allCases = [...fixedCases, ...fuzzCases];
+     const allCases = [...GEOMETRY_CORPUS, ...fuzzCases];
 
      for (const c of allCases) {
        const r = this.validLevel(c.rects);
        if (r.ok !== c.expectOk) {
          console.error(`[LeanBridge] SELF-TEST FAILED: ${c.name} (${c.reason})`, r);
+         // Call back to Kernel logic not handled here to avoid circular dep, 
+         // but ideally this service is leaf.
        } else {
          passed++;
        }

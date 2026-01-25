@@ -1,13 +1,15 @@
+
 import { Injectable, signal, OnDestroy, inject } from '@angular/core';
 import { Entity } from '../../models/game.models';
 import { DamageResult, DamagePacket } from '../../models/damage.model';
 import { Item } from '../../models/item.models';
 import { EventBusService } from '../events/event-bus.service';
 import { GameEvents } from '../events/game-events';
-import { LeanBridgeService, LeanCombatState, LeanCombatInput, LeanRect, LeanProofResult } from '../lean-bridge.service';
+import { LeanBridgeService, LeanCombatState, LeanCombatInput, LeanRect, LeanProofResult, GeometryDetails } from '../lean-bridge.service';
 
 export type AxiomDomain = 'COMBAT' | 'INVENTORY' | 'WORLD' | 'STATUS' | 'RENDER' | 'INTEGRITY' | 'GEOMETRY' | 'GEOMETRY_SEGMENTS' | 'SPATIAL_TOPOLOGY' | 'PATH_CONTINUITY' | 'RENDER_DEPTH';
 export type AxiomSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+export type GeometryGateMode = "STRICT_DEV" | "SOFT_PROD";
 
 // Critical domains bypass sampling and always run
 const CRITICAL_DOMAINS = new Set<AxiomDomain>([
@@ -164,7 +166,9 @@ export class ProofKernelService implements OnDestroy {
   public samplingProbability = signal(0.1);
   
   // Observability Ledger
-  private geometryLedger: GeometryLedgerEntry[] = [];
+  private geometryGateMode: GeometryGateMode = "STRICT_DEV";
+  private geometryLedger: GeometryDetails[] = [];
+  private geometryViolationCount = 0;
   private readonly LEDGER_CAP = 100;
 
   private axioms = new Map<string, Axiom>();
@@ -179,6 +183,8 @@ export class ProofKernelService implements OnDestroy {
     this.registerCoreAxioms();
     this.initWorker();
   }
+
+  getGeometryGateMode(): GeometryGateMode { return this.geometryGateMode; }
 
   // 3. CENTRALIZED PROBABILITY GATE
   private shouldVerify(domain: AxiomDomain): boolean {
@@ -226,27 +232,22 @@ export class ProofKernelService implements OnDestroy {
 
   // Refactored to use LeanBridge canonical geometry
   // Now returns the proof result for gating logic
-  verifyGeometry(rects: LeanRect[]): LeanProofResult {
+  verifyGeometry(rects: readonly LeanRect[], sectorId?: string, source: GeometryDetails["source"] = "SECTOR_LOAD"): LeanProofResult {
       const start = performance.now();
-      const proof = this.leanBridge.proveGeometryValidity(rects);
+      const proof = this.leanBridge.proveGeometryValidity(rects, sectorId, source);
       const time = performance.now() - start;
 
       if (!proof.valid) {
+          this.geometryViolationCount++;
           this.updateMetrics('GEOMETRY', time, 1);
           
-          // Ledger Recording
-          this.geometryLedger.push({
-              t: performance.now(),
-              aId: proof.details?.aId || '?',
-              bId: proof.details?.bId || '?'
-          });
-          if (this.geometryLedger.length > this.LEDGER_CAP) this.geometryLedger.shift();
+          if (proof.details) this.pushGeometryLedger(proof.details);
 
           this.eventBus.dispatch({
               type: GameEvents.REALITY_BLEED,
               payload: { 
                   severity: 'HIGH', 
-                  source: 'LEAN:GEOMETRY', 
+                  source: `LEAN:GEOMETRY:${source}`, 
                   message: proof.reason || 'Geometric overlapping detected',
                   meta: proof.details 
               }
@@ -254,8 +255,20 @@ export class ProofKernelService implements OnDestroy {
       } else {
           this.updateMetrics('GEOMETRY', time, 0);
       }
+
+      const mode = this.getGeometryGateMode();
+      if (!proof.valid && mode === "STRICT_DEV" && source !== "SELFTEST") {
+         throw new Error(`[HardGate] Sector ${sectorId ?? "UNKNOWN"} failed geometry: ${proof.reason}`);
+      }
       
       return proof;
+  }
+
+  private pushGeometryLedger(details: GeometryDetails) {
+      this.geometryLedger.push(details);
+      if (this.geometryLedger.length > this.LEDGER_CAP) {
+          this.geometryLedger.shift();
+      }
   }
 
   verifySpatialGridTopology(cellCount: number, entityCount: number, cellSize: number): void {
@@ -272,11 +285,15 @@ export class ProofKernelService implements OnDestroy {
 
   // --- OBSERVABILITY API ---
   getGeometryViolationCount(): number {
-      return this.geometryLedger.length;
+      return this.geometryViolationCount;
   }
 
-  getLastGeometryViolations(k: number): GeometryLedgerEntry[] {
+  getLastGeometryViolations(k: number): GeometryDetails[] {
       return this.geometryLedger.slice(-k);
+  }
+
+  debugRunGeometrySelfTest(): void {
+      this.leanBridge.runGeometrySelfTest();
   }
 
   // --- SYNC API (Critical Path) ---
