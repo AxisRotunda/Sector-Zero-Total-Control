@@ -19,6 +19,8 @@ import { EventBusService } from '../core/events/event-bus.service';
 import { GameEvents, RealityBleedPayload } from '../core/events/game-events';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RealityCorrectorService } from '../core/reality-corrector.service';
+import { PerformanceTelemetryService } from '../systems/performance-telemetry.service';
+import { AdaptiveQualityService } from '../systems/adaptive-quality.service';
 
 @Component({
   selector: 'app-hud',
@@ -86,6 +88,29 @@ import { RealityCorrectorService } from '../core/reality-corrector.service';
                   [class.shadow-[0_0_8px_currentColor]]="true"
                   [class.animate-pulse]="realityIntegrity() < 30"></div>
               </div>
+              
+              <!-- Performance Telemetry Overlay -->
+              <div class="mt-2 pt-2 border-t border-zinc-800">
+                  <div class="flex justify-between text-[10px]">
+                    <span class="text-zinc-500">FPS</span>
+                    <span 
+                      [class.text-green-500]="getPerformanceStats().fps >= 55"
+                      [class.text-yellow-500]="getPerformanceStats().fps >= 30 && getPerformanceStats().fps < 55"
+                      [class.text-red-500]="getPerformanceStats().fps < 30">
+                      {{ getPerformanceStats().fps.toFixed(0) }}
+                    </span>
+                  </div>
+                  <div class="flex justify-between text-[10px]">
+                    <span class="text-zinc-500">Quality</span>
+                    <span class="text-cyan-500">{{ getCurrentQuality() }}</span>
+                  </div>
+                  @if (getPerformanceStats().trend === 'DEGRADING' || getPerformanceStats().trend === 'CRITICAL') {
+                    <div class="text-[9px] text-orange-500 animate-pulse mt-1 font-bold">
+                      ⚠ ENTROPY RISING
+                    </div>
+                  }
+              </div>
+
               @if (lastBleedMessage()) {
                 <div class="text-[10px] text-red-500 mt-1 animate-pulse truncate drop-shadow-[0_0_6px_rgba(239,68,68,1)]">
                   {{ lastBleedMessage() }}
@@ -99,11 +124,6 @@ import { RealityCorrectorService } from '../core/reality-corrector.service';
                 <div class="text-[10px] text-orange-500 font-bold tracking-widest">
                   AUTO-CORRECTIONS: {{ getCorrectionStats().totalCorrections }}
                 </div>
-                @for (correction of getCorrectionStats().recentCorrections; track correction.timestamp) {
-                  <div class="text-[8px] text-zinc-500 truncate">
-                    {{ correction.action }}: {{ correction.context }}
-                  </div>
-                }
               </div>
             }
           </div>
@@ -209,6 +229,10 @@ export class HudComponent {
   interaction = inject(InteractionService);
   private eventBus = inject(EventBusService);
   private realityCorrector = inject(RealityCorrectorService);
+  
+  // New Injections
+  private telemetry = inject(PerformanceTelemetryService);
+  private adaptiveQuality = inject(AdaptiveQualityService);
 
   openInventory = output<void>();
   openSkills = output<void>();
@@ -244,5 +268,14 @@ export class HudComponent {
 
   getCorrectionStats() {
     return this.realityCorrector.getStats();
+  }
+
+  // Performance monitoring integration
+  getPerformanceStats() {
+    return this.telemetry.getStats();
+  }
+
+  getCurrentQuality() {
+    return this.adaptiveQuality.getPreset().name;
   }
 }

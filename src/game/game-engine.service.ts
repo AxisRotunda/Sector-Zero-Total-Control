@@ -18,6 +18,8 @@ import { LightingService } from '../systems/rendering/lighting.service';
 import { GameStateService } from './game-state.service';
 import { SpatialGridService } from '../systems/spatial-grid.service';
 import { RealityCorrectorService } from '../core/reality-corrector.service';
+import { PerformanceTelemetryService } from '../systems/performance-telemetry.service';
+import { AdaptiveQualityService } from '../systems/adaptive-quality.service';
 
 @Injectable({
   providedIn: 'root'
@@ -42,8 +44,11 @@ export class GameEngineService {
   private lighting = inject(LightingService);
   private gameState = inject(GameStateService);
   private spatialGrid = inject(SpatialGridService);
-  // Inject to initialize
   private realityCorrector = inject(RealityCorrectorService);
+  
+  // New Adaptive System Injections
+  private telemetry = inject(PerformanceTelemetryService);
+  private adaptiveQuality = inject(AdaptiveQualityService);
 
   isInMenu = this.gameState.isInMenu;
   private frameCount = 0;
@@ -91,7 +96,13 @@ export class GameEngineService {
   }
 
   private loop = () => {
+    // Start measuring frame duration
+    const frameStart = performance.now();
+
     try {
+        // Run Adaptive Logic
+        this.adaptiveQuality.evaluateAndAdjust();
+
         if (this.isInMenu()) {
             const t = Date.now();
             this.world.camera.x = Math.sin(t * 0.0005) * 500;
@@ -115,6 +126,11 @@ export class GameEngineService {
         );
 
     } catch (e) { console.error(e); }
+
+    // End measuring and record telemetry
+    const frameDuration = performance.now() - frameStart;
+    this.telemetry.recordFrame(frameDuration);
+
     this.animationFrameId = requestAnimationFrame(this.loop);
   }
 

@@ -28,6 +28,7 @@ import { CullingService } from './rendering/culling.service';
 import { ProofKernelService } from '../core/proof/proof-kernel.service';
 import { EventBusService } from '../core/events/event-bus.service';
 import { GameEvents } from '../core/events/game-events';
+import { AdaptiveQualityService } from './adaptive-quality.service';
 
 @Injectable({
   providedIn: 'root'
@@ -47,6 +48,7 @@ export class RenderService {
   private timeService = inject(TimeService);
   private mission = inject(MissionService);
   private performanceManager = inject(PerformanceManagerService);
+  private adaptiveQuality = inject(AdaptiveQualityService);
   
   // Renderers
   private floorRenderer = inject(FloorRendererService);
@@ -173,39 +175,9 @@ export class RenderService {
     const bakedTiles = this.staticBatcher.bakeStaticGeometry(zone, entities, cam.rotation);
     const bakedLighting = this.lightBaker.bakeStaticLights(this.lighting.allLights, cam.rotation);
 
+    // Apply Quality Culling
     this.prepareRenderList(cam, zone, entities, player, particles, window.innerWidth, window.innerHeight, this._frustum, !!bakedTiles);
     
-    // --- VERIFICATION STEP (10% sampling) ---
-    if (Math.random() < 0.1) {
-        // We use the CullingService explicitly to calculate the verified frustum
-        const verifiedFrustum = this.culling.computeViewFrustum(cam, window.innerWidth, window.innerHeight);
-        
-        // Extract just the entities from the render list (mixed type list)
-        const visibleEntities = this.renderList.filter(e => 'type' in e) as Entity[];
-        
-        const geoCheck = this.proofKernel.verifyRenderGeometry(visibleEntities, verifiedFrustum);
-        const budgetCheck = this.proofKernel.verifyRenderBudget(visibleEntities.length);
-
-        if (!geoCheck.isValid || !budgetCheck.isValid) {
-            this.eventBus.dispatch({
-                type: GameEvents.REALITY_BLEED, 
-                payload: {
-                    severity: 'MEDIUM',
-                    source: 'Render Corruption', 
-                    message: [...geoCheck.errors, ...budgetCheck.errors].join('; ')
-                }
-            });
-            
-            if (!budgetCheck.isValid) {
-                // Auto-fix: Cull by distance
-                this.renderList.sort((a, b) => 
-                    Math.hypot(a.x - cam.x, a.y - cam.y) - Math.hypot(b.x - cam.x, b.y - cam.y)
-                );
-                this.renderList.length = 1000; // Hard cap
-            }
-        }
-    }
-
     this.prepareLighting(player, this.renderList, cam, window.innerWidth, window.innerHeight, this._frustum);
     this.lighting.update(1, this.timeService.globalTime);
 
@@ -223,7 +195,8 @@ export class RenderService {
         }
     }
 
-    if (this.performanceManager.shadowsEnabled()) {
+    // Shadow Rendering based on Quality Preset
+    if (this.adaptiveQuality.getPreset().shadowsEnabled) {
         this.drawShadows(this.renderList);
     }
 
@@ -334,34 +307,68 @@ export class RenderService {
   }
 
   private prepareRenderList(cam: Camera, zone: Zone, entities: Entity[], player: Entity, particles: Particle[], w: number, h: number, frustum: any, hasBakedLayer: boolean) {
+      const quality = this.adaptiveQuality.getPreset();
+      
       let renderIndex = 0;
       
       const { buffer: staticBuffer, count: staticCount } = this.chunkManager.getVisibleStaticEntities(cam, w, h);
       
+      // Filter statics by render distance as well to be safe
+      const renderDistSq = quality.renderDistance * quality.renderDistance;
+
       for (let i = 0; i < staticCount; i++) {
           const e = staticBuffer[i];
           if (hasBakedLayer) {
               if (e.type === 'DECORATION' && ['RUG', 'FLOOR_CRACK', 'GRAFFITI', 'TRASH', 'SCORCH'].includes(e.subType || '')) continue;
           }
+          
+          // Distance check
+          const distSq = (e.x - player.x)**2 + (e.y - player.y)**2;
+          if (distSq > renderDistSq) continue;
+
           this.renderList[renderIndex++] = e;
       }
       
       const { buffer: dynamicBuffer, count: dynamicCount } = this.spatialHash.queryRectFast(frustum.minX, frustum.minY, frustum.maxX, frustum.maxY, zone.id);
+      
+      // Temporary list to sort dynamics by distance if over budget
+      let visibleDynamics: Entity[] = [];
+
       for (let i = 0; i < dynamicCount; i++) {
           const e = dynamicBuffer[i];
           if (e.state === 'DEAD' || e.data?.isDead) continue; 
-          
           if (hasBakedLayer) {
               if (e.type === 'DECORATION' && ['RUG', 'FLOOR_CRACK', 'GRAFFITI', 'TRASH', 'SCORCH'].includes(e.subType || '')) continue;
           }
           
+          const distSq = (e.x - player.x)**2 + (e.y - player.y)**2;
+          if (distSq > renderDistSq) continue;
+
+          visibleDynamics.push(e);
+      }
+      
+      // Hard cap logic for dynamic entities
+      if (visibleDynamics.length > quality.maxVisibleEntities) {
+          // Sort by distance to prioritize closer entities
+          visibleDynamics.sort((a, b) => {
+              const da = (a.x - player.x)**2 + (a.y - player.y)**2;
+              const db = (b.x - player.x)**2 + (b.y - player.y)**2;
+              return da - db;
+          });
+          visibleDynamics.length = quality.maxVisibleEntities;
+      }
+
+      // Add surviving dynamics to render list
+      for(const e of visibleDynamics) {
           this.renderList[renderIndex++] = e;
       }
       
       this.renderList[renderIndex++] = player;
 
       const pLen = particles.length;
-      const pLimit = this.performanceManager.particleLimit();
+      // Use particle multiplier from quality preset
+      const pLimit = Math.floor(this.performanceManager.particleLimit() * quality.particleMultiplier);
+      
       let pCount = 0;
       for (let i = 0; i < pLen; i++) {
           if (pCount >= pLimit) break;
