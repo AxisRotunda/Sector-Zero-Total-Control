@@ -6,6 +6,7 @@ import { RENDER_CONFIG } from './render.config';
 import { LightingService } from './lighting.service';
 import { PerformanceManagerService } from '../../game/performance-manager.service';
 import { LightSource } from '../../models/rendering.models';
+import { BakedTile } from './static-batch-renderer.service';
 
 @Injectable({ providedIn: 'root' })
 export class LightingRendererService {
@@ -153,7 +154,7 @@ export class LightingRendererService {
     zone: Zone,
     screenWidth: number, 
     screenHeight: number,
-    bakedLights?: { canvas: HTMLCanvasElement | OffscreenCanvas, x: number, y: number } | null
+    bakedTiles?: BakedTile[] | null
   ) {
     if (!RENDER_CONFIG.LIGHTING.ENABLED || !this.ctx || !this.canvas) return;
 
@@ -194,15 +195,17 @@ export class LightingRendererService {
     for (let i = 0; i < len; i++) {
         const light = visibleLights[i];
         // Only draw DYNAMIC/PULSE lights in the dynamic pass if we have baked lights
-        // If no bake, draw all visible
-        if (!bakedLights || light.type !== 'STATIC') {
+        // If no bake (rare now), draw all visible
+        if (!bakedTiles || light.type !== 'STATIC') {
             this.drawLightSprite(ctx, light.x, light.y, light.z || 0, light.radius, light.intensity);
         }
     }
 
-    // Apply Baked Lights (Holes)
-    if (bakedLights) {
-        ctx.drawImage(bakedLights.canvas, bakedLights.x, bakedLights.y);
+    // Apply Baked Tiles (Static Holes)
+    if (bakedTiles) {
+        for (const tile of bakedTiles) {
+            ctx.drawImage(tile.canvas, tile.x, tile.y);
+        }
     }
 
     // --- PASS 2: EMISSIVE LIGHTS (Color Additive) ---
@@ -212,13 +215,8 @@ export class LightingRendererService {
         const light = visibleLights[i];
         if (light.color === '#ffffff' || light.color === '#000000') continue;
         
-        // Skip static emissives if we decided to bake them (current light baker only bakes the mask/holes, not color)
-        // Light Baker currently DOES handle the additive look if we updated it to do so,
-        // BUT the provided LightBaker implementation only draws the white mask for destination-out.
-        // So we still need to draw colored lights dynamically unless we enhance the baker.
-        // For now, let's keep drawing colored lights dynamically to ensure visual quality.
-        // Optimization: Usually static lights are white/yellow ambient.
-        
+        // Static lights also get drawn here for their color component (Baker only handles mask)
+        // Optimization opportunity: Bake color too, but this retains quality.
         this.drawColoredLight(ctx, light.x, light.y, light.z || 0, light.radius * 0.8, light.intensity * 0.6, light.color);
     }
 

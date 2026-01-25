@@ -4,10 +4,8 @@ import { StaticWall } from '../models/map.models';
 
 export class MapUtils {
   
-  // Maximum length of a merged wall segment to prevent Z-sorting issues
-  // with entities standing near the ends of the wall.
-  // REDUCED from 600 to 300 to improve sort accuracy in Hub.
   private static readonly MAX_WALL_LENGTH = 300; 
+  private static readonly EPSILON = 0.5;
 
   /**
    * Merges collinear wall entities to reduce draw calls and entity count.
@@ -24,7 +22,7 @@ export class MapUtils {
       
       walls.forEach(w => {
           // Include subType and locked status in key to prevent merging distinct functional walls
-          const key = `${w.color}_${w.height}_${w.subType || 'GENERIC'}_${w.locked}_${w.width}_${w.depth}`;
+          const key = `${w.color}_${w.height}_${w.subType || 'GENERIC'}_${w.locked}_${Math.round(w.width || 40)}_${Math.round(w.depth || 40)}`;
           if (!groups.has(key)) groups.set(key, []);
           groups.get(key)!.push(w);
       });
@@ -35,7 +33,7 @@ export class MapUtils {
           // 1. Horizontal Merge Pass
           // Sort by Y then X
           group.sort((a, b) => {
-              if (Math.abs(a.y - b.y) > 1) return a.y - b.y;
+              if (Math.abs(a.y - b.y) > MapUtils.EPSILON) return a.y - b.y;
               return a.x - b.x;
           });
 
@@ -46,7 +44,6 @@ export class MapUtils {
               if (processed.has(group[i].id)) continue;
               
               let current = group[i];
-              // Clone to avoid mutating the original entity pool object prematurely
               let merged = { ...current }; 
               processed.add(current.id);
 
@@ -55,8 +52,8 @@ export class MapUtils {
                   const next = group[j];
                   if (processed.has(next.id)) continue;
                   
-                  // Check if they align horizontally
-                  if (Math.abs(next.y - current.y) < 1) { // Same Y row
+                  // Check if they align horizontally (Same Y)
+                  if (Math.abs(next.y - current.y) < MapUtils.EPSILON) { 
                       const currentRight = merged.x + (merged.width || 0) / 2;
                       const nextLeft = next.x - (next.width || 0) / 2;
                       
@@ -92,7 +89,7 @@ export class MapUtils {
           // 2. Vertical Merge Pass (Run on results of Horizontal pass)
           // Sort by X then Y
           horizontalResults.sort((a, b) => {
-              if (Math.abs(a.x - b.x) > 1) return a.x - b.x;
+              if (Math.abs(a.x - b.x) > MapUtils.EPSILON) return a.x - b.x;
               return a.y - b.y;
           });
           
@@ -110,7 +107,7 @@ export class MapUtils {
                   if (vProcessed.has(next.id)) continue;
                   
                   // Check alignment X
-                  if (Math.abs(next.x - current.x) < 1) {
+                  if (Math.abs(next.x - current.x) < MapUtils.EPSILON) {
                       const currentBottom = merged.y + (merged.depth || 0) / 2;
                       const nextTop = next.y - (next.depth || 0) / 2;
                       
@@ -142,9 +139,6 @@ export class MapUtils {
       return [...others, ...mergedWalls];
   }
 
-  /**
-   * Generates a fortified perimeter wall with pillars.
-   */
   static createFortress(radius: number, thickness: number, height: number, color: string): StaticWall[] {
     const walls: StaticWall[] = [];
     const segments = 8;
@@ -164,7 +158,6 @@ export class MapUtils {
             type: 'PILLAR'
         });
 
-        // Skip Gate openings (North, South, East, West indices)
         if (i === 2 || i === 6) continue; 
 
         const x1 = Math.cos(angle) * radius;
@@ -172,7 +165,6 @@ export class MapUtils {
         const x2 = Math.cos(nextAngle) * radius;
         const y2 = Math.sin(nextAngle) * radius;
         
-        // Fill the gap with blocks
         const dist = Math.hypot(x2-x1, y2-y1);
         const blockCount = Math.ceil(dist / thickness);
         
@@ -188,7 +180,6 @@ export class MapUtils {
             });
         }
     }
-    
     return walls;
   }
 

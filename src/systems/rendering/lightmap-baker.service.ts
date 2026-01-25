@@ -2,16 +2,18 @@
 import { Injectable, inject } from '@angular/core';
 import { LightSource } from '../../models/rendering.models';
 import { IsoUtils } from '../../utils/iso-utils';
+import { BakedTile } from './static-batch-renderer.service';
 
 @Injectable({ providedIn: 'root' })
 export class LightmapBakerService {
   
-  private bakeCache = new Map<string, { canvas: HTMLCanvasElement | OffscreenCanvas, x: number, y: number }>();
+  private bakeCache = new Map<string, BakedTile[]>();
+  private readonly TILE_SIZE = 2048; // Safe chunk size
 
   bakeStaticLights(
     lights: LightSource[], 
     cameraRotation: number
-  ): { canvas: HTMLCanvasElement | OffscreenCanvas, x: number, y: number } | null {
+  ): BakedTile[] | null {
     
     if (!lights) return null;
 
@@ -33,6 +35,7 @@ export class LightmapBakerService {
     let minIsoY = Infinity, maxIsoY = -Infinity;
     const pt = {x:0, y:0};
 
+    // First pass: Determine global bounds of all lights
     for (const l of staticLights) {
         IsoUtils.toIso(l.x, l.y, l.z || 0, pt);
         const r = l.radius;
@@ -42,52 +45,73 @@ export class LightmapBakerService {
         if (pt.y + r > maxIsoY) maxIsoY = pt.y + r;
     }
 
-    const width = Math.ceil(maxIsoX - minIsoX);
-    const height = Math.ceil(maxIsoY - minIsoY);
+    // Add padding
+    minIsoX -= 100; maxIsoX += 100;
+    minIsoY -= 100; maxIsoY += 100;
 
-    if (width > 4096 || height > 4096) {
-        IsoUtils.setContext(originalRotation, originalCx, originalCy);
-        return null;
-    }
+    const tiles: BakedTile[] = [];
 
-    // 2. Setup Canvas
-    let canvas: HTMLCanvasElement | OffscreenCanvas;
-    if (typeof OffscreenCanvas !== 'undefined') {
-        canvas = new OffscreenCanvas(width, height);
-    } else {
-        canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-    }
-    const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+    // 2. Generate Tiles
+    for (let y = minIsoY; y < maxIsoY; y += this.TILE_SIZE) {
+        for (let x = minIsoX; x < maxIsoX; x += this.TILE_SIZE) {
+            
+            const tileRight = x + this.TILE_SIZE;
+            const tileBottom = y + this.TILE_SIZE;
 
-    // 3. Render Lights (Hole Cutting / Additive)
-    // We render them as WHITE sprites for the mask or COLORED for additive
-    // This baker produces the "Light Mask" (holes in darkness)
-    ctx.translate(-minIsoX, -minIsoY);
-    
-    // Fill transparent
-    ctx.clearRect(0, 0, width, height);
+            // Find lights that overlap this tile
+            const tileLights = staticLights.filter(l => {
+                IsoUtils.toIso(l.x, l.y, l.z || 0, pt);
+                const r = l.radius;
+                return pt.x + r >= x && pt.x - r <= tileRight &&
+                       pt.y + r >= y && pt.y - r <= tileBottom;
+            });
 
-    for (const l of staticLights) {
-        IsoUtils.toIso(l.x, l.y, l.z || 0, pt);
-        
-        const grad = ctx.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, l.radius);
-        // We draw white with alpha = intensity. The lighting renderer will use this to destination-out
-        grad.addColorStop(0, `rgba(255, 255, 255, ${l.intensity})`);
-        grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-        
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(pt.x, pt.y, l.radius, 0, Math.PI*2);
-        ctx.fill();
+            if (tileLights.length === 0) continue;
+
+            const tile = this.renderTile(tileLights, x, y, this.TILE_SIZE, this.TILE_SIZE);
+            if (tile) tiles.push(tile);
+        }
     }
 
     IsoUtils.setContext(originalRotation, originalCx, originalCy);
 
-    const result = { canvas, x: minIsoX, y: minIsoY };
-    this.bakeCache.set(cacheKey, result);
-    return result;
+    this.bakeCache.set(cacheKey, tiles);
+    return tiles;
+  }
+
+  private renderTile(lights: LightSource[], x: number, y: number, w: number, h: number): BakedTile {
+      let canvas: HTMLCanvasElement | OffscreenCanvas;
+      if (typeof OffscreenCanvas !== 'undefined') {
+          canvas = new OffscreenCanvas(w, h);
+      } else {
+          canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+      }
+
+      const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+      
+      // Translate context so that tile origin (x, y) is at (0, 0)
+      ctx.translate(-x, -y);
+      ctx.clearRect(0, 0, w, h);
+
+      const pt = {x:0, y:0};
+
+      for (const l of lights) {
+          IsoUtils.toIso(l.x, l.y, l.z || 0, pt);
+          
+          const grad = ctx.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, l.radius);
+          // White mask with alpha = intensity
+          grad.addColorStop(0, `rgba(255, 255, 255, ${l.intensity})`);
+          grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+          
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, l.radius, 0, Math.PI*2);
+          ctx.fill();
+      }
+
+      return { canvas, x, y };
   }
 
   clearCache() {

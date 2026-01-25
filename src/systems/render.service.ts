@@ -171,9 +171,9 @@ export class RenderService {
     this.calculateFrustum(cam, window.innerWidth, window.innerHeight);
 
     // 1. Prepare Scene & Bake Check
-    // Returns array of tiles now
     const bakedTiles = this.staticBatcher.bakeStaticGeometry(zone, entities, cam.rotation);
-    const bakedLights = this.lightBaker.bakeStaticLights(this.lighting.allLights, cam.rotation);
+    // Returns BakedTile[] or null
+    const bakedLightTiles = this.lightBaker.bakeStaticLights(this.lighting.allLights, cam.rotation);
 
     this.prepareRenderList(cam, zone, entities, player, particles, window.innerWidth, window.innerHeight, this._frustum, !!bakedTiles);
     
@@ -195,10 +195,6 @@ export class RenderService {
     // 4. Baked Static Geometry Pass (Tiles)
     if (bakedTiles) {
         for (const tile of bakedTiles) {
-            // Simple culling for tiles
-            // Tile is in Iso coords. View is centered on Camera Iso.
-            // Check if tile intersects viewport?
-            // For now just draw, canvas handles out-of-bounds fairly well
             this.ctx.drawImage(tile.canvas, tile.x, tile.y);
         }
     }
@@ -209,7 +205,6 @@ export class RenderService {
     }
 
     // 6. Main Geometry Pass (Sorted & Occlusion)
-    // Note: Render list is already sorted by Layer then Depth
     this.drawGeometry(this.renderList, zone, player);
 
     // 7. Visual Effects
@@ -221,8 +216,7 @@ export class RenderService {
     this.ctx.restore();
     
     // 9. Lighting & Atmosphere Pass
-    // We pass the baked lightmap to the renderer if available
-    this.lightingRenderer.drawLighting(this.ctx, this.renderList as Entity[], player, cam, zone, w, h, bakedLights);
+    this.lightingRenderer.drawLighting(this.ctx, this.renderList as Entity[], player, cam, zone, w, h, bakedLightTiles);
 
     // 10. Post-Processing
     this.applyPostEffects(w, h);
@@ -339,7 +333,7 @@ export class RenderService {
           const e = staticBuffer[i];
           if (hasBakedLayer) {
               // Only skip floor decos that were baked. Walls are NOT baked anymore.
-              if (e.type === 'DECORATION' && ['RUG', 'FLOOR_CRACK', 'GRAFFITI', 'TRASH'].includes(e.subType || '')) continue;
+              if (e.type === 'DECORATION' && ['RUG', 'FLOOR_CRACK', 'GRAFFITI', 'TRASH', 'SCORCH'].includes(e.subType || '')) continue;
           }
           this.renderList[renderIndex++] = e;
       }
@@ -351,7 +345,7 @@ export class RenderService {
           
           if (hasBakedLayer) {
               // Same check for dynamic floor decos (rare)
-              if (e.type === 'DECORATION' && ['RUG', 'FLOOR_CRACK', 'GRAFFITI', 'TRASH'].includes(e.subType || '')) continue;
+              if (e.type === 'DECORATION' && ['RUG', 'FLOOR_CRACK', 'GRAFFITI', 'TRASH', 'SCORCH'].includes(e.subType || '')) continue;
           }
           
           this.renderList[renderIndex++] = e;
@@ -398,56 +392,44 @@ export class RenderService {
 
   // --- SCREEN-SPACE OCCLUSION ---
   private checkScreenSpaceOcclusion(wall: Entity, target: Entity): boolean {
-      // World Depth Check (Iso Depth Sort)
-      // If wall is logically "behind" target, it can't occlude
       const wallDepth = wall._depthKey || 0;
       const targetDepth = target._depthKey || 0;
       if (wallDepth < targetDepth) return false;
 
-      // Simple Bounding Box in Screen Space
-      // Get Wall Bounds
       const wWidth = wall.width || 40;
       const wDepth = wall.depth || 40;
       const wHeight = wall.height || 100;
       
-      // We check center base point for approximate logic
       const wallBaseIso = { x: 0, y: 0 };
       const targetBaseIso = { x: 0, y: 0 };
       
       IsoUtils.toIso(wall.x, wall.y, 0, wallBaseIso);
       IsoUtils.toIso(target.x, target.y, 0, targetBaseIso);
       
-      // Wall Bounding Rect (Approximate)
       const wallScreenW = (wWidth + wDepth) * 1.2;
       const wallScreenH = wHeight + (wWidth + wDepth) * 0.5;
       
       const wx = wallBaseIso.x - wallScreenW / 2;
-      const wy = wallBaseIso.y - wallScreenH; // Bottom anchored
+      const wy = wallBaseIso.y - wallScreenH; 
       
-      // Target Bounding Rect
       const tRadius = target.radius || 20;
-      const tHeight = 60; // Approx unit height
+      const tHeight = 60;
       const tx = targetBaseIso.x - tRadius;
       const ty = targetBaseIso.y - tHeight;
       const tw = tRadius * 2;
       const th = tHeight;
 
-      // AABB Intersection
       if (wx < tx + tw && wx + wallScreenW > tx &&
           wy < ty + th && wy + wallScreenH > ty) {
           return true;
       }
-      
       return false;
   }
 
   private checkAnyTargetOcclusion(wall: Entity, player: Entity, zoneId: string): boolean {
-      // Check Player
       if (this.checkScreenSpaceOcclusion(wall, player)) return true;
 
-      // Check Nearby Enemies
       const searchRadius = Math.max(wall.width || 100, wall.depth || 100);
-      // OPTIMIZATION: Only check nearby dynamic entities, not full world
       const { buffer, count } = this.spatialHash.queryFast(wall.x, wall.y, searchRadius, zoneId);
       
       for (let i = 0; i < count; i++) {
@@ -475,7 +457,6 @@ export class RenderService {
           
           const e = obj as Entity;
 
-          // Occlusion Handling for Walls
           if (e.type === 'WALL' && e.subType !== 'GATE_SEGMENT') {
               const isOccluding = this.checkAnyTargetOcclusion(e, player, zone.id);
               if (isOccluding) {
